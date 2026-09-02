@@ -1,0 +1,10 @@
+# Build trees
+/build
+/build-*
+/vcpkg_installed
+/out
+
+# Editor / tooling
+/.vscode
+/.idea
+compile_commands.json

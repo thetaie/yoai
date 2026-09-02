@@ -1,0 +1,72 @@
+{
+  "color": [
+    {
+      "name": "start_window_background",
+      "value": "#F2EFE9"
+    },
+
+    {
+      "name": "brand",
+      "value": "#1E3A6B"
+    },
+    {
+      "name": "on_brand",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "danger",
+      "value": "#BA1A1A"
+    },
+    {
+      "name": "success",
+      "value": "#2A7248"
+    },
+
+    {
+      "name": "bg_page",
+      "value": "#F2EFE9"
+    },
+    {
+      "name": "bg_surface",
+      "value": "#FAF7F1"
+    },
+    {
+      "name": "bg_bubble",
+      "value": "#EDE8DE"
+    },
+    {
+      "name": "bg_overlay",
+      "value": "#0A000000"
+    },
+
+    {
+      "name": "text_primary",
+      "value": "#1A1C1E"
+    },
+    {
+      "name": "text_secondary",
+      "value": "#52565C"
+    },
+    {
+      "name": "text_tertiary",
+      "value": "#63666B"
+    },
+    {
+      "name": "text_disabled",
+      "value": "#A9A49A"
+    },
+
+    {
+      "name": "divider",
+      "value": "#E7E1D5"
+    },
+    {
+      "name": "border",
+      "value": "#DDD6C9"
+    },
+    {
+      "name": "scrim",
+      "value": "#33000000"
+    }
+  ]
+}

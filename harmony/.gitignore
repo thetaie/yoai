@@ -1,0 +1,23 @@
+# build-profile.json5 IS tracked, even though DevEco writes the local debug signing
+# block into it (cert paths under ~/.ohos plus store/key passwords). Keeping those
+# rewrites out of a commit relies on each clone running, once, before opening the
+# project in DevEco:
+#     git update-index --skip-worktree harmony/build-profile.json5
+# See harmony/README.md § Signing. (A .gitignore rule would be a no-op on a tracked
+# file anyway.)
+/node_modules
+/oh_modules
+/local.properties
+/.idea
+**/build
+/.hvigor
+.cxx
+# The core's cross-compiled C++ dependencies, assembled per ABI by
+# build-prebuilt.cmd / .sh. Hundreds of MB, and reproducible from vcpkg.json.
+/prebuilt
+/.clangd
+/.clang-format
+/.clang-tidy
+**/.test
+/.appanalyzer
+**/oh-package-lock.json5

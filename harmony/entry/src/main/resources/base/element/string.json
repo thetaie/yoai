@@ -1,0 +1,208 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "YoAI 入口模块"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "YoAI"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "YoAI"
+    },
+    {
+      "name": "perm_internet_reason",
+      "value": "向你自己配置的大模型服务发送对话请求"
+    },
+    {
+      "name": "chat_input_hint",
+      "value": "给 YoAI 发消息…"
+    },
+    {
+      "name": "chat_need_model",
+      "value": "还没有可用的模型。先到设置里添加一个服务的 key。"
+    },
+    {
+      "name": "chat_empty_reply",
+      "value": "模型没有返回内容，换个模型或稍后再试。"
+    },
+    {
+      "name": "chat_thinking_label",
+      "value": "思考过程"
+    },
+    {
+      "name": "chat_stopped",
+      "value": "已停止"
+    },
+    {
+      "name": "chat_disclaimer",
+      "value": "YoAI 是 AI，可能会出错，请自行核实回答内容。"
+    },
+    {
+      "name": "chat_pick_model",
+      "value": "选择模型"
+    },
+    {
+      "name": "chat_empty_title",
+      "value": "你的 AI，跑在你自己的设备上"
+    },
+    {
+      "name": "chat_empty_body",
+      "value": "对话记录只保存在本机。用你自己的 API key 调用模型。"
+    },
+    {
+      "name": "drawer_title",
+      "value": "对话"
+    },
+    {
+      "name": "drawer_new_chat",
+      "value": "新对话"
+    },
+    {
+      "name": "drawer_empty",
+      "value": "还没有对话记录"
+    },
+    {
+      "name": "drawer_local_only",
+      "value": "记录只保存在本机"
+    },
+    {
+      "name": "drawer_untitled",
+      "value": "(空对话)"
+    },
+    {
+      "name": "drawer_msg_count",
+      "value": "%d 条"
+    },
+    {
+      "name": "drawer_delete_title",
+      "value": "删除这个对话?"
+    },
+    {
+      "name": "drawer_delete_msg",
+      "value": "删除后无法恢复。"
+    },
+    {
+      "name": "settings_title",
+      "value": "设置"
+    },
+    {
+      "name": "settings_models",
+      "value": "已配置的模型"
+    },
+    {
+      "name": "settings_models_empty",
+      "value": "还没有配置模型"
+    },
+    {
+      "name": "settings_add",
+      "value": "添加模型"
+    },
+    {
+      "name": "settings_intro",
+      "value": "每个服务一个 key，只存在本机的加密存储里，绝不上传。"
+    },
+    {
+      "name": "settings_vendor",
+      "value": "服务"
+    },
+    {
+      "name": "settings_base_url",
+      "value": "接口地址"
+    },
+    {
+      "name": "settings_base_url_hint",
+      "value": "https://…/v1（不要带 /chat/completions）"
+    },
+    {
+      "name": "settings_model",
+      "value": "模型名"
+    },
+    {
+      "name": "settings_model_hint",
+      "value": "请求里发送的模型名"
+    },
+    {
+      "name": "settings_key",
+      "value": "API Key"
+    },
+    {
+      "name": "settings_key_hint",
+      "value": "粘贴 key"
+    },
+    {
+      "name": "settings_key_saved",
+      "value": "已保存该服务的 key"
+    },
+    {
+      "name": "settings_key_keep",
+      "value": "留空则沿用已保存的 key"
+    },
+    {
+      "name": "settings_save",
+      "value": "保存"
+    },
+    {
+      "name": "settings_cancel",
+      "value": "取消"
+    },
+    {
+      "name": "settings_delete",
+      "value": "删除"
+    },
+    {
+      "name": "settings_get_key",
+      "value": "去获取 key ›"
+    },
+    {
+      "name": "settings_need_all",
+      "value": "接口地址、模型名和 key 都要填。"
+    },
+    {
+      "name": "settings_saved",
+      "value": "已保存"
+    },
+    {
+      "name": "settings_theme",
+      "value": "主题"
+    },
+    {
+      "name": "theme_system",
+      "value": "跟随系统"
+    },
+    {
+      "name": "theme_light",
+      "value": "浅色"
+    },
+    {
+      "name": "theme_dark",
+      "value": "深色"
+    },
+    {
+      "name": "settings_core",
+      "value": "内核"
+    },
+    {
+      "name": "settings_clear_history",
+      "value": "清空所有对话记录"
+    },
+    {
+      "name": "settings_clear_history_msg",
+      "value": "所有本机对话记录都会被删除，无法恢复。"
+    },
+    {
+      "name": "toast_copied",
+      "value": "已复制"
+    },
+    {
+      "name": "action_copy",
+      "value": "复制"
+    },
+    {
+      "name": "action_retry",
+      "value": "重新生成"
+    }
+  ]
+}

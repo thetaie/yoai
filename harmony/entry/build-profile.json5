@@ -1,0 +1,37 @@
+{
+  "apiType": "stageMode",
+  "buildOption": {
+    // Native module (src/main/cpp): the NAPI bridge plus yoai_core.
+    // Device only. Each ABI needs its own cross-compiled dependency tree under
+    // harmony/prebuilt/<abi> -- run `build-prebuilt.cmd <abi>` (or ./build-prebuilt.sh)
+    // first. Add "x86_64" here (and run the script for it) to also target the emulator.
+    "externalNativeOptions": {
+      "path": "./src/main/cpp/CMakeLists.txt",
+      "arguments": "",
+      "cppFlags": "",
+      "abiFilters": [
+        "arm64-v8a"
+      ]
+    }
+  },
+  "buildOptionSet": [
+    {
+      "name": "release",
+      "arkOptions": {
+        "obfuscation": {
+          "ruleOptions": {
+            "enable": false,
+            "files": [
+              "./obfuscation-rules.txt"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "targets": [
+    {
+      "name": "default"
+    }
+  ]
+}

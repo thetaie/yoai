@@ -1,0 +1,13 @@
+{
+  "name": "yoai",
+  "version-string": "0.1.0",
+  "builtin-baseline": "d015e31e90838a4c9dfa3eed45979bc70d9357fc",
+  "dependencies": [
+    {
+      "name": "curl",
+      "features": ["openssl"]
+    },
+    "openssl",
+    "rapidjson"
+  ]
+}
