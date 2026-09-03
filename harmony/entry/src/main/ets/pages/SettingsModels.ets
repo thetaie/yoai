@@ -25,6 +25,7 @@ import { common } from '@kit.AbilityKit';
 import { promptAction, router } from '@kit.ArkUI';
 import yoai from 'libyoai.so';
 import { ModelConfig, Vendor, VENDORS, findVendor, isLocal, modelLabel } from '../model/Provider';
+import { ICON_INLINE, ICON_TOOLBAR, icon } from '../core/Icons';
 import { LocalModelStore, PickedModel } from '../core/LocalModelStore';
 import { ModelStore } from '../core/ModelStore';
 import { DEFAULT_FAMILY, Palette, resolvePalette } from '../core/Palettes';
@@ -239,7 +240,7 @@ struct SettingsModels {
           .layoutWeight(1)
         Row({ space: 4 }) {
           Text(this.vendorLabel()).fontSize(15).fontColor(this.theme.text_primary)
-          Text('▾').fontSize(12).fontColor(this.theme.text_tertiary)
+          icon('chevron-down', ICON_INLINE, this.theme.text_tertiary)
         }
         .bindMenu(this.vendorMenu())
       }
@@ -384,7 +385,7 @@ struct SettingsModels {
     Column() {
       Row({ space: 8 }) {
         Button() {
-          Text('\u2039').fontSize(24).fontColor(this.theme.text_secondary)
+          icon('chevron-left', ICON_TOOLBAR, this.theme.text_secondary)
         }
         .type(ButtonType.Circle)
         .backgroundColor(Color.Transparent)

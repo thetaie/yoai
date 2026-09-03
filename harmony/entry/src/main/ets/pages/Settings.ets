@@ -18,6 +18,7 @@ import { common } from '@kit.AbilityKit';
 import { router } from '@kit.ArkUI';
 import yoai from 'libyoai.so';
 import { ModelConfig, modelLabel } from '../model/Provider';
+import { ICON_ROW, ICON_TOOLBAR, icon } from '../core/Icons';
 import { ModelStore } from '../core/ModelStore';
 import { DEFAULT_FAMILY, Palette, familyFor, resolvePalette } from '../core/Palettes';
 import { SessionStore } from '../core/SessionStore';
@@ -101,7 +102,7 @@ struct Settings {
     Column() {
       Row({ space: 8 }) {
         Button() {
-          Text('\u2039').fontSize(24).fontColor(this.theme.text_secondary)
+          icon('chevron-left', ICON_TOOLBAR, this.theme.text_secondary)
         }
         .type(ButtonType.Circle)
         .backgroundColor(Color.Transparent)
@@ -139,7 +140,7 @@ struct Settings {
               }
               .alignItems(HorizontalAlign.Start)
               .layoutWeight(1)
-              Text('\u203a').fontSize(18).fontColor(this.theme.text_tertiary)
+              icon('chevron-right', ICON_ROW, this.theme.text_tertiary)
             }
             .width('100%')
             .constraintSize({ minHeight: 56 })
@@ -166,7 +167,7 @@ struct Settings {
               }
               .alignItems(HorizontalAlign.Start)
               .layoutWeight(1)
-              Text('\u203a').fontSize(18).fontColor(this.theme.text_tertiary)
+              icon('chevron-right', ICON_ROW, this.theme.text_tertiary)
             }
             .width('100%')
             .constraintSize({ minHeight: 56 })

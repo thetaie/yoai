@@ -15,6 +15,7 @@ import { promptAction, router } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { i18n, intl } from '@kit.LocalizationKit';
 import ConfigurationConstant from '@ohos.app.ability.ConfigurationConstant';
+import { ICON_ROW, ICON_TOOLBAR, icon } from '../core/Icons';
 import { Language, LANGUAGES, TEXT_SIZES, TextSizeStep, languageIndexFor, stepIndexFor } from '../core/Interface';
 import { DEFAULT_FAMILY, FAMILIES, Family, Palette, resolvePalette } from '../core/Palettes';
 
@@ -196,31 +197,15 @@ struct SettingsInterface {
   }
 
   /**
-   * The selected-row tick.
+   * The selected-row tick, in the palette's accent.
    *
-   * Drawn rather than loaded from a media resource because its color is the
-   * palette's accent, which now varies with the user's choice -- Amber's is
-   * #E2701E, Arctic's #0072E8. A base/dark SVG pair can follow light and dark
-   * but not that, so it would be wrong in four of the six palettes. Shape's
-   * viewPort does the job an SVG viewBox would; the commands are Lucide's
-   * `check` unchanged, per design/icons.md.
+   * A one-line wrapper so the four rows that show it do not each have to name
+   * the icon, the size and the color; see core/Icons for why it is drawn
+   * rather than loaded from a media resource.
    */
   @Builder
   tick() {
-    Shape() {
-      // 2, not the 1.5 in design/icons.md: Shape scales the stroke with the
-      // geometry, and this 24 viewPort is drawn at 18, so 2 x 18/24 renders as
-      // exactly the 1.5 the spec asks for. Writing 1.5 here would draw 1.125.
-      Path({ commands: 'M20 6 9 17l-5-5' })
-        .stroke(this.theme.brand)
-        .strokeWidth(2)
-        .strokeLineCap(LineCapStyle.Round)
-        .strokeLineJoin(LineJoinStyle.Round)
-        .fill(Color.Transparent)
-    }
-    .viewPort({ x: 0, y: 0, width: 24, height: 24 })
-    .width(18)
-    .height(18)
+    icon('check', ICON_ROW, this.theme.brand)
   }
 
   /**
@@ -425,7 +410,7 @@ struct SettingsInterface {
     Column() {
       Row({ space: 8 }) {
         Button() {
-          Text('\u2039').fontSize(24).fontColor(this.theme.text_secondary)
+          icon('chevron-left', ICON_TOOLBAR, this.theme.text_secondary)
         }
         .type(ButtonType.Circle)
         .backgroundColor(Color.Transparent)

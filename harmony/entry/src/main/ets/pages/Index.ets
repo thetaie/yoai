@@ -21,6 +21,7 @@ import yoai from 'libyoai.so';
 import { Canceler, ChatMessage, MessagePart, StreamCallbacks } from '../model/Chat';
 import { ModelConfig, modelLabel } from '../model/Provider';
 import { ChatEngine } from '../core/ChatEngine';
+import { ICON_INLINE, ICON_TOOLBAR, icon } from '../core/Icons';
 import { ModelStore } from '../core/ModelStore';
 import { DEFAULT_FAMILY, Palette, resolvePalette } from '../core/Palettes';
 import { SessionMeta, SessionStore } from '../core/SessionStore';
@@ -298,7 +299,7 @@ struct Index {
   header() {
     Row({ space: 8 }) {
       Button() {
-        Text('☰').fontSize(20).fontColor(this.theme.text_secondary)
+        icon('menu', ICON_TOOLBAR, this.theme.text_secondary)
       }
       .type(ButtonType.Circle)
       .backgroundColor(Color.Transparent)
@@ -313,45 +314,14 @@ struct Index {
           .fontColor(this.theme.text_primary)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text('▾').fontSize(12).fontColor(this.theme.text_tertiary)
+        icon('chevron-down', ICON_INLINE, this.theme.text_tertiary)
       }
       .layoutWeight(1)
       .justifyContent(FlexAlign.Center)
       .bindMenu(this.modelMenu())
 
       Button() {
-        // Drawn rather than loaded as an SVG resource: the stroke has to be a
-        // palette color, and a base/dark resource pair can only follow light
-        // and dark, not which of the three families is in force. Commands are
-        // Lucide's `settings`.
-        //
-        // 24, not the 22 design/icons.md gives for a toolbar, and the viewPort
-        // is 1:1 with it on purpose. Shape scales the stroke along with the
-        // geometry, so drawing a 24 viewPort at 22 rendered the 1.5 stroke as
-        // 1.375 -- thinner than the spec. At 1:1 the stroke is exactly 1.5, and
-        // the extra 2vp make up for an outline replacing the filled glyph that
-        // used to sit here, which carried more visual weight at a smaller size.
-        Shape() {
-          Path({
-            commands: 'M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915' +
-              ' 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033' +
-              ' 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915' +
-              ' 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051' +
-              ' a2.34 2.34 0 0 0 3.319-1.915'
-          })
-            .stroke(this.theme.text_secondary)
-            .strokeWidth(1.5)
-            .strokeLineCap(LineCapStyle.Round)
-            .strokeLineJoin(LineJoinStyle.Round)
-            .fill(Color.Transparent)
-          Path({ commands: 'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0' })
-            .stroke(this.theme.text_secondary)
-            .strokeWidth(1.5)
-            .fill(Color.Transparent)
-        }
-        .viewPort({ x: 0, y: 0, width: 24, height: 24 })
-        .width(24)
-        .height(24)
+        icon('settings', ICON_TOOLBAR, this.theme.text_secondary)
       }
       .type(ButtonType.Circle)
       .backgroundColor(Color.Transparent)
