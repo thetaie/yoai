@@ -2,8 +2,9 @@
  * NAPI bridge to the embedded YoAI C++ core (the C ABI in src/yoai.h).
  *
  * Call order per session: nativeProviderSet once per model the user has a key
- * for, then nativeChat per turn. Nothing is persisted on the native side -- the
- * registry is process memory, so it has to be refilled after every cold start.
+ * for (and nativeLocalSet once per on-device model they have added), then
+ * nativeChat per turn. Nothing is persisted on the native side -- the registry is
+ * process memory, so it has to be refilled after every cold start.
  */
 
 /** Build stamp of the loaded .so. Proves native code is actually running. */
@@ -18,7 +19,7 @@ export const nativeSetLogLevel: (level: string) => void;
 /**
  * Register (or replace) one model the user can chat with. Returns 0 on success.
  *
- * @param id        your stable token for this entry, e.g. 'zhipu/glm-5.2'.
+ * @param id        your stable token for this entry, e.g. 'zhipu/glm-4.7-flash'.
  *                  Opaque to the core: it comes back from nativeProviders and
  *                  goes into nativeChat unchanged.
  * @param baseUrl   OpenAI-compatible API root WITHOUT /chat/completions.
@@ -46,9 +47,58 @@ export const nativeProviderClear: () => void;
 /**
  * The registered ids, newline-separated, '' when none. An id is listed exactly
  * when the core has everything it needs to run it, so this IS the model picker's
- * data source.
+ * data source. Remote and on-device entries are listed together.
  */
 export const nativeProviders: () => string;
+
+/**
+ * Whether this .so was built with llama.cpp (harmony/build-llama.cmd assembled an
+ * SDK before the HAP was compiled).
+ *
+ * False is a supported state, not a failure: the app runs, and everything below
+ * still works, but a turn against an on-device model reports the absence as an
+ * 'error' event. Check this before offering to add one at all -- letting someone
+ * pick a 3 GB file and only then be told is the worse order.
+ */
+export const nativeLocalAvailable: () => boolean;
+
+/**
+ * Register (or replace) one on-device model. Returns 0 on success.
+ *
+ * Shares the id namespace with nativeProviderSet, so the picker, nativeChat and
+ * nativeProviderRemove treat both lanes identically.
+ *
+ * @param id          your stable token for this entry.
+ * @param modelPath   absolute filesystem path to a .gguf. NOT a URI: the engine
+ *                    opens and mmaps this path, so a `file://docs/...` string
+ *                    fails. Resolve it first (see LocalModelStore), and keep the
+ *                    grant alive or the path stops opening after a cold start.
+ * @param optionsJson engine knobs as a JSON object, or '' for the defaults
+ *                    (which are tuned for a phone). See src/yoai.h for the
+ *                    members; unknown ones are ignored.
+ */
+export const nativeLocalSet: (
+  id: string,
+  modelPath: string,
+  optionsJson: string
+) => number;
+
+/**
+ * Read one on-device model's weights now, on a worker thread, so the first turn
+ * does not pay for them. `onDone` fires exactly once: 'end' when the model is
+ * resident, 'error' with a reason when it will not load.
+ *
+ * Worth calling as soon as the user selects a model: the load is seconds and a
+ * few GB off disk, and it is the whole difference between a first reply that
+ * starts immediately and one that appears to hang.
+ *
+ * Not cancellable, deliberately -- abandoning a load halfway leaves the file
+ * partly read for no benefit.
+ */
+export const nativeLocalLoad: (
+  id: string,
+  onDone: (type: string, content: string) => void
+) => void;
 
 /**
  * Run one chat turn on a worker thread, streaming events back on the ArkTS

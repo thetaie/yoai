@@ -1,0 +1,506 @@
+@echo off
+rem ---------------------------------------------------------------------------
+rem Everything the HarmonyOS app needs built natively, before DevEco can compile
+rem the HAP. This does NOT build the app itself -- open harmony\ in DevEco for
+rem that. It builds what the app links against.
+rem
+rem   build.cmd [abi] [deps^|llama^|hap^|all] [clean] [arch=<march>^|baseline]
+rem
+rem     abi     arm64-v8a (default) ^| x86_64 ^| armeabi-v7a
+rem     deps    the core's C++ dependencies via vcpkg -> prebuilt\<abi>\
+rem             (the default, and REQUIRED: without it the native module fails
+rem             to configure on its first find_package)
+rem     llama   the on-device LLM engine  -> prebuilt\llama-sdk\<abi>\
+rem             (OPTIONAL: building it is what turns on-device chat on)
+rem     hap     compile and sign the app itself, via hvigor. No IDE needed.
+rem     all     all three, in that order
+rem     clean   discard llama's cached build tree and SDK first. `deps` always
+rem             replaces its own output, so there is nothing for it to clean.
+rem     arch=   llama only: the -march feature set. `baseline` means plain
+rem             armv8-a. See :llama below for why the default is what it is.
+rem
+rem Typical first run:
+rem
+rem     build.cmd arm64-v8a all
+rem
+rem and after that, just:
+rem
+rem     build.cmd arm64-v8a hap
+rem
+rem Env overrides:
+rem   DEVECO_HOME     DevEco Studio install (default: read from its own .home
+rem                   marker under %LOCALAPPDATA%\Huawei\DevEcoStudio*)
+rem   VCPKG_ROOT      vcpkg checkout (default: a sibling of the repo)
+rem   OHOS_SDK_ROOT   the SDK dir CONTAINING native\ (default: from DEVECO_HOME)
+rem   LLAMA_SRC       llama.cpp checkout (default: a sibling of the repo)
+rem   LLAMA_SDK_DIR   where to assemble the llama SDK (default: auto-detected)
+rem ---------------------------------------------------------------------------
+setlocal EnableExtensions EnableDelayedExpansion
+cd /d "%~dp0"
+
+rem --- Arguments, position-independent ------------------------------------------
+rem Every token is a keyword or the ABI, and an unrecognized one is an ERROR
+rem rather than a guess. The predecessor treated any unknown token as llama's
+rem -march string, so a mistyped target silently became `-march=lama`.
+set "ABI="
+set "DO_DEPS="
+set "DO_LLAMA="
+set "DO_HAP="
+set "ARCH="
+set "ARCH_SET="
+set "CLEAN="
+
+:args
+if "%~1"=="" goto args_done
+set "TOK=%~1"
+if /I "!TOK!"=="deps"     ( set "DO_DEPS=1"  & goto args_next )
+if /I "!TOK!"=="llama"    ( set "DO_LLAMA=1" & goto args_next )
+if /I "!TOK!"=="hap"      ( set "DO_HAP=1"   & goto args_next )
+if /I "!TOK!"=="all"      ( set "DO_DEPS=1"  & set "DO_LLAMA=1" & set "DO_HAP=1" & goto args_next )
+if /I "!TOK!"=="clean"    ( set "CLEAN=1"    & goto args_next )
+if /I "!TOK!"=="baseline" ( set "ARCH="      & set "ARCH_SET=1" & goto args_next )
+if /I "!TOK!"=="-h"       ( goto usage )
+if /I "!TOK!"=="--help"   ( goto usage )
+if /I "!TOK!"=="/?"       ( goto usage )
+rem `arch=<march>` arrives here as TWO tokens: cmd's own tokenizer treats `=` as
+rem an argument separator, so an unquoted `arch=armv8.6-a+i8mm` is split into
+rem "arch" and "armv8.6-a+i8mm". Reassembling it here means the same command line
+rem works unquoted on both this script and build.sh, which is the point of them
+rem taking the same tokens at all. The quoted form ("arch=...") stays valid too,
+rem and lands on the second branch.
+if /I "!TOK!"=="arch"     goto arg_arch
+if /I "!TOK:~0,5!"=="arch=" ( set "ARCH=!TOK:~5!" & set "ARCH_SET=1" & goto args_next )
+if not defined ABI ( set "ABI=!TOK!" & goto args_next )
+echo unknown argument "!TOK!". Try: build.cmd --help>&2
+exit /b 2
+
+rem Flat, with labels, rather than a nested if-block: an `exit /b <n>` inside two
+rem levels of parentheses here did print its message and then report SUCCESS, so
+rem a usage error looked like a completed build. Not worth diagnosing cmd's
+rem parser over -- the flat form has no blocks to mis-nest.
+:arg_arch
+if "%~2"=="" goto arch_no_value
+set "ARCH=%~2"
+set "ARCH_SET=1"
+shift
+goto args_next
+
+:arch_no_value
+echo arch needs a value, e.g. arch=armv8.6-a+i8mm+dotprod - or the token baseline>&2
+exit /b 2
+
+:args_next
+shift
+goto args
+
+:args_done
+if not defined ABI set "ABI=arm64-v8a"
+rem Nothing named: build the dependencies, which is what someone who just cloned
+rem the repo needs and the only part that is mandatory.
+if not defined DO_DEPS if not defined DO_LLAMA if not defined DO_HAP set "DO_DEPS=1"
+
+rem OHOS ABI -> vcpkg overlay triplet (harmony\vcpkg-triplets\). Rejected here
+rem rather than at -DOHOS_ARCH, where an unknown ABI fails deep inside the
+rem toolchain file with nothing pointing back at the argument.
+if /I "%ABI%"=="arm64-v8a"   ( set "TRIPLET=arm64-ohos" ) else ^
+if /I "%ABI%"=="x86_64"      ( set "TRIPLET=x64-ohos"   ) else ^
+if /I "%ABI%"=="armeabi-v7a" ( set "TRIPLET=arm-ohos"   ) else (
+    echo abi must be arm64-v8a^|x86_64^|armeabi-v7a ^(got "%ABI%"^)>&2
+    exit /b 2
+)
+if defined DO_LLAMA if /I "%ABI%"=="armeabi-v7a" (
+    echo the on-device engine is built for arm64-v8a^|x86_64 only ^(got "%ABI%"^)>&2
+    exit /b 2
+)
+
+rem --- Resolve DevEco Studio ----------------------------------------------------
+rem Everything below comes out of the DevEco install: the NDK for the two native
+rem halves, and node + hvigor for `hap`.
+rem
+rem Found by reading the `.home` file DevEco leaves in its per-version config
+rem directory, which holds the install path as one line. That beats guessing at
+rem Program Files -- this repo's own author installs to D:\Huawei\DevEco Studio,
+rem which no hardcoded list would have found.
+if not defined DEVECO_HOME (
+    for /d %%D in ("%LOCALAPPDATA%\Huawei\DevEcoStudio*") do (
+        if exist "%%~D\.home" (
+            for /f "usebackq delims=" %%A in ("%%~D\.home") do (
+                if exist "%%A\tools" set "DEVECO_HOME=%%A"
+            )
+        )
+    )
+)
+rem Last resort, for a layout with no .home to read.
+if not defined DEVECO_HOME (
+    for %%D in (
+        "%ProgramFiles%\Huawei\DevEco Studio"
+        "%LOCALAPPDATA%\Huawei\DevEco Studio"
+    ) do (
+        if not defined DEVECO_HOME if exist "%%~D\tools" set "DEVECO_HOME=%%~D"
+    )
+)
+
+rem --- Resolve the OpenHarmony SDK ----------------------------------------------
+rem Both native halves need it, which is the main reason they now live in one
+rem script: this block used to exist in four copies and drift between them.
+rem
+rem OHOS_SDK_ROOT must name the directory CONTAINING native\ (vcpkg's
+rem scripts\toolchains\ohos.cmake appends \native itself).
+if not defined OHOS_SDK_ROOT (
+    for %%D in (
+        "%DEVECO_HOME%\sdk\default\openharmony"
+        "%LOCALAPPDATA%\OpenHarmony\Sdk\default\openharmony"
+    ) do (
+        if not defined OHOS_SDK_ROOT if exist "%%~D\native\build\cmake\ohos.toolchain.cmake" set "OHOS_SDK_ROOT=%%~D"
+    )
+)
+if not defined OHOS_SDK_ROOT (
+    echo OpenHarmony SDK not found. Set OHOS_SDK_ROOT to the directory containing native\,>&2
+    echo or DEVECO_HOME to the DevEco Studio install.>&2
+    exit /b 1
+)
+if not exist "%OHOS_SDK_ROOT%\native\build\cmake\ohos.toolchain.cmake" (
+    echo No native\build\cmake\ohos.toolchain.cmake under "%OHOS_SDK_ROOT%".>&2
+    exit /b 1
+)
+
+rem Default the vcpkg checkout to a sibling of the repo so it is not committed.
+if not defined VCPKG_ROOT for %%I in ("%~dp0..\..") do set "VCPKG_ROOT=%%~fI\vcpkg"
+
+echo [build] abi=%ABI%
+echo [build] sdk=!OHOS_SDK_ROOT!
+if defined DO_DEPS  echo [build] target: deps  ^(vcpkg -^> prebuilt\%ABI%^)
+if defined DO_LLAMA echo [build] target: llama ^(llama.cpp -^> prebuilt\llama-sdk\%ABI%^)
+echo.
+
+if defined DO_DEPS (
+    call :deps
+    if errorlevel 1 exit /b 1
+)
+if defined DO_LLAMA (
+    call :llama
+    if errorlevel 1 exit /b 1
+)
+if defined DO_HAP (
+    call :hap
+    if errorlevel 1 exit /b 1
+)
+
+echo.
+if defined DO_HAP (
+    echo [build] done.
+) else (
+    echo [build] done. Run `build.cmd %ABI% hap` to package the app, or open
+    echo [build] harmony\ in DevEco Studio.
+)
+exit /b 0
+
+rem ===========================================================================
+:usage
+echo Usage: build.cmd [abi] [deps^|llama^|hap^|all] [clean] [arch=^<march^>^|baseline]
+echo.
+echo   abi     arm64-v8a ^(default^) ^| x86_64 ^| armeabi-v7a
+echo   deps    the core's C++ dependencies via vcpkg   ^(default, required^)
+echo   llama   the on-device LLM engine                ^(optional^)
+echo   hap     compile and sign the app, via hvigor    ^(no IDE needed^)
+echo   all     all three, in that order
+echo   clean   discard llama's cached build tree and SDK first
+echo   arch=   llama only: -march feature set, or `baseline` for armv8-a
+echo.
+echo Read the top of this file for the env overrides and the reasoning.
+exit /b 0
+
+rem ===========================================================================
+rem The core's C++ dependencies, via vcpkg.
+rem
+rem vcpkg ships OHOS triplets but has taught no *port* about the platform, and
+rem the pinned tool does not map CMAKE_SYSTEM_NAME=OHOS to its own toolchain.
+rem Both are worked around by the overlay triplets in harmony\vcpkg-triplets\ --
+rem read the comments there before changing anything here.
+rem
+rem Re-running is idempotent: vcpkg skips already-built ports and the destination
+rem is refreshed.
+rem ===========================================================================
+:deps
+rem READ from vcpkg.json's "builtin-baseline" rather than repeating the hash
+rem here: two copies of a pin is one copy that silently goes stale.
+rem tokens=4 delims=" splits `  "builtin-baseline": "<hash>",` into ["  "]
+rem ["builtin-baseline"][": "][<hash>], so token 4 is the hash.
+set "VCPKG_JSON=%~dp0..\vcpkg.json"
+set "BASELINE="
+for /f tokens^=4^ delims^=^" %%A in ('findstr /c:"builtin-baseline" "%VCPKG_JSON%"') do set "BASELINE=%%A"
+if not defined BASELINE (
+    echo no "builtin-baseline" in "%VCPKG_JSON%">&2
+    exit /b 1
+)
+
+rem --- Space-free SDK path (mandatory for this half) ----------------------------
+rem OpenSSL's generated Makefile hands the compiler path and --sysroot to /bin/sh
+rem UNQUOTED, so a space anywhere in the SDK path breaks the build with
+rem "/bin/sh: .../Huawei/DevEco: No such file or directory". A directory junction
+rem is enough to work around it. Detect a space via substitution: !VAR: =! strips
+rem spaces, so a differing result means VAR had one.
+rem
+rem Only :deps needs this -- llama.cpp is a plain CMake/Ninja build that quotes
+rem its paths -- but the alias is left in OHOS_SDK_ROOT for the rest of the run,
+rem which is harmless: it points at the same SDK.
+set "SDK_NOSP=!OHOS_SDK_ROOT: =!"
+if not "!SDK_NOSP!"=="!OHOS_SDK_ROOT!" (
+    set "VR_NOSP=!VCPKG_ROOT: =!"
+    if not "!VR_NOSP!"=="!VCPKG_ROOT!" (
+        echo SDK path contains a space ^["!OHOS_SDK_ROOT!"^] and so does VCPKG_ROOT;>&2
+        echo point OHOS_SDK_ROOT at an SDK under a space-free path.>&2
+        exit /b 1
+    )
+    set "SDK_LINK=!VCPKG_ROOT!\ohos-sdk"
+    if not exist "!SDK_LINK!\native\build\cmake\ohos.toolchain.cmake" (
+        echo [deps] SDK path has a space; linking a space-free alias: !SDK_LINK!
+        if exist "!SDK_LINK!" rmdir "!SDK_LINK!" 2>nul
+        mklink /J "!SDK_LINK!" "!OHOS_SDK_ROOT!" >nul
+        if errorlevel 1 (
+            echo could not create the junction ^(mklink /J^)>&2
+            exit /b 1
+        )
+    )
+    set "OHOS_SDK_ROOT=!SDK_LINK!"
+)
+
+echo [deps] triplet=!TRIPLET!  vcpkg=!VCPKG_ROOT!  baseline=!BASELINE!
+
+rem --- Bootstrap vcpkg at the pinned baseline -----------------------------------
+if not exist "!VCPKG_ROOT!\.git" (
+    echo [deps] cloning vcpkg ...
+    git clone https://github.com/microsoft/vcpkg "!VCPKG_ROOT!"
+    if errorlevel 1 exit /b 1
+)
+git -C "!VCPKG_ROOT!" checkout %BASELINE%
+if errorlevel 1 exit /b 1
+if not exist "!VCPKG_ROOT!\vcpkg.exe" call "!VCPKG_ROOT!\bootstrap-vcpkg.bat" -disableMetrics
+
+rem --- Build the core's deps for OHOS (classic mode) ----------------------------
+rem --classic: this script runs inside the repo, whose vcpkg.json would otherwise
+rem put vcpkg into manifest mode (which rejects port-name arguments).
+rem
+rem zlib is named explicitly even though curl pulls it in: the OHOS triplet builds
+rem everything static, so the final link needs it resolvable on its own.
+set "PORTS=openssl curl[openssl] rapidjson zlib"
+echo [deps] installing: !PORTS!
+"!VCPKG_ROOT!\vcpkg.exe" install !PORTS! --classic --triplet !TRIPLET! ^
+    --overlay-triplets="%~dp0vcpkg-triplets" ^
+    --x-buildtrees-root "!VCPKG_ROOT!\buildtrees"
+if errorlevel 1 exit /b 1
+
+rem --- Lay out under harmony\prebuilt\<ABI> -------------------------------------
+set "INSTALLED=!VCPKG_ROOT!\installed\!TRIPLET!"
+if not exist "!INSTALLED!" (
+    echo expected install tree missing: !INSTALLED!>&2
+    exit /b 1
+)
+set "DEST=%~dp0prebuilt\%ABI%"
+if exist "!DEST!" rmdir /s /q "!DEST!"
+mkdir "!DEST!"
+rem Copy debug\ too: vcpkg's *Targets.cmake reference both release (lib\) and
+rem debug (debug\lib\) imported locations, and CMake verifies both exist at
+rem find_package time.
+for %%S in (include lib share debug) do (
+    if exist "!INSTALLED!\%%S" (
+        robocopy "!INSTALLED!\%%S" "!DEST!\%%S" /E /NFL /NDL /NJH /NJS >nul
+        rem robocopy exits 0-7 on success, >=8 on failure.
+        if errorlevel 8 (
+            echo robocopy %%S failed>&2
+            exit /b 1
+        )
+    )
+)
+echo [deps] done -^> !DEST!
+exit /b 0
+
+rem ===========================================================================
+rem The on-device LLM engine: llama.cpp cross-compiled for this ABI.
+rem
+rem WHY THE -march FLAGS: a cross build with no -march silently lands on baseline
+rem armv8-a. CMake's feature probes compile AND RUN a test binary, which is
+rem impossible when cross-compiling, so HAVE_MATMUL_INT8 /
+rem HAVE_FP16_VECTOR_ARITHMETIC / HAVE_SVE all "fail" and ggml quietly drops its
+rem fast kernels -- leaving dotprod, i8mm and fp16 unused on a phone that has all
+rem three. GGML_CPU_ARM_ARCH states the target's features instead of probing.
+rem
+rem CPU ONLY, deliberately -- there is no backend option. A Vulkan build was
+rem measured on this class of device and lost on every axis (roughly 5x slower
+rem load, 24x slower prefill, 3.5x slower decode) while adding tens of MB of
+rem SPIR-V to the HAP. The structural reason is that offload copies every tensor
+rem into device memory that shares its bandwidth with the CPU, so there is no win
+rem to be had; it is not a tuning problem.
+rem
+rem Output: prebuilt\llama-sdk\<abi>\{include,lib}, which
+rem entry\src\main\cpp\CMakeLists.txt finds BY ITSELF -- the same contract as the
+rem vcpkg deps above, and deliberately under the same parent. Build it and the
+rem on-device lane is on; delete it and the core compiles its stub and the app
+rem still builds. Nothing to paste into build-profile.json5. Static archives: a
+rem HAP has nowhere to put a companion .so.
+rem ===========================================================================
+:llama
+rem The feature set of a current arm64 phone SoC. `+sve` is deliberately absent:
+rem on 128-bit-vector parts the SVE kernels displace the i8mm SMMLA ones without
+rem a width advantage, which measured SLOWER on prefill. Pass arch=<...> to try
+rem something else, or `baseline` to compile plain armv8-a.
+if not defined ARCH_SET set "ARCH=armv8.6-a+i8mm+bf16+dotprod+fp16"
+
+rem --- llama.cpp source: cloned once by hand, reused ----------------------------
+rem Not cloned for you, unlike vcpkg above: this build wants a checkout you can
+rem pin and re-measure against, not one silently refreshed underneath it.
+if not defined LLAMA_SRC for %%I in ("%~dp0..\..") do set "LLAMA_SRC=%%~fI\llama.cpp"
+if not exist "!LLAMA_SRC!\include\llama.h" (
+    echo no llama.cpp at "!LLAMA_SRC!".>&2
+    echo clone it, or set LLAMA_SRC to an existing checkout:>&2
+    echo   git clone --depth 1 https://github.com/ggml-org/llama.cpp "!LLAMA_SRC!">&2
+    exit /b 1
+)
+
+if defined ARCH ( echo [llama] arch=!ARCH! ) else ( echo [llama] arch=baseline armv8-a )
+echo [llama] src=!LLAMA_SRC!
+
+rem The SDK ships its own cmake and ninja beside the toolchain; fall back to the
+rem host's if it does not.
+set "NATIVE=!OHOS_SDK_ROOT!\native"
+set "TOOLCHAIN=!NATIVE!\build\cmake\ohos.toolchain.cmake"
+set "CMAKE=!NATIVE!\build-tools\cmake\bin\cmake.exe"
+set "NINJA=!NATIVE!\build-tools\cmake\bin\ninja.exe"
+if not exist "!CMAKE!" for %%P in (cmake.exe) do set "CMAKE=%%~$PATH:P"
+if not exist "!NINJA!" for %%P in (ninja.exe) do set "NINJA=%%~$PATH:P"
+if not exist "!CMAKE!" (
+    echo need cmake ^(the SDK's build-tools\cmake\bin, or on PATH^)>&2
+    exit /b 1
+)
+if not exist "!NINJA!" (
+    echo need ninja ^(the SDK's build-tools\cmake\bin, or on PATH^)>&2
+    exit /b 1
+)
+
+set "LBUILD=%~dp0.llama-build\%ABI%"
+rem In-tree under harmony\prebuilt\, for the same reason the vcpkg deps are: the
+rem app's CMakeLists resolves it by repo-relative path, so there is no
+rem machine-local absolute path to paste into a tracked file.
+set "DEFAULT_LSDK=%~dp0prebuilt\llama-sdk\%ABI%"
+if not defined LLAMA_SDK_DIR set "LLAMA_SDK_DIR=!DEFAULT_LSDK!"
+set "LSDK=!LLAMA_SDK_DIR!"
+
+if defined CLEAN (
+    echo [llama] cleaning
+    if exist "!LBUILD!" rmdir /s /q "!LBUILD!"
+    if exist "!LSDK!"   rmdir /s /q "!LSDK!"
+)
+
+rem GGML_NATIVE=OFF because probing the host says nothing about the target.
+rem LLAMA_CURL=OFF: the app has no model downloader, and curl here would drag in
+rem a second, differently-configured copy of a dependency the core already links.
+rem Static libraries only -- see the header above.
+set "CFG=-S "!LLAMA_SRC!" -B "!LBUILD!" -G Ninja"
+set "CFG=!CFG! -DCMAKE_MAKE_PROGRAM="!NINJA!""
+set "CFG=!CFG! -DCMAKE_TOOLCHAIN_FILE="!TOOLCHAIN!""
+set "CFG=!CFG! -DOHOS_ARCH=%ABI%"
+set "CFG=!CFG! -DCMAKE_BUILD_TYPE=Release"
+set "CFG=!CFG! -DBUILD_SHARED_LIBS=OFF"
+set "CFG=!CFG! -DGGML_NATIVE=OFF"
+set "CFG=!CFG! -DGGML_OPENMP=OFF"
+set "CFG=!CFG! -DLLAMA_CURL=OFF"
+set "CFG=!CFG! -DLLAMA_BUILD_TESTS=OFF"
+set "CFG=!CFG! -DLLAMA_BUILD_EXAMPLES=OFF"
+set "CFG=!CFG! -DLLAMA_BUILD_SERVER=OFF"
+set "CFG=!CFG! -DLLAMA_BUILD_TOOLS=OFF"
+if defined ARCH set "CFG=!CFG! -DGGML_CPU_ARM_ARCH=!ARCH!"
+
+"!CMAKE!" !CFG!
+if errorlevel 1 exit /b 1
+
+rem Only the libraries. Upstream's CLI target links implementation libs that the
+rem OFF switches above remove, so asking for it would fail the link -- and the
+rem library is what we want.
+"!CMAKE!" --build "!LBUILD!" --target llama ggml ggml-cpu ggml-base
+if errorlevel 1 exit /b 1
+
+echo [llama] assembling !LSDK!
+if not exist "!LSDK!\include" mkdir "!LSDK!\include"
+if not exist "!LSDK!\lib"     mkdir "!LSDK!\lib"
+
+copy /y "!LLAMA_SRC!\include\llama.h" "!LSDK!\include\" >nul
+if errorlevel 1 exit /b 1
+copy /y "!LLAMA_SRC!\ggml\include\*.h" "!LSDK!\include\" >nul
+if errorlevel 1 exit /b 1
+
+rem Every archive is checked before it is copied, so a partial SDK stops the
+rem script rather than being discovered later as a link error.
+for %%L in (
+    "!LBUILD!\src\libllama.a"
+    "!LBUILD!\ggml\src\libggml.a"
+    "!LBUILD!\ggml\src\libggml-cpu.a"
+    "!LBUILD!\ggml\src\libggml-base.a"
+) do (
+    if not exist "%%~L" (
+        echo expected archive missing: %%~L>&2
+        exit /b 1
+    )
+    copy /y "%%~L" "!LSDK!\lib\" >nul
+    if errorlevel 1 exit /b 1
+)
+
+echo [llama] done -^> !LSDK!
+if /I not "!LSDK!"=="!DEFAULT_LSDK!" (
+    echo [llama] that is NOT the auto-detected location, so name it in
+    echo [llama] entry\build-profile.json5:
+    echo [llama]   "arguments": "-DLLAMA_CPP_DIR=!LSDK!"
+)
+exit /b 0
+
+rem ===========================================================================
+rem The app itself: compile and sign the HAP, without opening the IDE.
+rem
+rem DevEco is an IntelliJ front end over hvigor, and hvigor is a command-line
+rem tool -- so the IDE is a convenience, not a requirement. The three things it
+rem otherwise sets up for you:
+rem
+rem   NODE_HOME         hvigor runs on node, and DevEco ships one.
+rem   DEVECO_SDK_HOME   the SDK *root* (the dir holding default\), NOT the
+rem                     openharmony dir OHOS_SDK_ROOT names. Getting this wrong
+rem                     fails with "Invalid value of 'DEVECO_SDK_HOME' in the
+rem                     system environment path", which does not hint that the
+rem                     variable was simply unset.
+rem   ohpm on PATH      for dependency resolution.
+rem
+rem Signing comes from the signingConfigs block in build-profile.json5, the same
+rem one DevEco writes -- so a HAP built here is signed exactly as one built in
+rem the IDE. Without that block the build still succeeds and produces only the
+rem unsigned artifact, which is fine for CI and not installable on a device.
+rem ===========================================================================
+:hap
+if not defined DEVECO_HOME (
+    echo DevEco Studio not found. Set DEVECO_HOME to its install directory.>&2
+    exit /b 1
+)
+set "HVIGORW=!DEVECO_HOME!\tools\hvigor\bin\hvigorw.bat"
+if not exist "!HVIGORW!" (
+    echo no hvigorw at "!HVIGORW!" -- is DEVECO_HOME right?>&2
+    exit /b 1
+)
+
+set "NODE_HOME=!DEVECO_HOME!\tools\node"
+set "DEVECO_SDK_HOME=!DEVECO_HOME!\sdk"
+set "PATH=!NODE_HOME!;!DEVECO_HOME!\tools\ohpm\bin;!PATH!"
+
+echo [hap] hvigor from !DEVECO_HOME!
+rem `call`, because hvigorw is itself a batch file and control has to come back.
+call "!HVIGORW!" --mode module -p product=default assembleHap
+if errorlevel 1 (
+    echo [hap] build failed>&2
+    exit /b 1
+)
+
+set "HAP_OUT=%~dp0entry\build\default\outputs\default"
+echo [hap] done -^> !HAP_OUT!
+if exist "!HAP_OUT!\entry-default-signed.hap" (
+    echo [hap]   entry-default-signed.hap    -- installable: hdc install ^<file^>
+)
+if exist "!HAP_OUT!\entry-default-unsigned.hap" (
+    echo [hap]   entry-default-unsigned.hap
+)
+exit /b 0

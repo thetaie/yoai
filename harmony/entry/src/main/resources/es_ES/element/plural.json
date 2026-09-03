@@ -1,0 +1,17 @@
+{
+  "plural": [
+    {
+      "name": "drawer_msg_count",
+      "value": [
+        {
+          "quantity": "one",
+          "value": "%d message"
+        },
+        {
+          "quantity": "other",
+          "value": "%d messages"
+        }
+      ]
+    }
+  ]
+}

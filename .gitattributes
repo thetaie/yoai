@@ -1,0 +1,18 @@
+# Line endings are LOAD-BEARING for .cmd, not a style preference.
+#
+# cmd.exe re-reads a batch file by byte offset every time it takes a `goto`, and
+# an LF-only file makes it land in the wrong place. That shows up either as
+# "The system cannot find the batch label specified" or -- far worse -- as a
+# block whose `exit /b 2` silently stops running, so a usage error prints its
+# message and then reports SUCCESS. Both were observed in harmony/build.cmd
+# before this file existed.
+#
+# Pinning it here rather than trusting core.autocrlf: a clone with
+# core.autocrlf=input (the usual setting on a machine that also does Linux work)
+# would otherwise check these out LF-only and hit exactly that.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# The opposite requirement: CRLF in a shell script puts a stray \r on the end of
+# the shebang, and the kernel then looks for an interpreter that does not exist.
+*.sh text eol=lf

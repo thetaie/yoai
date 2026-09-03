@@ -14,11 +14,30 @@
     "pages": "$profile:main_pages",
     "requestPermissions": [
       {
-        // The only permission this app asks for. Everything else it does -- storing
-        // your keys, your settings, your conversations -- happens inside the app
-        // sandbox and needs nothing declared here.
+        // Everything else this app does -- storing your keys, your settings, your
+        // conversations -- happens inside the app sandbox and needs nothing
+        // declared here.
         "name": "ohos.permission.INTERNET",
         "reason": "$string:perm_internet_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
+      },
+      {
+        // Only for on-device models. A .gguf is gigabytes and belongs to the user,
+        // so it is referenced where it already lives rather than copied into the
+        // sandbox -- and the engine mmaps it by path, which means the grant the
+        // file picker hands out has to survive a cold start. Without this,
+        // persistPermission answers 201 and a model that worked when it was picked
+        // stops opening on the next launch.
+        //
+        // It grants nothing on its own: only files the user has explicitly chosen
+        // through the picker are ever reachable.
+        "name": "ohos.permission.FILE_ACCESS_PERSIST",
+        "reason": "$string:perm_file_persist_reason",
         "usedScene": {
           "abilities": [
             "EntryAbility"

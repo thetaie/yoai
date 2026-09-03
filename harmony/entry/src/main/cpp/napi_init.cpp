@@ -205,6 +205,80 @@ napi_value NativeProviders(napi_env env, napi_callback_info /*info*/) {
     return Utf8(env, yoai_providers());
 }
 
+//------------------------------------------------------------------------------
+// On-device models
+//------------------------------------------------------------------------------
+
+// nativeLocalAvailable(): boolean -- was this .so built with llama.cpp?
+napi_value NativeLocalAvailable(napi_env env, napi_callback_info /*info*/) {
+    napi_value out = nullptr;
+    napi_get_boolean(env, yoai_local_available() != 0, &out);
+    return out;
+}
+
+// nativeLocalSet(id, modelPath, optionsJson): number  (0 = ok)
+napi_value NativeLocalSet(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value argv[3] = {nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+
+    const std::string id      = ArgUtf8(env, argc, argv, 0);
+    const std::string path    = ArgUtf8(env, argc, argv, 1);
+    const std::string options = ArgUtf8(env, argc, argv, 2);
+
+    return Int32(env, yoai_local_set(id.c_str(), path.c_str(),
+                                     options.empty() ? nullptr : options.c_str()));
+}
+
+// The worker for nativeLocalLoad: read the weights, then report once and let go.
+//
+// A separate thread for the same reason a turn gets one -- yoai_local_load blocks
+// for seconds reading gigabytes, and doing that on the ArkTS thread freezes the
+// UI at exactly the moment the user is being told the model is getting ready.
+void LoadWorker(std::string id, napi_threadsafe_function tsfn) {
+    const int rc = yoai_local_load(id.c_str());
+    OH_LOG_INFO(LOG_APP, "local load %{public}s rc=%{public}d", id.c_str(), rc);
+
+    // Reuses the chat callback's (type, content) shape rather than inventing a
+    // second one: the ArkTS side already has a handler of that signature, and one
+    // vocabulary is easier to hold than two.
+    StreamEvent* ev = new StreamEvent{rc == 0 ? "end" : "error",
+                                      rc == 0 ? "" : "could not load the model"};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+}
+
+// nativeLocalLoad(id, onDone: (type, content) => void): void
+//
+// Not a turn, so it takes no turn id and cannot be cancelled: a load either
+// finishes or fails, and abandoning one halfway leaves the file partly read for
+// no benefit. The callback fires exactly once.
+napi_value NativeLocalLoad(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 2) {
+        napi_throw_error(env, nullptr, "nativeLocalLoad(id, onDone) needs two arguments");
+        return nullptr;
+    }
+
+    std::string id = ToUtf8(env, argv[0]);
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "yoai_local_load", NAPI_AUTO_LENGTH, &work_name);
+
+    napi_threadsafe_function tsfn = nullptr;
+    if (napi_create_threadsafe_function(env, argv[1], nullptr, work_name,
+                                        0 /*unbounded*/, 1 /*one worker*/,
+                                        nullptr, nullptr, nullptr, CallJs, &tsfn) != napi_ok) {
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+
+    std::thread(LoadWorker, std::move(id), tsfn).detach();
+    return nullptr;
+}
+
 // nativeChat(provider, messagesJson, systemPrompt,
 //            onEvent: (type, content) => void): number   (turn id)
 napi_value NativeChat(napi_env env, napi_callback_info info) {
@@ -279,6 +353,9 @@ napi_value Init(napi_env env, napi_value exports) {
         {"nativeProviderRemove", nullptr, NativeProviderRemove, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeProviderClear",  nullptr, NativeProviderClear,  nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeProviders",      nullptr, NativeProviders,      nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeLocalAvailable", nullptr, NativeLocalAvailable, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeLocalSet",       nullptr, NativeLocalSet,       nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeLocalLoad",      nullptr, NativeLocalLoad,      nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChat",           nullptr, NativeChat,           nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChatCancel",     nullptr, NativeChatCancel,     nullptr, nullptr, nullptr, napi_default, nullptr},
     };

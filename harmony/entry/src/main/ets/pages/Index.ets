@@ -22,6 +22,7 @@ import { Canceler, ChatMessage, MessagePart, StreamCallbacks } from '../model/Ch
 import { ModelConfig, modelLabel } from '../model/Provider';
 import { ChatEngine } from '../core/ChatEngine';
 import { ModelStore } from '../core/ModelStore';
+import { DEFAULT_FAMILY, Palette, resolvePalette } from '../core/Palettes';
 import { SessionMeta, SessionStore } from '../core/SessionStore';
 
 @Entry
@@ -42,6 +43,24 @@ struct Index {
 
   @StorageLink('fontScale') fontScale: number = 1;
 
+  /**
+   * The palette in force, as one object the build method reads fields off.
+   *
+   * It is @State recomputed by a watcher rather than a method called at each
+   * use site: there are ~36 of those in this file, and resolving the palette
+   * per reference would walk the table on every one of them, every frame.
+   *
+   * `paletteFamily` is the user's choice; `isDark` is what the system settled
+   * on, published by EntryAbility. Neither means anything without the other.
+   */
+  @StorageLink('paletteFamily') @Watch('resolveTheme') paletteFamily: string = DEFAULT_FAMILY;
+  @StorageProp('isDark') @Watch('resolveTheme') isDark: boolean = false;
+  @State private theme: Palette = resolvePalette(DEFAULT_FAMILY, false);
+
+  private resolveTheme(): void {
+    this.theme = resolvePalette(this.paletteFamily, this.isDark);
+  }
+
   private sessionId: string = SessionStore.newId();
   private canceler: Canceler | null = null;
   private scroller: Scroller = new Scroller();
@@ -51,6 +70,12 @@ struct Index {
   }
 
   async aboutToAppear(): Promise<void> {
+    // @Watch fires on change, not on construction, and `theme` was initialized
+    // with defaults while the two inputs came from AppStorage already set. So
+    // the first resolve has to be done by hand or a cold start paints the
+    // default palette until something happens to move one of them.
+    this.resolveTheme();
+
     // The native registry is process memory, so a cold start finds it empty.
     // This is the one call that makes stored models usable again.
     await ModelStore.syncToCore(this.ctx());
@@ -262,8 +287,10 @@ struct Index {
             ModelStore.setActiveId(this.ctx(), m.id);
           })
       }, (m: ModelConfig) => m.id)
+      // Straight to the models page, not the settings index: this item is
+      // reached from the model picker and means one specific thing.
       MenuItem({ content: $r('app.string.settings_add') })
-        .onClick(() => router.pushUrl({ url: 'pages/Settings' }))
+        .onClick(() => router.pushUrl({ url: 'pages/SettingsModels' }))
     }
   }
 
@@ -271,7 +298,7 @@ struct Index {
   header() {
     Row({ space: 8 }) {
       Button() {
-        Text('☰').fontSize(20).fontColor($r('app.color.text_secondary'))
+        Text('☰').fontSize(20).fontColor(this.theme.text_secondary)
       }
       .type(ButtonType.Circle)
       .backgroundColor(Color.Transparent)
@@ -283,17 +310,48 @@ struct Index {
         Text(this.activeId.length === 0 ? $r('app.string.chat_pick_model') : this.activeLabel())
           .fontSize(16)
           .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.text_primary'))
+          .fontColor(this.theme.text_primary)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text('▾').fontSize(12).fontColor($r('app.color.text_tertiary'))
+        Text('▾').fontSize(12).fontColor(this.theme.text_tertiary)
       }
       .layoutWeight(1)
       .justifyContent(FlexAlign.Center)
       .bindMenu(this.modelMenu())
 
       Button() {
-        Text('⚙').fontSize(18).fontColor($r('app.color.text_secondary'))
+        // Drawn rather than loaded as an SVG resource: the stroke has to be a
+        // palette color, and a base/dark resource pair can only follow light
+        // and dark, not which of the three families is in force. Commands are
+        // Lucide's `settings`.
+        //
+        // 24, not the 22 design/icons.md gives for a toolbar, and the viewPort
+        // is 1:1 with it on purpose. Shape scales the stroke along with the
+        // geometry, so drawing a 24 viewPort at 22 rendered the 1.5 stroke as
+        // 1.375 -- thinner than the spec. At 1:1 the stroke is exactly 1.5, and
+        // the extra 2vp make up for an outline replacing the filled glyph that
+        // used to sit here, which carried more visual weight at a smaller size.
+        Shape() {
+          Path({
+            commands: 'M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915' +
+              ' 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033' +
+              ' 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915' +
+              ' 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051' +
+              ' a2.34 2.34 0 0 0 3.319-1.915'
+          })
+            .stroke(this.theme.text_secondary)
+            .strokeWidth(1.5)
+            .strokeLineCap(LineCapStyle.Round)
+            .strokeLineJoin(LineJoinStyle.Round)
+            .fill(Color.Transparent)
+          Path({ commands: 'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0' })
+            .stroke(this.theme.text_secondary)
+            .strokeWidth(1.5)
+            .fill(Color.Transparent)
+        }
+        .viewPort({ x: 0, y: 0, width: 24, height: 24 })
+        .width(24)
+        .height(24)
       }
       .type(ButtonType.Circle)
       .backgroundColor(Color.Transparent)
@@ -304,7 +362,7 @@ struct Index {
     .width('100%')
     .height(56)
     .padding({ left: 8, right: 8 })
-    .backgroundColor($r('app.color.bg_page'))
+    .backgroundColor(this.theme.bg_page)
   }
 
   @Builder
@@ -313,11 +371,11 @@ struct Index {
       Text($r('app.string.chat_empty_title'))
         .fontSize(20)
         .fontWeight(FontWeight.Medium)
-        .fontColor($r('app.color.text_primary'))
+        .fontColor(this.theme.text_primary)
         .textAlign(TextAlign.Center)
       Text($r('app.string.chat_empty_body'))
         .fontSize(14)
-        .fontColor($r('app.color.text_tertiary'))
+        .fontColor(this.theme.text_tertiary)
         .textAlign(TextAlign.Center)
     }
     .width('100%')
@@ -329,8 +387,8 @@ struct Index {
     Row() {
       Text(m.content)
         .fontSize(16 * this.fontScale)
-        .fontColor($r('app.color.text_primary'))
-        .backgroundColor($r('app.color.bg_bubble'))
+        .fontColor(this.theme.text_primary)
+        .backgroundColor(this.theme.bg_bubble)
         .borderRadius(16)
         .padding({ left: 14, right: 14, top: 10, bottom: 10 })
         .copyOption(CopyOptions.LocalDevice)
@@ -345,16 +403,16 @@ struct Index {
     Column({ space: 4 }) {
       Text($r('app.string.chat_thinking_label'))
         .fontSize(12)
-        .fontColor($r('app.color.text_tertiary'))
+        .fontColor(this.theme.text_tertiary)
       Text(text)
         .fontSize(14 * this.fontScale)
-        .fontColor($r('app.color.text_tertiary'))
+        .fontColor(this.theme.text_tertiary)
     }
     .alignItems(HorizontalAlign.Start)
     .width('100%')
     .padding(10)
     .borderRadius(10)
-    .backgroundColor($r('app.color.bg_overlay'))
+    .backgroundColor(this.theme.bg_overlay)
   }
 
   @Builder
@@ -367,7 +425,7 @@ struct Index {
           } else {
             Text(p.content)
               .fontSize(16 * this.fontScale)
-              .fontColor($r('app.color.text_primary'))
+              .fontColor(this.theme.text_primary)
               .width('100%')
               .copyOption(CopyOptions.LocalDevice)
           }
@@ -375,17 +433,17 @@ struct Index {
       } else {
         Text(m.content)
           .fontSize(16 * this.fontScale)
-          .fontColor(m.transient === true ? $r('app.color.danger') : $r('app.color.text_primary'))
+          .fontColor(m.transient === true ? this.theme.danger : this.theme.text_primary)
           .width('100%')
           .copyOption(CopyOptions.LocalDevice)
       }
 
       if (m.model !== undefined) {
         Row({ space: 12 }) {
-          Text(m.model).fontSize(11).fontColor($r('app.color.text_tertiary'))
+          Text(m.model).fontSize(11).fontColor(this.theme.text_tertiary)
           Text($r('app.string.action_copy'))
             .fontSize(11)
-            .fontColor($r('app.color.text_tertiary'))
+            .fontColor(this.theme.text_tertiary)
             .onClick(() => this.copy(m.content))
         }
         .width('100%')
@@ -405,11 +463,11 @@ struct Index {
       if (this.streamText.length > 0) {
         Text(this.streamText)
           .fontSize(16 * this.fontScale)
-          .fontColor($r('app.color.text_primary'))
+          .fontColor(this.theme.text_primary)
           .width('100%')
       } else if (this.streamThinking.length === 0) {
         Row() {
-          LoadingProgress().width(20).height(20).color($r('app.color.text_tertiary'))
+          LoadingProgress().width(20).height(20).color(this.theme.text_tertiary)
         }
       }
     }
@@ -424,7 +482,7 @@ struct Index {
       Row({ space: 8 }) {
         TextInput({ text: this.input, placeholder: $r('app.string.chat_input_hint') })
           .layoutWeight(1)
-          .backgroundColor($r('app.color.bg_surface'))
+          .backgroundColor(this.theme.bg_surface)
           .borderRadius(22)
           .padding({ left: 16, right: 16 })
           .fontSize(16 * this.fontScale)
@@ -432,12 +490,12 @@ struct Index {
           .onSubmit(() => this.send())
 
         Button() {
-          Text(this.streaming ? '■' : '↑').fontSize(18).fontColor($r('app.color.on_brand'))
+          Text(this.streaming ? '■' : '↑').fontSize(18).fontColor(this.theme.on_brand)
         }
         .type(ButtonType.Circle)
         .width(44)
         .height(44)
-        .backgroundColor($r('app.color.brand'))
+        .backgroundColor(this.theme.brand)
         .onClick(() => {
           if (this.streaming) {
             this.stop();
@@ -450,11 +508,11 @@ struct Index {
 
       Text($r('app.string.chat_disclaimer'))
         .fontSize(11)
-        .fontColor($r('app.color.text_tertiary'))
+        .fontColor(this.theme.text_tertiary)
     }
     .width('100%')
     .padding({ left: 12, right: 12, top: 8, bottom: 12 })
-    .backgroundColor($r('app.color.bg_page'))
+    .backgroundColor(this.theme.bg_page)
   }
 
   @Builder
@@ -464,11 +522,11 @@ struct Index {
         Text($r('app.string.drawer_title'))
           .fontSize(18)
           .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.text_primary'))
+          .fontColor(this.theme.text_primary)
           .layoutWeight(1)
         Text($r('app.string.drawer_new_chat'))
           .fontSize(14)
-          .fontColor($r('app.color.brand'))
+          .fontColor(this.theme.brand)
           .onClick(() => this.newChat())
       }
       .width('100%')
@@ -477,7 +535,7 @@ struct Index {
       if (this.sessions.length === 0) {
         Text($r('app.string.drawer_empty'))
           .fontSize(14)
-          .fontColor($r('app.color.text_tertiary'))
+          .fontColor(this.theme.text_tertiary)
           .padding(16)
       } else {
         List({ space: 2 }) {
@@ -486,18 +544,18 @@ struct Index {
               Column({ space: 2 }) {
                 Text(s.title.length === 0 ? $r('app.string.drawer_untitled') : s.title)
                   .fontSize(15)
-                  .fontColor($r('app.color.text_primary'))
+                  .fontColor(this.theme.text_primary)
                   .maxLines(1)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
                   .width('100%')
-                Text($r('app.string.drawer_msg_count', s.count))
+                Text($r('app.plural.drawer_msg_count', s.count, s.count))
                   .fontSize(12)
-                  .fontColor($r('app.color.text_tertiary'))
+                  .fontColor(this.theme.text_tertiary)
               }
               .alignItems(HorizontalAlign.Start)
               .width('100%')
               .padding({ left: 16, right: 16, top: 10, bottom: 10 })
-              .backgroundColor(s.id === this.sessionId ? $r('app.color.bg_overlay') : Color.Transparent)
+              .backgroundColor(s.id === this.sessionId ? this.theme.bg_overlay : Color.Transparent)
             }
             .onClick(() => this.openSession(s.id))
             .swipeAction({ end: this.deleteButton(s.id) })
@@ -509,20 +567,20 @@ struct Index {
 
       Text($r('app.string.drawer_local_only'))
         .fontSize(11)
-        .fontColor($r('app.color.text_tertiary'))
+        .fontColor(this.theme.text_tertiary)
         .padding(16)
     }
     .width('100%')
     .height('100%')
-    .backgroundColor($r('app.color.bg_surface'))
+    .backgroundColor(this.theme.bg_surface)
   }
 
   @Builder
   deleteButton(id: string) {
     Button($r('app.string.settings_delete'))
       .fontSize(14)
-      .fontColor($r('app.color.on_brand'))
-      .backgroundColor($r('app.color.danger'))
+      .fontColor(this.theme.on_brand)
+      .backgroundColor(this.theme.danger)
       .height('100%')
       .onClick(() => this.deleteSession(id))
   }
@@ -530,7 +588,7 @@ struct Index {
   build() {
     Column() {
       this.header()
-      Divider().color($r('app.color.divider'))
+      Divider().color(this.theme.divider)
 
       List({ space: 0, scroller: this.scroller }) {
         if (this.messages.length === 0 && !this.streaming) {
@@ -561,10 +619,10 @@ struct Index {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor($r('app.color.bg_page'))
+    .backgroundColor(this.theme.bg_page)
     .bindSheet($$this.showDrawer, this.drawer(), {
       detents: [SheetSize.MEDIUM, SheetSize.LARGE],
-      backgroundColor: $r('app.color.bg_surface')
+      backgroundColor: this.theme.bg_surface
     })
   }
 }

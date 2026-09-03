@@ -98,6 +98,18 @@ export function findVendor(id: string): Vendor | undefined {
 }
 
 /**
+ * Vendor id for a model that runs ON THIS DEVICE. A sentinel rather than a real
+ * Vendor record, because there is no endpoint, no key and no catalog behind it --
+ * but reusing the vendor/model shape lets the picker, the selection, the chat
+ * path and the removal path all stay lane-agnostic. It is deliberately absent
+ * from VENDORS: adding one is a file picker, not a URL and a pasted key.
+ */
+export const LOCAL_VENDOR_ID: string = 'local';
+
+/** `kind` for an on-device entry. Anything else (including absent) is remote. */
+export const KIND_LOCAL: string = 'local';
+
+/**
  * One model the user configured. Persisted (minus the key, which lives in the
  * secure store) and registered with the core at startup.
  */
@@ -109,18 +121,42 @@ export interface ModelConfig {
    */
   id: string;
   vendorId: string;
-  /** Vendor's base URL, or the user's own for a custom endpoint. */
+  /** Vendor's base URL, or the user's own for a custom endpoint. Empty when local. */
   baseUrl: string;
-  /** The model name sent in the request body. */
+  /** The model name sent in the request body; the file name when local. */
   model: string;
+
+  /**
+   * KIND_LOCAL for an on-device model, absent or anything else for a remote one.
+   *
+   * Optional rather than required because entries written before on-device
+   * existed are still in preferences and parse without it -- and `undefined`
+   * meaning "remote" is exactly right, since that is what those entries are.
+   */
+  kind?: string;
+  /** Absolute path to the .gguf. Only meaningful when kind is KIND_LOCAL. */
+  modelPath?: string;
+  /** Picker-granted URI the path came from; what re-activates access on launch. */
+  modelUri?: string;
+}
+
+export function isLocal(cfg: ModelConfig): boolean {
+  return cfg.kind === KIND_LOCAL;
 }
 
 export function modelId(vendorId: string, model: string): string {
   return vendorId + '/' + model;
 }
 
-/** What the picker shows: "智谱 GLM · glm-4.7-flash". */
+/** What the picker shows: "智谱 GLM · glm-4.7-flash", or the file name locally. */
 export function modelLabel(cfg: ModelConfig): string {
+  if (isLocal(cfg)) {
+    // No vendor to name, and the file name is what the user recognizes. The
+    // ".gguf" suffix is dropped: every one of them has it, so it distinguishes
+    // nothing and only costs width in a menu row.
+    const name: string = cfg.model;
+    return name.endsWith('.gguf') ? name.substring(0, name.length - 5) : name;
+  }
   const v: Vendor | undefined = findVendor(cfg.vendorId);
   const vendorLabel: string = v === undefined ? cfg.vendorId : v.label;
   return vendorLabel + ' · ' + cfg.model;

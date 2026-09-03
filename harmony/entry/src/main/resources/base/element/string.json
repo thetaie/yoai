@@ -17,6 +17,10 @@
       "value": "向你自己配置的大模型服务发送对话请求"
     },
     {
+      "name": "perm_file_persist_reason",
+      "value": "读取你选择的本地模型文件，重启后仍可继续使用"
+    },
+    {
       "name": "chat_input_hint",
       "value": "给 YoAI 发消息…"
     },
@@ -71,10 +75,6 @@
     {
       "name": "drawer_untitled",
       "value": "(空对话)"
-    },
-    {
-      "name": "drawer_msg_count",
-      "value": "%d 条"
     },
     {
       "name": "drawer_delete_title",
@@ -157,6 +157,34 @@
       "value": "去获取 key ›"
     },
     {
+      "name": "settings_local",
+      "value": "本机模型"
+    },
+    {
+      "name": "settings_local_intro",
+      "value": "选一个 GGUF 文件，直接在这台设备上跑，不联网。文件留在原处，不会复制进应用，删除模型也不会删文件。"
+    },
+    {
+      "name": "settings_local_add",
+      "value": "选择 GGUF 文件"
+    },
+    {
+      "name": "settings_local_unavailable",
+      "value": "这个版本没有编译本机推理引擎（需要先运行 harmony/build-llama）。"
+    },
+    {
+      "name": "settings_local_failed",
+      "value": "这个文件读不到，换一个试试"
+    },
+    {
+      "name": "settings_local_loading",
+      "value": "正在加载模型…"
+    },
+    {
+      "name": "settings_local_ready",
+      "value": "模型已就绪"
+    },
+    {
       "name": "settings_need_all",
       "value": "接口地址、模型名和 key 都要填。"
     },
@@ -203,6 +231,86 @@
     {
       "name": "action_retry",
       "value": "重新生成"
+    },
+    {
+      "name": "settings_page_models",
+      "value": "模型"
+    },
+    {
+      "name": "settings_interface",
+      "value": "界面"
+    },
+    {
+      "name": "settings_interface_intro",
+      "value": "改动即时生效，无需重启。"
+    },
+    {
+      "name": "settings_palette",
+      "value": "主题色"
+    },
+    {
+      "name": "settings_palette_amber",
+      "value": "Amber · 暖"
+    },
+    {
+      "name": "settings_palette_arctic",
+      "value": "Arctic · 冷"
+    },
+    {
+      "name": "settings_palette_quiet",
+      "value": "Quiet · 低饱和"
+    },
+    {
+      "name": "settings_palette_note",
+      "value": "色系和深浅是两件事：这里选色系，上面选深浅，色卡显示的是当前实际生效的那一套。"
+    },
+    {
+      "name": "settings_text_size",
+      "value": "文字大小"
+    },
+    {
+      "name": "settings_text_size_note",
+      "value": "只作用于对话正文，界面本身的尺寸不变。"
+    },
+    {
+      "name": "settings_text_preview",
+      "value": "预览"
+    },
+    {
+      "name": "settings_text_smallest",
+      "value": "更小"
+    },
+    {
+      "name": "settings_text_smaller",
+      "value": "减小"
+    },
+    {
+      "name": "settings_text_normal",
+      "value": "正常"
+    },
+    {
+      "name": "settings_text_larger",
+      "value": "增大"
+    },
+    {
+      "name": "settings_text_largest",
+      "value": "更大"
+    },
+    {
+      "name": "settings_text_sample",
+      "value": "帮我把这段话改写得更简洁一些。"
+    },
+    {
+      "name": "settings_language",
+      "value": "界面语言"
+    },
+    {
+      "name": "settings_language_note",
+      "value": "只改界面。已有的对话保持原样，模型也用你提问的语言回答。"
+    },
+    {
+      "name": "settings_language_partial",
+      "value": "目前只有中文和英文是完整的，其余语种会回退显示。"
     }
   ]
 }

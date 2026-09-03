@@ -10,9 +10,9 @@
 // (it does in this build), but consult _MSVC_LANG anyway so a stray include
 // of this header from a project that forgot the flag still works.
 #if defined(_MSVC_LANG)
-    static_assert(_MSVC_LANG  >= 201703L, "yoai requires C++17 or newer");
+    static_assert(_MSVC_LANG  >= 201103L, "yoai requires C++11 or newer");
 #else
-    static_assert(__cplusplus >= 201703L, "yoai requires C++17 or newer");
+    static_assert(__cplusplus >= 201103L, "yoai requires C++11 or newer");
 #endif
 
 namespace yoai { namespace platform {

@@ -15,7 +15,8 @@ import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
 import hilog from '@ohos.hilog';
 import yoai from 'libyoai.so';
-import { ModelConfig, modelId } from '../model/Provider';
+import { ModelConfig, isLocal, modelId } from '../model/Provider';
+import { LocalModelStore } from './LocalModelStore';
 import { SecureKeyStore } from './SecureKeyStore';
 
 const STORE_NAME: string = 'models';
@@ -78,6 +79,10 @@ export class ModelStore {
     for (const m of list) {
       if (m.id !== id) {
         next.push(m);
+      } else if (isLocal(m)) {
+        // Hand back the file grant we are no longer using. The .gguf itself is
+        // the user's and stays exactly where it is.
+        await LocalModelStore.release(m);
       }
     }
     await ModelStore.write(ctx, next);
@@ -118,12 +123,31 @@ export class ModelStore {
   }
 
   /**
-   * Register one model with the core, reading its key from the secure store.
-   * Returns false when there is no key for its vendor -- in which case the core
-   * is left WITHOUT the entry, deliberately: yoai_providers() is the picker's
-   * source of truth, so an entry that cannot run must not appear in it.
+   * Register one model with the core. For a remote model that means reading its
+   * key from the secure store; for an on-device one, handing over the file path.
+   *
+   * Returns false when the model cannot run -- no key for its vendor, or no path.
+   * The core is then left WITHOUT the entry, deliberately: yoai_providers() is
+   * the picker's source of truth, so an entry that cannot run must not appear
+   * in it.
    */
   static async register(cfg: ModelConfig): Promise<boolean> {
+    if (isLocal(cfg)) {
+      const path: string | undefined = cfg.modelPath;
+      if (path === undefined || path.length === 0) {
+        return false;
+      }
+      // '' for the options: the core's defaults are already tuned for a phone,
+      // and the app has no settings screen for them. See src/yoai.h if that
+      // changes.
+      const rc: number = yoai.nativeLocalSet(cfg.id, path, '');
+      if (rc !== 0) {
+        hilog.error(0x0000, 'yoai', 'nativeLocalSet(%{public}s) failed rc=%{public}d', cfg.id, rc);
+        return false;
+      }
+      return true;
+    }
+
     const key: string = await SecureKeyStore.getKey(cfg.vendorId);
     if (key.length === 0) {
       return false;
@@ -139,10 +163,40 @@ export class ModelStore {
   /**
    * Refill the core's registry from what is stored. Call once at startup, before
    * the first turn. Returns how many models are actually usable.
+   *
+   * On-device models are re-armed FIRST: their file grants are dormant after a
+   * cold start, and registering a path we can no longer open would put an entry
+   * in the picker that fails only when someone tries to use it. Ones whose file
+   * has moved or gone are dropped from the stored list here -- the single place
+   * that owns that list, so an entry cannot vanish from two directions at once.
    */
   static async syncToCore(ctx: common.UIAbilityContext): Promise<number> {
     yoai.nativeProviderClear();
-    const list: ModelConfig[] = await ModelStore.list(ctx);
+
+    let list: ModelConfig[] = await ModelStore.list(ctx);
+
+    const locals: ModelConfig[] = [];
+    for (const m of list) {
+      if (isLocal(m)) {
+        locals.push(m);
+      }
+    }
+    if (locals.length > 0) {
+      const gone: string[] = await LocalModelStore.activate(locals);
+      if (gone.length > 0) {
+        const kept: ModelConfig[] = [];
+        for (const m of list) {
+          if (!gone.includes(m.id)) {
+            kept.push(m);
+          }
+        }
+        hilog.warn(0x0000, 'yoai', 'dropping %{public}d unreachable on-device model(s)',
+                   gone.length);
+        await ModelStore.write(ctx, kept);
+        list = kept;
+      }
+    }
+
     let ready: number = 0;
     for (const m of list) {
       if (await ModelStore.register(m)) {
