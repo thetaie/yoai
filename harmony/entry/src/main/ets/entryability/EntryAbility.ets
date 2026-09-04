@@ -8,24 +8,14 @@ import UIAbility from '@ohos.app.ability.UIAbility';
 import Want from '@ohos.app.ability.Want';
 import window from '@ohos.window';
 import ConfigurationConstant from '@ohos.app.ability.ConfigurationConstant';
-import { DEFAULT_FAMILY } from '../core/Palettes';
+import { BusinessError } from '@kit.BasicServicesKit';
+import { Prefs } from '../core/Prefs';
 
 const TAG: string = 'yoai';
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(0x0000, TAG, '%{public}s', 'Ability onCreate');
-
-    // App-wide font scale, persisted across launches.
-    PersistentStorage.persistProp('fontScale', 1);
-    // Theme override. Stored as the raw ColorMode value so there is no mapping
-    // table: NOT_SET(-1) = follow the system, which is also the first-run default.
-    PersistentStorage.persistProp('colorModePref', ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
-    // Which color family the palette comes from. Independent of the mode above:
-    // the two together name one of the six palettes in [Palettes].
-    PersistentStorage.persistProp('paletteFamily', DEFAULT_FAMILY);
-    this.applyStoredColorMode();
-    this.publishColorMode(this.context.config.colorMode);
   }
 
   /**
@@ -82,7 +72,29 @@ export default class EntryAbility extends UIAbility {
     this.context.getApplicationContext().setColorMode(mode);
   }
 
+  /**
+   * The stored settings are read here, and the first page is not loaded until
+   * they are in AppStorage.
+   *
+   * The await is the point: a page built before the values land binds its
+   * @StorageLink to the declared default, so someone who chose dark would see
+   * the light theme for a frame and then a jump. One preferences read is
+   * cheaper than that.
+   */
   onWindowStageCreate(windowStage: window.WindowStage): void {
+    Prefs.load(this.context).then(() => {
+      this.applyStoredColorMode();
+      this.publishColorMode(this.context.config.colorMode);
+      this.load(windowStage);
+    }).catch((err: BusinessError) => {
+      // Show the app rather than nothing: defaults are a worse first run than
+      // the user's choice, but they are still a working one.
+      hilog.error(0x0000, TAG, 'Failed to read settings: %{public}s', err.message);
+      this.load(windowStage);
+    });
+  }
+
+  private load(windowStage: window.WindowStage): void {
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {
         hilog.error(0x0000, TAG, 'Failed to load the content. Cause: %{public}s', JSON.stringify(err) ?? '');

@@ -32,7 +32,7 @@ export interface Vendor {
 export const VENDORS: Vendor[] = [
   {
     id: 'zhipu',
-    label: '智谱 GLM',
+    label: 'GLM',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     models: ['glm-4.7-flash', 'glm-4.7'],
     registerUrl: 'https://open.bigmodel.cn'
@@ -46,14 +46,14 @@ export const VENDORS: Vendor[] = [
   },
   {
     id: 'dashscope',
-    label: '阿里云百炼 (DashScope)',
+    label: '阿里云 (DashScope)',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     models: ['qwen-plus', 'qwen-turbo'],
     registerUrl: 'https://bailian.console.aliyun.com'
   },
   {
     id: 'moonshot',
-    label: '月之暗面 Kimi',
+    label: 'Kimi',
     baseUrl: 'https://api.moonshot.cn/v1',
     models: ['kimi-k2-turbo-preview'],
     registerUrl: 'https://platform.moonshot.cn'
@@ -67,7 +67,7 @@ export const VENDORS: Vendor[] = [
   },
   {
     id: 'gemini',
-    label: 'Google Gemini',
+    label: 'Google',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     models: ['gemini-3.6-flash'],
     registerUrl: 'https://aistudio.google.com/apikey'
@@ -148,7 +148,7 @@ export function modelId(vendorId: string, model: string): string {
   return vendorId + '/' + model;
 }
 
-/** What the picker shows: "智谱 GLM · glm-4.7-flash", or the file name locally. */
+/** What the picker shows: "GLM · glm-4.7-flash", or the file name locally. */
 export function modelLabel(cfg: ModelConfig): string {
   if (isLocal(cfg)) {
     // No vendor to name, and the file name is what the user recognizes. The

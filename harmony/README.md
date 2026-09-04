@@ -43,8 +43,6 @@ app takes the keys with it (no `IS_PERSISTENT` tag, which would need
 - DevEco Studio, with an OpenHarmony SDK that has `native/` (the NDK). Its
   bundled node, hvigor and ohpm are used too, so nothing else needs installing.
 - `git`, for the vcpkg checkout the dependency build clones.
-- Only `arm64-v8a` is enabled in `entry/build-profile.json5`. Add `x86_64` there
-  (and build for it) to target the emulator.
 
 The SDK path must not contain a space. OpenSSL's generated Makefile passes the
 compiler path to `/bin/sh` unquoted, so a space breaks the build; the script
@@ -57,14 +55,29 @@ One script builds everything, selected by token — `build.cmd` on Windows,
 
 | | |
 |---|---|
-| `build.cmd <abi>` | the C++ dependencies — the default, and the required part |
-| `build.cmd <abi> llama` | the on-device engine (see below) |
-| `build.cmd <abi> hap` | compile and sign the app |
-| `build.cmd <abi> all` | all three, in that order |
+| `build.cmd` | everything, in the order below — the default |
+| `build.cmd deps` | the C++ dependencies — the required part |
+| `build.cmd llama` | the on-device engine (see below) |
+| `build.cmd hap` | compile and sign the app |
+| `build.cmd all` | the same three the bare command does, named explicitly |
 | `build.cmd --help` | every token, including `clean` and `arch=` |
 
-Tokens compose, so `build.cmd arm64-v8a deps hap` is a full rebuild of what
-changed most days.
+Tokens compose, so `build.cmd deps hap` is a full rebuild of what changed most
+days — and it is also how you build the app *without* the on-device engine.
+
+The bare command includes `llama` because on-device chat is part of the app, not
+an opt-in lane. It is the expensive part of a first run, though: it needs a
+llama.cpp checkout you clone yourself (~200 MB) and a few minutes of
+cross-compile, and it adds about 4.3 MiB to `libyoai.so`.
+
+No ABI is named above because there is only one that matters: HarmonyOS NEXT is
+64-bit ARM throughout, so `arm64-v8a` is both the script's default and the only
+entry in `entry/build-profile.json5`'s `abiFilters`.
+
+The emulator is the one reason to want another. It runs an x86_64 image on an
+x86 host, so that means `build.cmd x86_64` for the native libraries AND adding
+`"x86_64"` to `abiFilters` — the script only produces the libraries, it does not
+decide what goes into the HAP.
 
 `deps` clones vcpkg at the baseline pinned in `../vcpkg.json`, builds `openssl`,
 `curl[openssl]`, `rapidjson` and `zlib` for OHOS, and lays them out under
@@ -100,24 +113,26 @@ point at the SDK *root* (the directory holding `default/`), not at the
 not hint that the variable was simply unset. And hvigor needs a node, which
 DevEco ships at `tools/node`.
 
-## On-device models (optional)
+## On-device models
 
-Off unless you build the engine. To turn it on, clone llama.cpp once (beside the
-repo, or set `LLAMA_SRC`) and run:
+Built by default, but the one thing the script will not fetch for you is
+llama.cpp itself — clone it once (beside the repo, or set `LLAMA_SRC`) and the
+bare `build.cmd` covers the rest. To build only this part:
 
 ```
-build.cmd arm64-v8a llama        # Windows
-./build.sh arm64-v8a llama       # macOS / Linux
+build.cmd llama       # Windows
+./build.sh llama      # macOS / Linux
 ```
 
 That cross-compiles llama.cpp and assembles `prebuilt/llama-sdk/<abi>/`
 (`include/` + static `lib/`), which `entry/src/main/cpp/CMakeLists.txt` finds by
 itself. **Its presence IS the switch**: build it and `libyoai.so` links the
 engine, delete it and the core compiles its stub and the app still builds, with
-on-device chat reporting itself unavailable. Nothing to paste into
-`build-profile.json5` — which matters, because that file is `skip-worktree`d for
-signing (below) and any machine-local path put there would be invisible to
-everyone else.
+on-device chat reporting itself unavailable. That off state is still supported —
+`build.cmd deps hap` is how you ask for it — it just is not what a bare
+`build.cmd` gives you any more. Nothing to paste into `build-profile.json5`
+either, which matters: that file is `skip-worktree`d for signing (below), so any
+machine-local path put there would be invisible to everyone else.
 
 Static archives, and CPU only. A HAP has nowhere to put a companion `.so`, so
 the engine has to link in; and GPU offload measured worse on every axis on this

@@ -12,23 +12,33 @@
 #
 #     abi     arm64-v8a (default) | x86_64 | armeabi-v7a
 #     deps    the core's C++ dependencies via vcpkg -> prebuilt/<abi>/
-#             (the default, and REQUIRED: without it the native module fails to
-#             configure on its first find_package)
+#             (REQUIRED: without it the native module fails to configure on its
+#             first find_package)
 #     llama   the on-device LLM engine  -> prebuilt/llama-sdk/<abi>/
-#             (OPTIONAL: building it is what turns on-device chat on)
+#             (building it is what turns on-device chat on)
 #     hap     compile and sign the app itself, via hvigor. No IDE needed.
-#     all     all three, in that order
+#     all     all three, in that order -- and what a bare `./build.sh` does
 #     clean   discard llama's cached build tree and SDK first. `deps` always
 #             replaces its own output, so there is nothing for it to clean.
 #     arch=   llama only: the -march feature set; `baseline` means armv8-a
 #
-# Typical first run:
+# The abi defaults to arm64-v8a, which is the only one a HarmonyOS NEXT device
+# has -- so it is normally left off entirely. Naming no target means `all`, so
+# the first run is just:
 #
-#     ./build.sh arm64-v8a all
+#     ./build.sh
 #
 # and after that, just:
 #
-#     ./build.sh arm64-v8a hap
+#     ./build.sh hap
+#
+# On-device chat is part of the app rather than an opt-in lane, so the bare
+# command produces an app that has it. That is not free: it needs a llama.cpp
+# checkout (~200 MB, and this script will not clone it for you -- see
+# build_llama) plus a few minutes of cross-compile. To build the app WITHOUT the
+# engine, name the two targets you do want:
+#
+#     ./build.sh deps hap
 #
 # Env overrides:
 #   DEVECO_HOME     DevEco Studio / command-line-tools install (default: read
@@ -61,8 +71,10 @@ for tok in "$@"; do
         baseline)  ARCH="" ; ARCH_SET=1 ;;
         arch=*)    ARCH="${tok#arch=}" ; ARCH_SET=1 ;;
         # The header block above, minus its rule lines, IS the help text -- so
-        # there is only one copy of it to keep true.
-        -h|--help) sed -n '3,39p' "$SCRIPT" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        # there is only one copy of it to keep true. Delimited by the rules
+        # rather than by line numbers: the hardcoded range this replaces had
+        # already fallen one line behind the header it was printing.
+        -h|--help) sed '1,2d; /^# ---/,$d' "$SCRIPT" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)
             if [ -z "$ABI" ]; then
                 ABI="$tok"
@@ -75,10 +87,13 @@ for tok in "$@"; do
 done
 
 ABI="${ABI:-arm64-v8a}"
-# Nothing named: build the dependencies, which is what someone who just cloned
-# the repo needs and the only part that is mandatory.
+# Nothing named: everything, in the order `all` would. The bare command is what
+# a fresh clone runs, and it should end with an installable app that has
+# on-device chat -- not with a half-built tree needing two more invocations
+# nobody mentioned.
+IMPLIED_ALL=""
 if [ -z "$DO_DEPS" ] && [ -z "$DO_LLAMA" ] && [ -z "$DO_HAP" ]; then
-    DO_DEPS=1
+    DO_DEPS=1 ; DO_LLAMA=1 ; DO_HAP=1 ; IMPLIED_ALL=1
 fi
 
 # OHOS ABI -> vcpkg overlay triplet (vcpkg-triplets/). Rejected here rather than
@@ -91,8 +106,16 @@ case "$ABI" in
   *) echo "[build] abi must be arm64-v8a|x86_64|armeabi-v7a (got '$ABI')" >&2; exit 2 ;;
 esac
 if [ -n "$DO_LLAMA" ] && [ "$ABI" = "armeabi-v7a" ]; then
-    echo "[build] the on-device engine is built for arm64-v8a|x86_64 only (got '$ABI')" >&2
-    exit 2
+    # Refusing outright is right when llama was ASKED for, and wrong when it was
+    # merely implied by a bare command line -- on an ABI that cannot have the
+    # engine, `./build.sh armeabi-v7a` should still build everything else.
+    if [ -n "$IMPLIED_ALL" ]; then
+        echo "[build] llama skipped: the on-device engine is built for arm64-v8a|x86_64 only"
+        DO_LLAMA=""
+    else
+        echo "[build] the on-device engine is built for arm64-v8a|x86_64 only (got '$ABI')" >&2
+        exit 2
+    fi
 fi
 
 # --- Resolve DevEco Studio / the command-line tools --------------------------
@@ -174,6 +197,7 @@ echo "[build] abi=$ABI"
 echo "[build] sdk=$OHOS_SDK_ROOT"
 if [ -n "$DO_DEPS" ];  then echo "[build] target: deps  (vcpkg -> prebuilt/$ABI)"; fi
 if [ -n "$DO_LLAMA" ]; then echo "[build] target: llama (llama.cpp -> prebuilt/llama-sdk/$ABI)"; fi
+if [ -n "$DO_HAP" ];   then echo "[build] target: hap   (hvigor -> entry/build/default/outputs)"; fi
 echo
 
 #-----------------------------------------------------------------------------
@@ -414,6 +438,10 @@ echo
 if [ -n "$DO_HAP" ]; then
     echo "[build] done."
 else
-    echo "[build] done. Run \`./build.sh $ABI hap\` to package the app, or open"
+    # The abi is named back only when it is NOT the default, so the hint on the
+    # common path is the command someone would actually type.
+    hint=""
+    [ "$ABI" = "arm64-v8a" ] || hint="$ABI "
+    echo "[build] done. Run \`./build.sh ${hint}hap\` to package the app, or open"
     echo "[build] harmony/ in DevEco Studio."
 fi

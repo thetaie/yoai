@@ -8,24 +8,34 @@ rem   build.cmd [abi] [deps^|llama^|hap^|all] [clean] [arch=<march>^|baseline]
 rem
 rem     abi     arm64-v8a (default) ^| x86_64 ^| armeabi-v7a
 rem     deps    the core's C++ dependencies via vcpkg -> prebuilt\<abi>\
-rem             (the default, and REQUIRED: without it the native module fails
-rem             to configure on its first find_package)
+rem             (REQUIRED: without it the native module fails to configure on
+rem             its first find_package)
 rem     llama   the on-device LLM engine  -> prebuilt\llama-sdk\<abi>\
-rem             (OPTIONAL: building it is what turns on-device chat on)
+rem             (building it is what turns on-device chat on)
 rem     hap     compile and sign the app itself, via hvigor. No IDE needed.
-rem     all     all three, in that order
+rem     all     all three, in that order -- and what a bare `build.cmd` does
 rem     clean   discard llama's cached build tree and SDK first. `deps` always
 rem             replaces its own output, so there is nothing for it to clean.
 rem     arch=   llama only: the -march feature set. `baseline` means plain
 rem             armv8-a. See :llama below for why the default is what it is.
 rem
-rem Typical first run:
+rem The abi defaults to arm64-v8a, which is the only one a HarmonyOS NEXT
+rem device has -- so it is normally left off entirely. Naming no target means
+rem `all`, so the first run is just:
 rem
-rem     build.cmd arm64-v8a all
+rem     build.cmd
 rem
 rem and after that, just:
 rem
-rem     build.cmd arm64-v8a hap
+rem     build.cmd hap
+rem
+rem On-device chat is part of the app rather than an opt-in lane, so the bare
+rem command produces an app that has it. That is not free: it needs a llama.cpp
+rem checkout (~200 MB, and this script will not clone it for you -- see :llama)
+rem plus a few minutes of cross-compile. To build the app WITHOUT the engine,
+rem name the two targets you do want:
+rem
+rem     build.cmd deps hap
 rem
 rem Env overrides:
 rem   DEVECO_HOME     DevEco Studio install (default: read from its own .home
@@ -95,9 +105,17 @@ goto args
 
 :args_done
 if not defined ABI set "ABI=arm64-v8a"
-rem Nothing named: build the dependencies, which is what someone who just cloned
-rem the repo needs and the only part that is mandatory.
-if not defined DO_DEPS if not defined DO_LLAMA if not defined DO_HAP set "DO_DEPS=1"
+rem Nothing named: everything, in the order `all` would. The bare command is what
+rem a fresh clone runs, and it should end with an installable app that has
+rem on-device chat -- not with a half-built tree needing two more invocations
+rem nobody mentioned.
+set "IMPLIED_ALL="
+if not defined DO_DEPS if not defined DO_LLAMA if not defined DO_HAP (
+    set "DO_DEPS=1"
+    set "DO_LLAMA=1"
+    set "DO_HAP=1"
+    set "IMPLIED_ALL=1"
+)
 
 rem OHOS ABI -> vcpkg overlay triplet (harmony\vcpkg-triplets\). Rejected here
 rem rather than at -DOHOS_ARCH, where an unknown ABI fails deep inside the
@@ -108,10 +126,21 @@ if /I "%ABI%"=="armeabi-v7a" ( set "TRIPLET=arm-ohos"   ) else (
     echo abi must be arm64-v8a^|x86_64^|armeabi-v7a ^(got "%ABI%"^)>&2
     exit /b 2
 )
-if defined DO_LLAMA if /I "%ABI%"=="armeabi-v7a" (
-    echo the on-device engine is built for arm64-v8a^|x86_64 only ^(got "%ABI%"^)>&2
-    exit /b 2
+rem Refusing outright is right when llama was ASKED for, and wrong when it was
+rem merely implied by a bare command line -- on an ABI that cannot have the
+rem engine, `build.cmd armeabi-v7a` should still build everything else. Flat,
+rem with a label, for the same reason as :arg_arch above: an `exit /b` two paren
+rem levels deep prints its message and then reports success.
+if not defined DO_LLAMA goto llama_abi_ok
+if /I not "%ABI%"=="armeabi-v7a" goto llama_abi_ok
+if defined IMPLIED_ALL (
+    echo [build] llama skipped: the on-device engine is built for arm64-v8a^|x86_64 only
+    set "DO_LLAMA="
+    goto llama_abi_ok
 )
+echo the on-device engine is built for arm64-v8a^|x86_64 only ^(got "%ABI%"^)>&2
+exit /b 2
+:llama_abi_ok
 
 rem --- Resolve DevEco Studio ----------------------------------------------------
 rem Everything below comes out of the DevEco install: the NDK for the two native
@@ -171,6 +200,7 @@ echo [build] abi=%ABI%
 echo [build] sdk=!OHOS_SDK_ROOT!
 if defined DO_DEPS  echo [build] target: deps  ^(vcpkg -^> prebuilt\%ABI%^)
 if defined DO_LLAMA echo [build] target: llama ^(llama.cpp -^> prebuilt\llama-sdk\%ABI%^)
+if defined DO_HAP   echo [build] target: hap   ^(hvigor -^> entry\build\default\outputs^)
 echo.
 
 if defined DO_DEPS (
@@ -190,7 +220,10 @@ echo.
 if defined DO_HAP (
     echo [build] done.
 ) else (
-    echo [build] done. Run `build.cmd %ABI% hap` to package the app, or open
+    rem The abi is named back only when it is NOT the default, so the hint on
+    rem the common path is the command someone would actually type.
+    if /I "%ABI%"=="arm64-v8a" ( set "HINT=" ) else ( set "HINT=%ABI% " )
+    echo [build] done. Run `build.cmd !HINT!hap` to package the app, or open
     echo [build] harmony\ in DevEco Studio.
 )
 exit /b 0
@@ -200,12 +233,15 @@ rem ===========================================================================
 echo Usage: build.cmd [abi] [deps^|llama^|hap^|all] [clean] [arch=^<march^>^|baseline]
 echo.
 echo   abi     arm64-v8a ^(default^) ^| x86_64 ^| armeabi-v7a
-echo   deps    the core's C++ dependencies via vcpkg   ^(default, required^)
-echo   llama   the on-device LLM engine                ^(optional^)
+echo   deps    the core's C++ dependencies via vcpkg   ^(required^)
+echo   llama   the on-device LLM engine                ^(turns on-device chat on^)
 echo   hap     compile and sign the app, via hvigor    ^(no IDE needed^)
 echo   all     all three, in that order
 echo   clean   discard llama's cached build tree and SDK first
 echo   arch=   llama only: -march feature set, or `baseline` for armv8-a
+echo.
+echo Naming no target means `all`, so a bare build.cmd builds everything. For
+echo the app WITHOUT the on-device engine: build.cmd deps hap
 echo.
 echo Read the top of this file for the env overrides and the reasoning.
 exit /b 0

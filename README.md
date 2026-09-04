@@ -107,16 +107,20 @@ entry takes any endpoint that is not on it.
 
 ### HarmonyOS
 
-Cross-compile the native dependencies once per ABI, then build the app:
+Cross-compile the native halves once, then repackage as you go:
 
 ```
 cd harmony
-build.cmd arm64-v8a       # Windows      -- the C++ dependencies, via vcpkg
-build.cmd arm64-v8a hap   #              -- compile and sign the app
+build.cmd           # Windows        -- dependencies, on-device engine, the app
+build.cmd hap       #                -- just repackage, every run after that
 
-./build.sh arm64-v8a      # macOS / Linux
-./build.sh arm64-v8a hap
+./build.sh          # macOS / Linux
+./build.sh hap
 ```
+
+The bare command expects a llama.cpp checkout beside the repo (see below). For
+the app without the on-device engine, name the other two targets:
+`build.cmd deps hap`.
 
 `hap` drives the same hvigor build DevEco does — same tasks, same signing — and
 drops an installable `entry-default-signed.hap` under
@@ -125,20 +129,21 @@ debugging, not a build dependency. Open `harmony/` in DevEco Studio when you wan
 it; see [harmony/README.md](harmony/README.md) for signing and the SDK
 requirements.
 
-#### On-device models (optional)
+#### On-device models
 
 The app can also run a GGUF on the phone itself, with no network. That lane is
-off until you build the engine, because llama.cpp is a large static dependency
-nobody should pay for by default:
+part of the default build; the one thing the script will not fetch for you is
+llama.cpp:
 
 ```
 git clone --depth 1 https://github.com/ggml-org/llama.cpp ../llama.cpp
 cd harmony
-build.cmd arm64-v8a llama        # Windows
-./build.sh arm64-v8a llama       # macOS / Linux
+build.cmd             # Windows       -- or `build.cmd llama` for just the engine
+./build.sh            # macOS / Linux
 ```
 
-(`all` instead of `llama` does the dependencies and the engine in one go.)
+It costs about 4.3 MiB in `libyoai.so`, a ~200 MB checkout, and a few minutes of
+cross-compile. `build.cmd deps hap` builds the app without it.
 
 The checkout goes beside the repo (`LLAMA_SRC` moves it) and is never updated
 for you: this build wants a source you can pin and re-measure against, not one
@@ -161,7 +166,7 @@ model never deletes it. From there it is a model like any other in the picker.
 | Reasoning output split from the answer | working |
 | Token / cost summary per turn | working |
 | Conversations persisted on device | working |
-| On-device inference (llama.cpp + GGUF) | working on HarmonyOS, opt-in at build time |
+| On-device inference (llama.cpp + GGUF) | working on HarmonyOS, in the default build |
 | Local personal-data storage | not yet |
 | Android app | not yet |
 | Tools / MCP, attachments, markdown rendering | not yet |

@@ -18,6 +18,7 @@ import ConfigurationConstant from '@ohos.app.ability.ConfigurationConstant';
 import { ICON_ROW, ICON_TOOLBAR, icon } from '../core/Icons';
 import { Language, LANGUAGES, TEXT_SIZES, TextSizeStep, languageIndexFor, stepIndexFor } from '../core/Interface';
 import { DEFAULT_FAMILY, FAMILIES, Family, Palette, resolvePalette } from '../core/Palettes';
+import { KEY_COLOR_MODE, KEY_FONT_SCALE, KEY_PALETTE_FAMILY, Prefs } from '../core/Prefs';
 
 /** One row of the light/dark control. */
 interface ThemeMode {
@@ -84,6 +85,8 @@ struct SettingsInterface {
     } else if (mode === ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT) {
       AppStorage.setOrCreate('isDark', false);
     }
+
+    Prefs.save(this.ctx(), KEY_COLOR_MODE, mode);
   }
 
   /**
@@ -93,6 +96,7 @@ struct SettingsInterface {
    */
   private applyTextScale(scale: number): void {
     this.fontScale = scale;
+    Prefs.save(this.ctx(), KEY_FONT_SCALE, scale);
   }
 
   /**
@@ -261,8 +265,12 @@ struct SettingsInterface {
           width: 1,
           color: this.paletteFamily === f.key ? this.theme.brand : this.theme.border
         })
-        // Writing the @StorageLink is all of it: Index links the same prop.
-        .onClick(() => { this.paletteFamily = f.key; })
+        // The @StorageLink reaches every page that links it; the save is what
+        // makes the choice outlive the process.
+        .onClick(() => {
+          this.paletteFamily = f.key;
+          Prefs.save(this.ctx(), KEY_PALETTE_FAMILY, f.key);
+        })
       }, (f: Family) => f.key)
     }
     .width('100%')

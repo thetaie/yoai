@@ -170,7 +170,7 @@
     },
     {
       "name": "settings_local_unavailable",
-      "value": "This build has no on-device engine (run harmony/build-llama first)."
+      "value": "This build has no on-device engine (run harmony/build llama first)."
     },
     {
       "name": "settings_local_failed",

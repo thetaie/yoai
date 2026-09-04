@@ -98,16 +98,19 @@ export YOAI_API_KEY=...          # 从 https://aistudio.google.com/apikey 获取
 
 ### HarmonyOS
 
-每个 ABI 交叉编译一次原生依赖,然后编 app:
+每个 ABI 把原生这两半交叉编译一次,之后改动只要重新打包:
 
 ```
 cd harmony
-build.cmd arm64-v8a       # Windows      -- C++ 依赖,走 vcpkg
-build.cmd arm64-v8a hap   #              -- 编译并签名 app
+build.cmd           # Windows        -- 依赖、本机推理引擎、app
+build.cmd hap       #                -- 之后每次只要重新打包
 
-./build.sh arm64-v8a      # macOS / Linux
-./build.sh arm64-v8a hap
+./build.sh          # macOS / Linux
+./build.sh hap
 ```
+
+不带参数的命令需要仓库旁边有一份 llama.cpp checkout(见下)。想编不带本机推理
+引擎的 app,就把另外两个目标写出来:`build.cmd deps hap`。
 
 `hap` 走的就是 DevEco 背后那套 hvigor——同样的任务、同样的签名——产物是
 `harmony/entry/build/default/outputs/default/entry-default-signed.hap`,可以直接
@@ -115,19 +118,20 @@ build.cmd arm64-v8a hap   #              -- 编译并签名 app
 Studio 打开 `harmony/`;签名和 SDK 要求见
 [harmony/README.md](harmony/README.md)。
 
-#### 本机模型(可选)
+#### 本机模型
 
-app 也可以把 GGUF 跑在手机本机上,全程不联网。这条路默认是关的,因为 llama.cpp
-是一坨很大的静态依赖,不该让所有人默认背上:
+app 也可以把 GGUF 跑在手机本机上,全程不联网。这条路在默认构建里就是开的;脚本
+唯一不会替你拉的东西就是 llama.cpp 本身:
 
 ```
 git clone --depth 1 https://github.com/ggml-org/llama.cpp ../llama.cpp
 cd harmony
-build.cmd arm64-v8a llama        # Windows
-./build.sh arm64-v8a llama       # macOS / Linux
+build.cmd             # Windows       -- 或者 `build.cmd llama` 只编引擎
+./build.sh            # macOS / Linux
 ```
 
-(把 `llama` 换成 `all`,依赖和引擎一次编完。)
+代价是 `libyoai.so` 多约 4.3 MiB、一份约 200 MB 的 checkout,以及几分钟交叉编译。
+`build.cmd deps hap` 编出来的 app 不带它。
 
 checkout 放在仓库旁边(用 `LLAMA_SRC` 可以改位置),而且不会替你更新:这个构建
 想要一个你能锁定、能反复对比测量的源码,不是一个在两次运行之间悄悄变掉的。
@@ -148,7 +152,7 @@ checkout 放在仓库旁边(用 `LLAMA_SRC` 可以改位置),而且不会替你�
 | 思考过程与回答分离 | 已完成 |
 | 每轮的 token / 费用汇总 | 已完成 |
 | 对话持久化到设备 | 已完成 |
-| 本机推理(llama.cpp + GGUF) | HarmonyOS 上已可用,构建时选择启用 |
+| 本机推理(llama.cpp + GGUF) | HarmonyOS 上已可用,默认构建即包含 |
 | 本地个人数据存储 | 未开始 |
 | Android app | 未开始 |
 | 工具 / MCP、附件、Markdown 渲染 | 未开始 |

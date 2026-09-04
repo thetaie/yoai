@@ -170,7 +170,7 @@
     },
     {
       "name": "settings_local_unavailable",
-      "value": "这个版本没有编译本机推理引擎（需要先运行 harmony/build-llama）。"
+      "value": "这个版本没有编译本机推理引擎（需要先运行 harmony/build llama）。"
     },
     {
       "name": "settings_local_failed",
