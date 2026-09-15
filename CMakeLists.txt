@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.19)
-project(bodyclock CXX)
+project(bodyclock C CXX)
 
 # The Body Clock core: a static library plus a C ABI (src/bodyclock.h), built to be linked
 # INTO a host app -- the HarmonyOS native module today, an Android one next --
@@ -45,6 +45,123 @@ if(NOT RapidJSON_FOUND)
     find_path(RAPIDJSON_INCLUDE_DIR rapidjson/document.h REQUIRED)
 endif()
 
+# SQLite, vendored as the amalgamation in third_party/sqlite3 rather than
+# resolved like the three above. Two reasons, and neither is about vcpkg:
+#
+#  - Every mobile target HAS SQLite and none of them LETS C++ LINK IT. The
+#    Android NDK has never exposed libsqlite3 as a stable native library, and
+#    HarmonyOS's native side offers its own OH_Rdb_* relational store, not the
+#    sqlite3 C API. Either way a C++ core has to carry its own copy, which is
+#    what Chrome, Signal and SQLCipher all do. iOS is the lone exception.
+#  - Since we are carrying a copy regardless, carrying the source means every
+#    platform compiles the same bytes from a version pinned by the file itself
+#    -- the same argument this build already makes for llama.cpp.
+#
+# Costs about 1 MB per ABI inside libbodyclock.so. See third_party/sqlite3/README.md
+# for the version and how to move to a new one.
+add_library(bodyclock_sqlite3 STATIC third_party/sqlite3/sqlite3.c)
+target_include_directories(bodyclock_sqlite3 PUBLIC third_party/sqlite3)
+
+# PUBLIC because several of these change what sqlite3.h declares: a translation
+# unit that includes the header must be built with the same set the library was.
+target_compile_definitions(bodyclock_sqlite3 PUBLIC
+    # The store is reached from the UI thread and from worker threads, so pay
+    # for serialized mode rather than police the calls.
+    SQLITE_THREADSAFE=1
+    # Foreign keys are OFF by default in SQLite, per connection. The schema
+    # relies on them, and a default is harder to forget than a pragma.
+    SQLITE_DEFAULT_FOREIGN_KEYS=1
+    # A double-quoted string is a syntax error instead of silently becoming a
+    # string literal, so a mistyped column name fails on the first run rather
+    # than returning its own name forever.
+    SQLITE_DQS=0
+    # Per-allocation bookkeeping nothing here reads.
+    SQLITE_DEFAULT_MEMSTATUS=0
+    SQLITE_OMIT_DEPRECATED
+    SQLITE_OMIT_SHARED_CACHE
+    # Nothing loads an extension, and on a device this is attack surface.
+    SQLITE_OMIT_LOAD_EXTENSION
+)
+
+# The amalgamation is generated code and warns freely under the core's flags.
+if(MSVC)
+    target_compile_options(bodyclock_sqlite3 PRIVATE /w)
+else()
+    target_compile_options(bodyclock_sqlite3 PRIVATE -w)
+endif()
+
+# Serialized mode needs pthreads where they are not already implied.
+find_package(Threads REQUIRED)
+target_link_libraries(bodyclock_sqlite3 PUBLIC Threads::Threads)
+
+#-------------------------------------------------------------------------------
+# Schema migrations
+#-------------------------------------------------------------------------------
+#
+# sql/sqlite/NNN_name.sql, in order, baked into the binary as a table of
+# {version, name, sql}.
+#
+# They are files so that schema is read and reviewed as SQL, and so that the
+# numbered sequence IS the migration order rather than a convention someone has
+# to maintain in C++. They are baked in because the core is a static library
+# inside a .so inside a HAP: there is no sql/ directory on the device, and
+# having the host hand the statements in would put the host back in charge of
+# the schema, which is the thing moving storage into the core was meant to end.
+#
+# Only the schema lives here. Query text stays next to the code that binds its
+# parameters and reads its columns -- splitting those two apart is how a column
+# order silently stops matching the indices that read it.
+file(GLOB BODYCLOCK_SQL_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/sql/sqlite/*.sql")
+list(SORT BODYCLOCK_SQL_FILES)
+if(NOT BODYCLOCK_SQL_FILES)
+    message(FATAL_ERROR "No migrations found in sql/sqlite/")
+endif()
+
+set(_bodyclock_migrations "")
+foreach(_sql_file ${BODYCLOCK_SQL_FILES})
+    get_filename_component(_sql_name "${_sql_file}" NAME)
+    if(NOT _sql_name MATCHES "^([0-9]+)_.+\\.sql$")
+        message(FATAL_ERROR "Migration ${_sql_name} is not named NNN_something.sql")
+    endif()
+    # Strip leading zeros by hand: math(EXPR) is not the place to discover how a
+    # given CMake feels about 007.
+    string(REGEX REPLACE "^0+" "" _sql_version "${CMAKE_MATCH_1}")
+    if(_sql_version STREQUAL "")
+        message(FATAL_ERROR "Migration ${_sql_name} is numbered 0; versions start at 1")
+    endif()
+    file(READ "${_sql_file}" _sql_text)
+    string(APPEND _bodyclock_migrations
+        "    { ${_sql_version}, \"${_sql_name}\", R\"BODYCLOCK_SQL(\n${_sql_text})BODYCLOCK_SQL\" },\n")
+    # Re-run CMake when the statements change, not only when a file is added.
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_sql_file}")
+endforeach()
+
+set(_bodyclock_gen_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(WRITE "${_bodyclock_gen_dir}/store/migrations.hpp.in"
+"// Generated by the root CMakeLists.txt from sql/sqlite/*.sql -- do not edit.\n"
+"#pragma once\n"
+"\n"
+"namespace bodyclock {\n"
+"namespace store {\n"
+"\n"
+"struct Migration {\n"
+"    int         version;\n"
+"    const char* name;\n"
+"    const char* sql;\n"
+"};\n"
+"\n"
+"const Migration kMigrations[] = {\n"
+"${_bodyclock_migrations}"
+"};\n"
+"\n"
+"const int kMigrationCount = sizeof(kMigrations) / sizeof(kMigrations[0]);\n"
+"\n"
+"}  // namespace store\n"
+"}  // namespace bodyclock\n")
+# COPYONLY so an unchanged schema does not touch the header and rebuild the world.
+configure_file("${_bodyclock_gen_dir}/store/migrations.hpp.in"
+               "${_bodyclock_gen_dir}/store/migrations.hpp" COPYONLY)
+
 #-------------------------------------------------------------------------------
 # bodyclock_core
 #-------------------------------------------------------------------------------
@@ -60,9 +177,13 @@ add_library(bodyclock_core STATIC
     src/llm/sse_parser.cpp
     src/platform/c_api.cpp
     src/platform/log.cpp
+    src/store/day_store.cpp
 )
 
 target_include_directories(bodyclock_core PUBLIC src)
+# PRIVATE: the generated migration table is an implementation detail of the
+# store, not part of what a host sees.
+target_include_directories(bodyclock_core PRIVATE "${_bodyclock_gen_dir}")
 
 if(RapidJSON_FOUND)
     if(TARGET rapidjson)
@@ -78,6 +199,7 @@ target_link_libraries(bodyclock_core PUBLIC
     CURL::libcurl
     OpenSSL::SSL
     OpenSSL::Crypto
+    bodyclock_sqlite3
 )
 
 # platform/log.cpp routes to the platform's own log sink where there is one --
@@ -187,4 +309,11 @@ option(BODYCLOCK_BUILD_CLI "Build the desktop CLI harness (cli/)" ${_bodyclock_c
 if(BODYCLOCK_BUILD_CLI)
     add_executable(bodyclock-cli cli/main.cpp)
     target_link_libraries(bodyclock-cli PRIVATE bodyclock_core)
+
+    # Rides on the same switch as the CLI, and for the same reason: both are
+    # desktop harnesses for the core, and a HAP has nowhere to put an
+    # executable. The day log's rules are the one part of the core that fails
+    # silently in the data rather than loudly at runtime, so they get a test.
+    add_executable(bodyclock-store-test tests/day_store_test.cpp)
+    target_link_libraries(bodyclock-store-test PRIVATE bodyclock_core)
 endif()
