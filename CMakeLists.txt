@@ -177,7 +177,7 @@ add_library(bodyclock_core STATIC
     src/llm/sse_parser.cpp
     src/platform/c_api.cpp
     src/platform/log.cpp
-    src/store/day_store.cpp
+    src/store/timeline.cpp
 )
 
 target_include_directories(bodyclock_core PUBLIC src)
@@ -312,8 +312,8 @@ if(BODYCLOCK_BUILD_CLI)
 
     # Rides on the same switch as the CLI, and for the same reason: both are
     # desktop harnesses for the core, and a HAP has nowhere to put an
-    # executable. The day log's rules are the one part of the core that fails
+    # executable. The timeline's rules are the one part of the core that fails
     # silently in the data rather than loudly at runtime, so they get a test.
-    add_executable(bodyclock-store-test tests/day_store_test.cpp)
-    target_link_libraries(bodyclock-store-test PRIVATE bodyclock_core)
+    add_executable(bodyclock-timeline-test tests/timeline_test.cpp)
+    target_link_libraries(bodyclock-timeline-test PRIVATE bodyclock_core)
 endif()

@@ -80,10 +80,36 @@ button at its lower right; it opens a stack of pills — Ask, Now/Today, Setting
 screen needs its own back arrow. The vault screen from earlier rounds is gone as
 a destination: data and model belong to Settings.
 
-The rules behind the day log — one open entry, switching leaves no gap, a gap is
-the absence of a row — are implemented and documented in
-[src/store/day_store.hpp](../src/store/day_store.hpp), with the schema in
+The rules behind the timeline — one open entry, switching leaves no gap, a gap
+is the absence of a row — are implemented and documented in
+[src/store/timeline.hpp](../src/store/timeline.hpp), with the schema in
 [sql/sqlite/](../sql/sqlite/).
+
+### Recent is a window; a day is a day
+
+The home screen's log is a **rolling window** — the last 24 hours — not "today".
+The two answer different questions, and the day-shaped answer is wrong for this
+one: open the app at 00:30 and "today" is one entry long, while the evening it
+belongs to has just been cut away by a boundary that has nothing to do with
+what the person was doing.
+
+Everything that **compares** stays on days: the day bar, the month calendar,
+and every line of the form "on days when you napped longer than 25 minutes".
+Two rolling windows overlap, so they cannot be compared to each other, and a
+calendar of them means nothing. The window is an addition, never a replacement.
+
+Relative buckets are deliberately not used as *labels* — no "in the last 48
+hours" heading. An entry's bucket would change as time passed, so something
+seen yesterday under one heading sits under another today, and anyone going
+back for it looks in the wrong place. Relative wording over absolute grouping
+("Today", "Yesterday", then the date) is the stable form.
+
+**Still open:** whether the day boundary should be configurable. Midnight
+splits a night owl's evening in two and splits sleep every single night; 04:00
+would leave both intact while keeping days comparable, on the calendar, and
+aligned to weekdays. It is a schema change, but a cheap one — the derived day
+columns are VIRTUAL and store nothing, so a rebuild copies only the base
+columns.
 
 **Eleven interface languages**: Chinese, English, French, Spanish, German,
 Italian, Japanese, Korean, Russian, Arabic, Hebrew. Two of them are RTL, so

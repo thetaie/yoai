@@ -1,4 +1,4 @@
-#include "store/day_store.hpp"
+#include "store/timeline.hpp"
 
 #include "platform/log.hpp"
 #include "store/migrations.hpp"   // generated from sql/sqlite/*.sql
@@ -46,20 +46,18 @@ std::time_t as_utc(std::tm tm) {
 #endif
 }
 
-std::string date_of(long long ms) {
-    std::tm tm = local_tm(static_cast<std::time_t>(ms / 1000));
-    char buf[16];
-    std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d",
-                  tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
-    return std::string(buf);
-}
-
 // Minutes east of UTC at that instant -- derived from the two renderings of the
 // same timestamp rather than from a global, so it is right across a DST edge
 // and needs no tzset bookkeeping.
 int offset_of(long long ms) {
     std::time_t t = static_cast<std::time_t>(ms / 1000);
     return static_cast<int>((as_utc(local_tm(t)) - t) / 60);
+}
+
+// The same arithmetic the generated columns do, for the one case SQL cannot
+// answer: what today is. Kept beside offset_of so the two cannot drift.
+int day_of(long long ms, int tz_minutes) {
+    return static_cast<int>((ms + static_cast<long long>(tz_minutes) * 60000) / 86400000);
 }
 
 //------------------------------------------------------------------------------
@@ -172,36 +170,70 @@ bool migrate(sqlite3* db, std::string* err) {
 }  // namespace
 
 //------------------------------------------------------------------------------
-// DayStore
+// Timeline
 //------------------------------------------------------------------------------
 
-struct DayStore::Impl {
+struct Timeline::Impl {
     sqlite3*   db;
     std::mutex mutex;   // guards the multi-statement transactions below
 
     Impl() : db(0) {}
 };
 
-DayStore::DayStore() : impl_(new Impl) {}
+Timeline::Timeline() : impl_(new Impl) {}
 
-DayStore::~DayStore() {
+Timeline::~Timeline() {
     if (impl_->db) {
         sqlite3_close(impl_->db);
     }
     delete impl_;
 }
 
-std::string DayStore::today_local_date() {
-    return date_of(now_ms());
+int Timeline::today_local_day() {
+    const long long t = now_ms();
+    return day_of(t, offset_of(t));
 }
 
-DayStore* DayStore::open(const std::string& dir, std::string* err) {
-    DayStore* self = new DayStore();
+std::string Timeline::day_to_iso(int local_day) {
+    std::time_t t = static_cast<std::time_t>(local_day) * 86400;
+    std::tm     tm;
+    std::memset(&tm, 0, sizeof(tm));
+#ifdef _WIN32
+    gmtime_s(&tm, &t);
+#else
+    gmtime_r(&t, &tm);
+#endif
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d",
+                  tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
+    return std::string(buf);
+}
+
+int Timeline::iso_to_day(const std::string& iso) {
+    int y = 0, m = 0, d = 0;
+    if (std::sscanf(iso.c_str(), "%4d-%2d-%2d", &y, &m, &d) != 3) {
+        return -1;
+    }
+    if (m < 1 || m > 12 || d < 1 || d > 31) {
+        return -1;
+    }
+    std::tm tm;
+    std::memset(&tm, 0, sizeof(tm));
+    tm.tm_year = y - 1900;
+    tm.tm_mon  = m - 1;
+    tm.tm_mday = d;
+    // Read back as UTC, so no timezone is consulted: a day number is already
+    // offset-applied and must not pick up the device's offset a second time.
+    return static_cast<int>(as_utc(tm) / 86400);
+}
+
+Timeline* Timeline::open(const std::string& dir, std::string* err) {
+    Timeline* self = new Timeline();
     std::string path = dir;
     if (!path.empty() && path[path.size() - 1] != '/' && path[path.size() - 1] != '\\') {
         path += "/";
     }
-    path += "daylog.db";
+    path += "bodyclock.db";
 
     if (sqlite3_open(path.c_str(), &self->impl_->db) != SQLITE_OK) {
         if (err) {
@@ -230,25 +262,29 @@ DayStore* DayStore::open(const std::string& dir, std::string* err) {
         return 0;
     }
 
-    platform::log_info("day log opened: %s (schema v%d)", path.c_str(), schema_version(db));
+    platform::log_info("timeline opened: %s (schema v%d)", path.c_str(), schema_version(db));
     return self;
 }
 
 namespace {
 
-// Load one entry from a row selecting the six columns in schema order.
+// Load one entry from a row selecting kEntryCols, in that order. The two stay
+// adjacent because nothing checks that they agree.
 Entry read_entry(sqlite3_stmt* s) {
     Entry e;
-    e.id         = sqlite3_column_int64(s, 0);
-    e.state_id   = col_text(s, 1);
-    e.started_at = sqlite3_column_int64(s, 2);
-    e.ended_at   = sqlite3_column_type(s, 3) == SQLITE_NULL ? 0 : sqlite3_column_int64(s, 3);
-    e.local_date = col_text(s, 4);
-    e.tz_offset  = sqlite3_column_int(s, 5);
+    e.id            = sqlite3_column_int64(s, 0);
+    e.state_id      = col_text(s, 1);
+    e.started_at    = sqlite3_column_int64(s, 2);
+    e.started_tz    = sqlite3_column_int(s, 3);
+    e.ended_at      = sqlite3_column_type(s, 4) == SQLITE_NULL ? 0 : sqlite3_column_int64(s, 4);
+    e.ended_tz      = sqlite3_column_type(s, 5) == SQLITE_NULL ? 0 : sqlite3_column_int(s, 5);
+    e.local_day     = sqlite3_column_int(s, 6);
+    e.local_day_end = sqlite3_column_type(s, 7) == SQLITE_NULL ? 0 : sqlite3_column_int(s, 7);
     return e;
 }
 
-const char* kEntryCols = "id, state_id, started_at, ended_at, local_date, tz_offset";
+const char* kEntryCols =
+    "id, state_id, started_at, started_tz, ended_at, ended_tz, local_day, local_day_end";
 
 bool load_notes(sqlite3* db, Entry* e, std::string* err) {
     Stmt s(db, "SELECT id, text, at FROM notes WHERE entry_id = ? ORDER BY at, id;");
@@ -288,7 +324,7 @@ bool current_entry(sqlite3* db, Entry* out, bool* found, std::string* err) {
 
 }  // namespace
 
-bool DayStore::switch_to(const std::string& state_id, std::string* err) {
+bool Timeline::switch_to(const std::string& state_id, std::string* err) {
     if (state_id.empty()) {
         if (err) *err = "switch_to: state_id is required";
         return false;
@@ -317,13 +353,16 @@ bool DayStore::switch_to(const std::string& state_id, std::string* err) {
     // leave a gap of however long the write took.
     const long long at = now_ms();
 
+    const int tz = offset_of(at);
+
     if (have) {
-        Stmt s(db, "UPDATE entries SET ended_at = ? WHERE ended_at IS NULL;");
+        Stmt s(db, "UPDATE entries SET ended_at = ?, ended_tz = ? WHERE ended_at IS NULL;");
         if (!s.ok()) {
             exec(db, "ROLLBACK;", 0);
             return fail(db, "prepare close", err);
         }
         s.bind(1, at);
+        s.bind(2, static_cast<long long>(tz));
         if (s.step() != SQLITE_DONE) {
             exec(db, "ROLLBACK;", 0);
             return fail(db, "close open entry", err);
@@ -331,16 +370,15 @@ bool DayStore::switch_to(const std::string& state_id, std::string* err) {
     }
     {
         Stmt s(db,
-               "INSERT INTO entries(state_id, started_at, ended_at, local_date, tz_offset)"
-               " VALUES(?, ?, NULL, ?, ?);");
+               "INSERT INTO entries(state_id, started_at, started_tz, ended_at, ended_tz)"
+               " VALUES(?, ?, ?, NULL, NULL);");
         if (!s.ok()) {
             exec(db, "ROLLBACK;", 0);
             return fail(db, "prepare open", err);
         }
         s.bind(1, state_id);
         s.bind(2, at);
-        s.bind(3, date_of(at));
-        s.bind(4, static_cast<long long>(offset_of(at)));
+        s.bind(3, static_cast<long long>(tz));
         if (s.step() != SQLITE_DONE) {
             // A foreign key failure here means the id is not a known state,
             // which is a caller mistake worth saying plainly.
@@ -355,24 +393,56 @@ bool DayStore::switch_to(const std::string& state_id, std::string* err) {
     return exec(db, "COMMIT;", err);
 }
 
-bool DayStore::end_current(std::string* err) {
+bool Timeline::end_current(std::string* err) {
+    return end_at(now_ms(), err);
+}
+
+bool Timeline::end_at(long long at, std::string* err) {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     sqlite3* db = impl_->db;
 
-    Stmt s(db, "UPDATE entries SET ended_at = ? WHERE ended_at IS NULL;");
-    if (!s.ok()) {
-        return fail(db, "prepare end", err);
-    }
-    s.bind(1, now_ms());
-    if (s.step() != SQLITE_DONE) {
-        return fail(db, "end current", err);
+    Entry cur;
+    bool  have = false;
+    if (!current_entry(db, &cur, &have, err)) {
+        return false;
     }
     // Rule 3: nothing is opened in its place. Already being idle is success --
     // the user asked for no current state and there is none.
+    if (!have) {
+        return true;
+    }
+
+    // Both bounds are checked here rather than trusted, because both failures
+    // are silent in the data. An end before the start makes a negative
+    // duration, which every consumer will render as something absurd rather
+    // than reject. An end in the future makes an entry that is still running
+    // by the clock while being closed in the table, and the elapsed time on
+    // the home screen counts backwards until the clock catches up.
+    if (at < cur.started_at) {
+        if (err) *err = "end_at: that is before the entry started";
+        return false;
+    }
+    if (at > now_ms()) {
+        if (err) *err = "end_at: that is in the future";
+        return false;
+    }
+
+    Stmt s(db, "UPDATE entries SET ended_at = ?, ended_tz = ? WHERE ended_at IS NULL;");
+    if (!s.ok()) {
+        return fail(db, "prepare end", err);
+    }
+    s.bind(1, at);
+    // The offset AT THAT INSTANT, not the one in force now. They differ across
+    // a daylight-saving switch, and correcting an entry the morning after one
+    // would otherwise file it an hour off.
+    s.bind(2, static_cast<long long>(offset_of(at)));
+    if (s.step() != SQLITE_DONE) {
+        return fail(db, "end current", err);
+    }
     return true;
 }
 
-bool DayStore::undo(std::string* err) {
+bool Timeline::undo(std::string* err) {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     sqlite3* db = impl_->db;
 
@@ -417,7 +487,10 @@ bool DayStore::undo(std::string* err) {
         return false;
     }
     {
-        Stmt s(db, "UPDATE entries SET ended_at = NULL WHERE id = ?;");
+        // Both endpoints of the end go, not just the timestamp: ended_tz is
+        // only meaningful with an ended_at, and a stale one left behind would
+        // make local_day_end lie on the next close.
+        Stmt s(db, "UPDATE entries SET ended_at = NULL, ended_tz = NULL WHERE id = ?;");
         if (!s.ok()) {
             exec(db, "ROLLBACK;", 0);
             return fail(db, "prepare undo", err);
@@ -431,7 +504,7 @@ bool DayStore::undo(std::string* err) {
     return exec(db, "COMMIT;", err);
 }
 
-bool DayStore::note_add(const std::string& text, std::string* err) {
+bool Timeline::note_add(const std::string& text, std::string* err) {
     if (text.empty()) {
         if (err) *err = "note_add: text is required";
         return false;
@@ -462,7 +535,7 @@ bool DayStore::note_add(const std::string& text, std::string* err) {
     return true;
 }
 
-bool DayStore::now(Now* out, std::string* err) {
+bool Timeline::now(Now* out, std::string* err) {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     sqlite3* db = impl_->db;
     *out = Now();
@@ -494,18 +567,78 @@ bool DayStore::now(Now* out, std::string* err) {
     return true;
 }
 
-bool DayStore::day(const std::string& local_date, std::vector<Entry>* out, std::string* err) {
+bool Timeline::recent(int hours, std::vector<Entry>* out, std::string* err) {
+    if (hours <= 0) {
+        if (err) *err = "recent: hours must be positive";
+        return false;
+    }
     std::lock_guard<std::mutex> lock(impl_->mutex);
     sqlite3* db = impl_->db;
     out->clear();
 
+    // Overlap, not containment: a stretch that began before the window and is
+    // still running is the most relevant thing on the screen, and one that
+    // began before it but ended inside it is part of what just happened. Only
+    // an entry that finished before the cutoff drops out.
+    //
+    // No timezone arithmetic anywhere here -- a window is a span of real time,
+    // and that is the same span wherever its owner happens to be standing.
+    const long long cutoff = now_ms() - static_cast<long long>(hours) * 3600000LL;
+
     std::string sql = std::string("SELECT ") + kEntryCols +
-                      " FROM entries WHERE local_date = ? ORDER BY started_at, id;";
+                      " FROM entries WHERE ended_at IS NULL OR ended_at > ?"
+                      " ORDER BY started_at DESC, id DESC;";
+    Stmt s(db, sql.c_str());
+    if (!s.ok()) {
+        return fail(db, "prepare recent", err);
+    }
+    s.bind(1, cutoff);
+    int rc;
+    while ((rc = s.step()) == SQLITE_ROW) {
+        out->push_back(read_entry(s.get()));
+    }
+    if (rc != SQLITE_DONE) {
+        return fail(db, "read recent", err);
+    }
+    for (size_t i = 0; i < out->size(); ++i) {
+        if (!load_notes(db, &(*out)[i], err)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool Timeline::day(int local_day, std::vector<Entry>* out, std::string* err) {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    sqlite3* db = impl_->db;
+    out->clear();
+
+    // An entry touches a day when the day falls anywhere between its two end
+    // days -- not when it equals one of them. Two cases make that distinction
+    // load-bearing rather than pedantic:
+    //
+    //   * A stretch nobody switched out of for a long weekend spans five days.
+    //     Matching only the endpoints loses the three in the middle, and loses
+    //     them silently: the day just looks empty.
+    //   * local_day_end can be LESS than local_day. Fly west across the date
+    //     line -- Beijing 02:00 to Honolulu, eleven hours -- and you land on the
+    //     previous calendar date, because the offset dropped eighteen hours and
+    //     the flight was shorter than that. min/max rather than a direct range
+    //     is what keeps that entry findable instead of matching nothing.
+    //
+    // An open entry has no end day at all, so it covers every day from its
+    // start onward. That is what keeps a state running since last night on
+    // today's screen.
+    std::string sql = std::string("SELECT ") + kEntryCols +
+                      " FROM entries WHERE (ended_at IS NULL AND local_day <= ?1)"
+                      " OR (?1 BETWEEN min(local_day, local_day_end)"
+                      "             AND max(local_day, local_day_end))"
+                      " ORDER BY started_at, id;";
     Stmt s(db, sql.c_str());
     if (!s.ok()) {
         return fail(db, "prepare day", err);
     }
-    s.bind(1, local_date);
+    s.bind(1, static_cast<long long>(local_day));
     int rc;
     while ((rc = s.step()) == SQLITE_ROW) {
         out->push_back(read_entry(s.get()));
