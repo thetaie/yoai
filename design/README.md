@@ -10,6 +10,7 @@ too when that arrives.
 | [logo.md](logo.md) | The segmented-ring mark, its geometry, and the wordmark |
 | [i18n-status.md](i18n-status.md) | Which of the eleven languages are written, and what is left |
 | [embedding.md](embedding.md) | Which embedding model, at what quantization, and how the vectors are stored |
+| [omni.md](omni.md) | Voice in as one pass — why a 3B hears the words and not the voice, and the two-way control that shows it |
 | [ui/](ui/) | The upstream review canvas itself — see below |
 
 Three scripts here write into the app, and are the only thing that should:
