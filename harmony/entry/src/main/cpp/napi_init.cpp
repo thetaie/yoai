@@ -1,6 +1,6 @@
-// NAPI bridge: ArkTS <-> the YoAI C ABI (src/yoai.h).
+// NAPI bridge: ArkTS <-> the Body Clock C ABI (src/bodyclock.h).
 //
-// Threading is the whole reason this file exists. yoai_chat BLOCKS until the
+// Threading is the whole reason this file exists. bodyclock_chat BLOCKS until the
 // turn completes and calls its handler once per event on the calling thread, so
 // each turn runs on a detached worker thread and every event crosses back to
 // ArkTS through one napi_threadsafe_function. Events arrive in order; the worker
@@ -15,7 +15,7 @@
 #include <napi/native_api.h>
 #include <hilog/log.h>
 
-#include "yoai.h"
+#include "bodyclock.h"
 
 #include <atomic>
 #include <cstdint>
@@ -29,7 +29,7 @@
 #undef LOG_DOMAIN
 #undef LOG_TAG
 #define LOG_DOMAIN 0x3200
-#define LOG_TAG "yoai-napi"
+#define LOG_TAG "bodyclock-napi"
 
 namespace {
 
@@ -99,7 +99,7 @@ void CallJs(napi_env env, napi_value js_callback, void* /*context*/, void* data)
     napi_call_function(env, undefined, js_callback, 2, argv, nullptr);
 }
 
-// The yoai_chat_handler context: where to forward events, and the cancel flag.
+// The bodyclock_chat_handler context: where to forward events, and the cancel flag.
 struct HandlerContext {
     napi_threadsafe_function tsfn;
     std::shared_ptr<Turn>    turn;
@@ -127,7 +127,7 @@ void ChatWorker(std::int32_t turn_id,
                 std::shared_ptr<Turn> turn) {
     HandlerContext ctx{tsfn, turn};
 
-    const int rc = yoai_chat(provider.c_str(), messages_json.c_str(),
+    const int rc = bodyclock_chat(provider.c_str(), messages_json.c_str(),
                              system_prompt.empty() ? nullptr : system_prompt.c_str(),
                              &OnChatEvent, &ctx);
     OH_LOG_INFO(LOG_APP, "chat turn %{public}d finished rc=%{public}d", turn_id, rc);
@@ -152,7 +152,7 @@ void ChatWorker(std::int32_t turn_id,
 
 // nativeVersion(): string -- build stamp, proves the .so is really loaded.
 napi_value NativeVersion(napi_env env, napi_callback_info /*info*/) {
-    return Utf8(env, ("yoai " + std::string(yoai_version())
+    return Utf8(env, ("bodyclock " + std::string(bodyclock_version())
                       + " / built " __DATE__ " " __TIME__).c_str());
 }
 
@@ -162,7 +162,7 @@ napi_value NativeSetLogLevel(napi_env env, napi_callback_info info) {
     napi_value argv[1] = {nullptr};
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
     const std::string level = ArgUtf8(env, argc, argv, 0);
-    yoai_set_log_level(level.c_str());
+    bodyclock_set_log_level(level.c_str());
     return nullptr;
 }
 
@@ -178,7 +178,7 @@ napi_value NativeProviderSet(napi_env env, napi_callback_info info) {
     const std::string model    = ArgUtf8(env, argc, argv, 3);
     const std::string extra    = ArgUtf8(env, argc, argv, 4);
 
-    return Int32(env, yoai_provider_set(id.c_str(), base_url.c_str(), api_key.c_str(),
+    return Int32(env, bodyclock_provider_set(id.c_str(), base_url.c_str(), api_key.c_str(),
                                         model.c_str(), extra.empty() ? nullptr : extra.c_str()));
 }
 
@@ -190,19 +190,19 @@ napi_value NativeProviderRemove(napi_env env, napi_callback_info info) {
 
     const std::string id = ArgUtf8(env, argc, argv, 0);
     napi_value out = nullptr;
-    napi_get_boolean(env, yoai_provider_remove(id.c_str()) != 0, &out);
+    napi_get_boolean(env, bodyclock_provider_remove(id.c_str()) != 0, &out);
     return out;
 }
 
 // nativeProviderClear(): void
 napi_value NativeProviderClear(napi_env /*env*/, napi_callback_info /*info*/) {
-    yoai_provider_clear();
+    bodyclock_provider_clear();
     return nullptr;
 }
 
 // nativeProviders(): string  (newline-separated ids; '' when none)
 napi_value NativeProviders(napi_env env, napi_callback_info /*info*/) {
-    return Utf8(env, yoai_providers());
+    return Utf8(env, bodyclock_providers());
 }
 
 //------------------------------------------------------------------------------
@@ -212,7 +212,7 @@ napi_value NativeProviders(napi_env env, napi_callback_info /*info*/) {
 // nativeLocalAvailable(): boolean -- was this .so built with llama.cpp?
 napi_value NativeLocalAvailable(napi_env env, napi_callback_info /*info*/) {
     napi_value out = nullptr;
-    napi_get_boolean(env, yoai_local_available() != 0, &out);
+    napi_get_boolean(env, bodyclock_local_available() != 0, &out);
     return out;
 }
 
@@ -226,17 +226,17 @@ napi_value NativeLocalSet(napi_env env, napi_callback_info info) {
     const std::string path    = ArgUtf8(env, argc, argv, 1);
     const std::string options = ArgUtf8(env, argc, argv, 2);
 
-    return Int32(env, yoai_local_set(id.c_str(), path.c_str(),
+    return Int32(env, bodyclock_local_set(id.c_str(), path.c_str(),
                                      options.empty() ? nullptr : options.c_str()));
 }
 
 // The worker for nativeLocalLoad: read the weights, then report once and let go.
 //
-// A separate thread for the same reason a turn gets one -- yoai_local_load blocks
+// A separate thread for the same reason a turn gets one -- bodyclock_local_load blocks
 // for seconds reading gigabytes, and doing that on the ArkTS thread freezes the
 // UI at exactly the moment the user is being told the model is getting ready.
 void LoadWorker(std::string id, napi_threadsafe_function tsfn) {
-    const int rc = yoai_local_load(id.c_str());
+    const int rc = bodyclock_local_load(id.c_str());
     OH_LOG_INFO(LOG_APP, "local load %{public}s rc=%{public}d", id.c_str(), rc);
 
     // Reuses the chat callback's (type, content) shape rather than inventing a
@@ -265,7 +265,7 @@ napi_value NativeLocalLoad(napi_env env, napi_callback_info info) {
     std::string id = ToUtf8(env, argv[0]);
 
     napi_value work_name = nullptr;
-    napi_create_string_utf8(env, "yoai_local_load", NAPI_AUTO_LENGTH, &work_name);
+    napi_create_string_utf8(env, "bodyclock_local_load", NAPI_AUTO_LENGTH, &work_name);
 
     napi_threadsafe_function tsfn = nullptr;
     if (napi_create_threadsafe_function(env, argv[1], nullptr, work_name,
@@ -296,7 +296,7 @@ napi_value NativeChat(napi_env env, napi_callback_info info) {
     std::string system   = ToUtf8(env, argv[2]);
 
     napi_value work_name = nullptr;
-    napi_create_string_utf8(env, "yoai_chat", NAPI_AUTO_LENGTH, &work_name);
+    napi_create_string_utf8(env, "bodyclock_chat", NAPI_AUTO_LENGTH, &work_name);
 
     napi_threadsafe_function tsfn = nullptr;
     if (napi_create_threadsafe_function(env, argv[3], nullptr, work_name,
@@ -364,16 +364,16 @@ napi_value Init(napi_env env, napi_value exports) {
 }
 EXTERN_C_END
 
-static napi_module g_yoai_module = {
+static napi_module g_bodyclock_module = {
     .nm_version = 1,
     .nm_flags = 0,
     .nm_filename = nullptr,
     .nm_register_func = Init,
-    .nm_modname = "yoai",   // must match the library name: libyoai.so
+    .nm_modname = "bodyclock",   // must match the library name: libbodyclock.so
     .nm_priv = nullptr,
     .reserved = {0},
 };
 
-extern "C" __attribute__((constructor)) void RegisterYoaiModule(void) {
-    napi_module_register(&g_yoai_module);
+extern "C" __attribute__((constructor)) void RegisterBodyClockModule(void) {
+    napi_module_register(&g_bodyclock_module);
 }

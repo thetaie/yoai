@@ -1,6 +1,6 @@
 #include "llm/event.hpp"
 
-namespace yoai { namespace llm {
+namespace bodyclock { namespace llm {
 
 const char* to_string(EventType t) {
     switch (t) {

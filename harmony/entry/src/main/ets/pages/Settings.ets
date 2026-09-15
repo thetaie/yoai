@@ -16,7 +16,7 @@
  */
 import { common } from '@kit.AbilityKit';
 import { router } from '@kit.ArkUI';
-import yoai from 'libyoai.so';
+import bodyclock from 'libbodyclock.so';
 import { ModelConfig, modelLabel } from '../model/Provider';
 import { ICON_ROW, ICON_TOOLBAR, icon } from '../core/Icons';
 import { ModelStore } from '../core/ModelStore';
@@ -181,7 +181,7 @@ struct Settings {
 
           this.sectionTitle($r('app.string.settings_core'))
           Column({ space: 12 }) {
-            Text(yoai.nativeVersion())
+            Text(bodyclock.nativeVersion())
               .fontSize(12)
               .fontColor(this.theme.text_tertiary)
               .width('100%')

@@ -1,5 +1,5 @@
 @echo off
-rem Desktop build: yoai_core plus the CLI harness, into build\.
+rem Desktop build: bodyclock_core plus the CLI harness, into build\.
 rem
 rem The point of a desktop build is that the core can be exercised without a
 rem device -- see cli\main.cpp. It is not a shipping target.

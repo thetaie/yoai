@@ -1,4 +1,4 @@
-// Public C ABI for embedding the YoAI core into a host application.
+// Public C ABI for embedding the Body Clock core into a host application.
 //
 // The core is a library, not a server: there is no port to bind, no account,
 // and no configuration file. A host app (the HarmonyOS entry module today, an
@@ -10,7 +10,7 @@
 // embed the core -- ArkTS through a NAPI module, Kotlin through JNI, Swift
 // through the bridging header, and so on -- without holding a C++ object.
 //
-// Threading: nothing here starts a thread of its own. yoai_chat BLOCKS for the
+// Threading: nothing here starts a thread of its own. bodyclock_chat BLOCKS for the
 // length of the turn, so call it off whatever thread draws. The provider
 // registry is guarded internally and safe to edit from another thread while a
 // turn is in flight; a turn reads a snapshot taken when it started, so an edit
@@ -27,12 +27,12 @@ extern "C" {
 //------------------------------------------------------------------------------
 
 // The core's version string ("0.1.0"), so a host can log what it linked.
-const char* yoai_version(void);
+const char* bodyclock_version(void);
 
 // Process-wide minimum log level, one of "debug", "info", "warn", "error"
 // (case-insensitive). An unrecognized value leaves the level unchanged.
 // Default is "info", so debug output is silent until this is called.
-void yoai_set_log_level(const char* level);
+void bodyclock_set_log_level(const char* level);
 
 //------------------------------------------------------------------------------
 // Provider registry
@@ -49,7 +49,7 @@ void yoai_set_log_level(const char* level);
 //
 //   id          the host's stable token for this entry, e.g.
 //               "zhipu/glm-4.7-flash". Opaque to the core: whatever you pass
-//               here is what yoai_chat takes back and what yoai_providers
+//               here is what bodyclock_chat takes back and what bodyclock_providers
 //               lists. Required.
 //   base_url    OpenAI-compatible API root WITHOUT the /chat/completions
 //               suffix, e.g. "https://open.bigmodel.cn/api/paas/v4". Required.
@@ -63,18 +63,18 @@ void yoai_set_log_level(const char* level);
 //               for none. A value that is not a parseable object is logged and
 //               ignored, never fatal -- one provider's quirk must not be able
 //               to break a turn.
-int yoai_provider_set(const char* id,
+int bodyclock_provider_set(const char* id,
                       const char* base_url,
                       const char* api_key,
                       const char* model,
                       const char* extra_json);
 
 // Forget one entry. Returns 1 if it was there, 0 if not.
-int yoai_provider_remove(const char* id);
+int bodyclock_provider_remove(const char* id);
 
 // Forget every entry -- what a host calls when the user signs out or clears
 // their keys.
-void yoai_provider_clear(void);
+void bodyclock_provider_clear(void);
 
 // The registered ids, NUL-terminated and newline-separated, or an empty string
 // when none are registered. This is the menu a host offers the user: an id is
@@ -82,16 +82,16 @@ void yoai_provider_clear(void);
 // on-device entries are listed together -- see the next section.
 //
 // The buffer is owned by the core and stays valid until this thread's next
-// yoai_providers() call -- copy it if you need to keep it. Never NULL.
-const char* yoai_providers(void);
+// bodyclock_providers() call -- copy it if you need to keep it. Never NULL.
+const char* bodyclock_providers(void);
 
 //------------------------------------------------------------------------------
 // On-device models (llama.cpp + GGUF)
 //------------------------------------------------------------------------------
 //
 // A second kind of entry in the SAME registry as the remote providers above. An
-// on-device id is registered here, then listed by yoai_providers, run by
-// yoai_chat and forgotten by yoai_provider_remove exactly like a remote one --
+// on-device id is registered here, then listed by bodyclock_providers, run by
+// bodyclock_chat and forgotten by bodyclock_provider_remove exactly like a remote one --
 // the host picks a model, not a lane. Which one an id is stays the core's
 // business, so a host that never adds a local model is unaffected by all of
 // this.
@@ -104,21 +104,21 @@ const char* yoai_providers(void);
 
 // Whether this build has the engine compiled in: 1 if yes, 0 if it was built
 // without llama.cpp. When 0, everything below still exists and answers
-// truthfully -- yoai_local_set succeeds and the entry appears in the menu, but a
+// truthfully -- bodyclock_local_set succeeds and the entry appears in the menu, but a
 // turn against it reports the absence as an "error" event. A host should call
 // this before offering an "add an on-device model" affordance at all.
-int yoai_local_available(void);
+int bodyclock_local_available(void);
 
 // Register one on-device model, replacing any entry already under `id`. Returns
 // 0 on success, non-zero when a required argument is missing.
 //
 //   id            the host's stable token for this entry, as with
-//                 yoai_provider_set. Shares one namespace with the remote
+//                 bodyclock_provider_set. Shares one namespace with the remote
 //                 entries, so registering a local model under an id already
 //                 held by a remote one replaces it. Required.
 //   model_path    absolute path to a .gguf the process can open. Required. NOT
 //                 validated here -- the file is opened on the first turn (or by
-//                 yoai_local_load), so a path that has gone stale reports itself
+//                 bodyclock_local_load), so a path that has gone stale reports itself
 //                 as an "error" event rather than at registration time.
 //   options_json  optional JSON OBJECT of engine knobs; NULL or empty for the
 //                 defaults, which are tuned for a phone. Unknown members are
@@ -149,7 +149,7 @@ int yoai_local_available(void);
 //                   "topK"           int   default 20
 //                   "repeatPenalty"  float default 1.1; 1.0 disables
 //                   "repeatLastN"    int   default 256
-int yoai_local_set(const char* id,
+int bodyclock_local_set(const char* id,
                    const char* model_path,
                    const char* options_json);
 
@@ -160,14 +160,14 @@ int yoai_local_set(const char* id,
 // Returns 0 when the model is resident, non-zero for an unknown id, an id that
 // is a remote provider, a build without the engine, or a file that will not
 // load. Idempotent: a second call on a loaded model returns 0 immediately.
-int yoai_local_load(const char* id);
+int bodyclock_local_load(const char* id);
 
 //------------------------------------------------------------------------------
 // Chat
 //------------------------------------------------------------------------------
 
-// Streaming callback for yoai_chat, invoked once per event as the turn streams,
-// on the thread that called yoai_chat.
+// Streaming callback for bodyclock_chat, invoked once per event as the turn streams,
+// on the thread that called bodyclock_chat.
 //
 //   event_type  a stable lowercase tag for the chunk. Never NULL:
 //                 "reply"      answer text
@@ -187,20 +187,20 @@ int yoai_local_load(const char* id);
 //               tools yet, so today they never fire.
 //   content     UTF-8 payload, NUL-terminated. Never NULL, may be empty. Valid
 //               only for the duration of the call -- copy it to keep it.
-//   user_data   the opaque pointer passed to yoai_chat, forwarded verbatim.
+//   user_data   the opaque pointer passed to bodyclock_chat, forwarded verbatim.
 //
 // Return non-zero to keep streaming, 0 to abort the turn now. Returning 0 is
 // how a host cancels: it tears down the HTTP transfer at the next chunk -- or,
 // on an on-device turn, stops the decode loop at the next token -- so no
 // separate cancel entry point is needed (and none exists).
-typedef int (*yoai_chat_handler)(const char* event_type,
+typedef int (*bodyclock_chat_handler)(const char* event_type,
                                  const char* content,
                                  void* user_data);
 
 // Run one chat turn against a registered provider, streaming it through
 // `on_event`. BLOCKS until the turn ends or the handler aborts it.
 //
-//   provider_id     an id from yoai_providers, verbatim. Required; unknown =>
+//   provider_id     an id from bodyclock_providers, verbatim. Required; unknown =>
 //                   error return.
 //   messages_json   '[{"role":"user"|"assistant"|"system","content":"..."},...]'
 //                   in conversation order, ending with the current user turn.
@@ -219,10 +219,10 @@ typedef int (*yoai_chat_handler)(const char* event_type,
 // (401, rate limit, a model that does not exist) is NOT distinguished by the
 // return code -- it arrives as an "error" event first, because that is the text
 // worth showing the user.
-int yoai_chat(const char* provider_id,
+int bodyclock_chat(const char* provider_id,
               const char* messages_json,
               const char* system_prompt,
-              yoai_chat_handler on_event,
+              bodyclock_chat_handler on_event,
               void* user_data);
 
 #ifdef __cplusplus

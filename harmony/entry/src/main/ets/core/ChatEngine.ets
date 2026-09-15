@@ -7,7 +7,7 @@
  * vocabulary -- so adding an event type later touches one file, not the page.
  */
 import hilog from '@ohos.hilog';
-import yoai from 'libyoai.so';
+import bodyclock from 'libbodyclock.so';
 import { Canceler, ChatMessage, StreamCallbacks } from '../model/Chat';
 
 /** What actually crosses the ABI: no parts, no timestamps, no transient rows. */
@@ -59,7 +59,7 @@ export class ChatEngine {
 
     let turnId: number = 0;
     try {
-      turnId = yoai.nativeChat(providerId, JSON.stringify(wire), systemPrompt,
+      turnId = bodyclock.nativeChat(providerId, JSON.stringify(wire), systemPrompt,
         (type: string, content: string) => {
           if (type === 'reply') {
             cb.onDelta(content);
@@ -78,7 +78,7 @@ export class ChatEngine {
           } else {
             // Reserved tool events. Logged rather than shown: an unhandled
             // event is a gap in this file, and the user cannot act on it.
-            hilog.info(0x0000, 'yoai', 'unhandled chat event %{public}s', type);
+            hilog.info(0x0000, 'bodyclock', 'unhandled chat event %{public}s', type);
           }
         });
     } catch (err) {
@@ -90,7 +90,7 @@ export class ChatEngine {
 
     canceler.cancel = () => {
       canceler.stopped = true;
-      yoai.nativeChatCancel(turnId);
+      bodyclock.nativeChatCancel(turnId);
     };
     return canceler;
   }

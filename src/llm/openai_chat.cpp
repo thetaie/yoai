@@ -16,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-namespace yoai { namespace llm {
+namespace bodyclock { namespace llm {
 
 namespace {
 
@@ -174,7 +174,7 @@ void handle_data_event(StreamContext& ctx, const char* payload) {
     rapidjson::Document doc;
     doc.Parse(payload);
     if (doc.HasParseError() || !doc.IsObject()) {
-        yoai::platform::log_warn("openai-chat: bad SSE JSON: %.200s", payload);
+        bodyclock::platform::log_warn("openai-chat: bad SSE JSON: %.200s", payload);
         return;
     }
 
@@ -355,7 +355,7 @@ std::string build_request_body(const OpenAIChatOptions& opt,
     if (!opt.extra_body_json.empty()) {
         rapidjson::Document extra;
         if (extra.Parse(opt.extra_body_json.c_str()).HasParseError() || !extra.IsObject()) {
-            yoai::platform::log_warn(
+            bodyclock::platform::log_warn(
                 "openai-chat: ignoring extra_body_json, not a JSON object: %.120s",
                 opt.extra_body_json.c_str());
         } else {
@@ -448,7 +448,7 @@ RequestOutcome run_request(const OpenAIChatOptions& opt,
     hdrs = curl_slist_append(hdrs, "Accept: text/event-stream");
     hdrs = curl_slist_append(hdrs, auth.c_str());
 
-    yoai::client::configure_tls_trust(curl);
+    bodyclock::client::configure_tls_trust(curl);
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(body.size()));

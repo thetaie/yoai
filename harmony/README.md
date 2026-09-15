@@ -1,7 +1,7 @@
-# YoAI for HarmonyOS
+# Body Clock for HarmonyOS
 
 The HarmonyOS app: an ArkTS UI over the embedded C++ core, reached through a
-NAPI module (`libyoai.so`).
+NAPI module (`libbodyclock.so`).
 
 There is no server in this picture at all. The app talks to whichever
 OpenAI-compatible endpoint the user configured, with the user's own key, and
@@ -12,9 +12,9 @@ to anything at all.
 
 ```
 entry/src/main/
-  cpp/                    the NAPI bridge; links yoai_core from the repo root
+  cpp/                    the NAPI bridge; links bodyclock_core from the repo root
     napi_init.cpp           one worker thread per turn, one tsfn back to ArkTS
-    types/libyoai/          the .d.ts ArkTS imports
+    types/libbodyclock/          the .d.ts ArkTS imports
   ets/
     core/ChatEngine.ets       ChatMessage[] -> the native ABI and back
     core/ModelStore.ets       configured models (preferences) + registry refill
@@ -68,7 +68,7 @@ days — and it is also how you build the app *without* the on-device engine.
 The bare command includes `llama` because on-device chat is part of the app, not
 an opt-in lane. It is the expensive part of a first run, though: it needs a
 llama.cpp checkout you clone yourself (~200 MB) and a few minutes of
-cross-compile, and it adds about 4.3 MiB to `libyoai.so`.
+cross-compile, and it adds about 4.3 MiB to `libbodyclock.so`.
 
 No ABI is named above because there is only one that matters: HarmonyOS NEXT is
 64-bit ARM throughout, so `arm64-v8a` is both the script's default and the only
@@ -126,7 +126,7 @@ build.cmd llama       # Windows
 
 That cross-compiles llama.cpp and assembles `prebuilt/llama-sdk/<abi>/`
 (`include/` + static `lib/`), which `entry/src/main/cpp/CMakeLists.txt` finds by
-itself. **Its presence IS the switch**: build it and `libyoai.so` links the
+itself. **Its presence IS the switch**: build it and `libbodyclock.so` links the
 engine, delete it and the core compiles its stub and the app still builds, with
 on-device chat reporting itself unavailable. That off state is still supported —
 `build.cmd deps hap` is how you ask for it — it just is not what a bare
@@ -178,7 +178,7 @@ git update-index --no-skip-worktree harmony/build-profile.json5
 
 ## Logging
 
-Core logs go to hilog under the tag `yoai`, so they show up in DevEco's Log
+Core logs go to hilog under the tag `bodyclock`, so they show up in DevEco's Log
 window beside the ArkTS ones. `nativeSetLogLevel('debug')` turns on the verbose
 ones. On desktop the same core logs to stderr instead — see
 `src/platform/log.cpp`.

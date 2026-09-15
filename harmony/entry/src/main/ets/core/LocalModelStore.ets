@@ -27,7 +27,7 @@ import fileUri from '@ohos.file.fileuri';
 import fileShare from '@ohos.fileshare';
 import fs from '@ohos.file.fs';
 import hilog from '@ohos.hilog';
-import yoai from 'libyoai.so';
+import bodyclock from 'libbodyclock.so';
 import { ModelConfig, KIND_LOCAL, LOCAL_VENDOR_ID, modelId } from '../model/Provider';
 
 /** What importModel() produced, or nothing when the user cancelled. */
@@ -37,7 +37,7 @@ export interface PickedModel {
 }
 
 function log(msg: string): void {
-  hilog.info(0x0000, 'yoai', '%{public}s', msg);
+  hilog.info(0x0000, 'bodyclock', '%{public}s', msg);
 }
 
 export class LocalModelStore {
@@ -50,7 +50,7 @@ export class LocalModelStore {
 
   static available(): boolean {
     if (LocalModelStore.availability === null) {
-      LocalModelStore.availability = yoai.nativeLocalAvailable();
+      LocalModelStore.availability = bodyclock.nativeLocalAvailable();
     }
     return LocalModelStore.availability;
   }

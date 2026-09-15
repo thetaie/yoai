@@ -14,7 +14,7 @@
 import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
 import hilog from '@ohos.hilog';
-import yoai from 'libyoai.so';
+import bodyclock from 'libbodyclock.so';
 import { ModelConfig, isLocal, modelId } from '../model/Provider';
 import { LocalModelStore } from './LocalModelStore';
 import { SecureKeyStore } from './SecureKeyStore';
@@ -42,7 +42,7 @@ export class ModelStore {
     } catch (err) {
       // Corrupt JSON is not worth crashing over, but it IS worth saying out
       // loud: silently returning [] would look identical to a fresh install.
-      hilog.error(0x0000, 'yoai', 'model list unreadable, starting empty');
+      hilog.error(0x0000, 'bodyclock', 'model list unreadable, starting empty');
       return [];
     }
   }
@@ -86,7 +86,7 @@ export class ModelStore {
       }
     }
     await ModelStore.write(ctx, next);
-    yoai.nativeProviderRemove(id);
+    bodyclock.nativeProviderRemove(id);
 
     // The selection may have just pointed at it.
     const active: string = await ModelStore.activeId(ctx);
@@ -127,7 +127,7 @@ export class ModelStore {
    * key from the secure store; for an on-device one, handing over the file path.
    *
    * Returns false when the model cannot run -- no key for its vendor, or no path.
-   * The core is then left WITHOUT the entry, deliberately: yoai_providers() is
+   * The core is then left WITHOUT the entry, deliberately: bodyclock_providers() is
    * the picker's source of truth, so an entry that cannot run must not appear
    * in it.
    */
@@ -138,11 +138,11 @@ export class ModelStore {
         return false;
       }
       // '' for the options: the core's defaults are already tuned for a phone,
-      // and the app has no settings screen for them. See src/yoai.h if that
+      // and the app has no settings screen for them. See src/bodyclock.h if that
       // changes.
-      const rc: number = yoai.nativeLocalSet(cfg.id, path, '');
+      const rc: number = bodyclock.nativeLocalSet(cfg.id, path, '');
       if (rc !== 0) {
-        hilog.error(0x0000, 'yoai', 'nativeLocalSet(%{public}s) failed rc=%{public}d', cfg.id, rc);
+        hilog.error(0x0000, 'bodyclock', 'nativeLocalSet(%{public}s) failed rc=%{public}d', cfg.id, rc);
         return false;
       }
       return true;
@@ -152,9 +152,9 @@ export class ModelStore {
     if (key.length === 0) {
       return false;
     }
-    const rc: number = yoai.nativeProviderSet(cfg.id, cfg.baseUrl, key, cfg.model, '');
+    const rc: number = bodyclock.nativeProviderSet(cfg.id, cfg.baseUrl, key, cfg.model, '');
     if (rc !== 0) {
-      hilog.error(0x0000, 'yoai', 'nativeProviderSet(%{public}s) failed rc=%{public}d', cfg.id, rc);
+      hilog.error(0x0000, 'bodyclock', 'nativeProviderSet(%{public}s) failed rc=%{public}d', cfg.id, rc);
       return false;
     }
     return true;
@@ -171,7 +171,7 @@ export class ModelStore {
    * that owns that list, so an entry cannot vanish from two directions at once.
    */
   static async syncToCore(ctx: common.UIAbilityContext): Promise<number> {
-    yoai.nativeProviderClear();
+    bodyclock.nativeProviderClear();
 
     let list: ModelConfig[] = await ModelStore.list(ctx);
 
@@ -190,7 +190,7 @@ export class ModelStore {
             kept.push(m);
           }
         }
-        hilog.warn(0x0000, 'yoai', 'dropping %{public}d unreachable on-device model(s)',
+        hilog.warn(0x0000, 'bodyclock', 'dropping %{public}d unreachable on-device model(s)',
                    gone.length);
         await ModelStore.write(ctx, kept);
         list = kept;
@@ -203,7 +203,7 @@ export class ModelStore {
         ready++;
       }
     }
-    hilog.info(0x0000, 'yoai', 'registered %{public}d of %{public}d models', ready, list.length);
+    hilog.info(0x0000, 'bodyclock', 'registered %{public}d of %{public}d models', ready, list.length);
     return ready;
   }
 

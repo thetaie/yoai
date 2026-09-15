@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.19)
-project(yoai CXX)
+project(bodyclock CXX)
 
-# The YoAI core: a static library plus a C ABI (src/yoai.h), built to be linked
+# The Body Clock core: a static library plus a C ABI (src/bodyclock.h), built to be linked
 # INTO a host app -- the HarmonyOS native module today, an Android one next --
 # rather than run as a process. There is no server here and no port to bind: the
 # host owns storage and settings and reaches the core through the C ABI.
@@ -46,13 +46,13 @@ if(NOT RapidJSON_FOUND)
 endif()
 
 #-------------------------------------------------------------------------------
-# yoai_core
+# bodyclock_core
 #-------------------------------------------------------------------------------
 
-add_library(yoai_core STATIC
+add_library(bodyclock_core STATIC
     src/client/http_client.cpp
     src/llm/event.cpp
-    # Compiles to a stub unless YOAI_ONDEVICE_LLM is on (see below), so the
+    # Compiles to a stub unless BODYCLOCK_ONDEVICE_LLM is on (see below), so the
     # default build needs no llama.cpp and still exposes the on-device entry
     # points -- they just answer "not built in".
     src/llm/local.cpp
@@ -62,19 +62,19 @@ add_library(yoai_core STATIC
     src/platform/log.cpp
 )
 
-target_include_directories(yoai_core PUBLIC src)
+target_include_directories(bodyclock_core PUBLIC src)
 
 if(RapidJSON_FOUND)
     if(TARGET rapidjson)
-        target_link_libraries(yoai_core PUBLIC rapidjson)
+        target_link_libraries(bodyclock_core PUBLIC rapidjson)
     else()
-        target_include_directories(yoai_core PUBLIC ${RAPIDJSON_INCLUDE_DIRS})
+        target_include_directories(bodyclock_core PUBLIC ${RAPIDJSON_INCLUDE_DIRS})
     endif()
 else()
-    target_include_directories(yoai_core PUBLIC ${RAPIDJSON_INCLUDE_DIR})
+    target_include_directories(bodyclock_core PUBLIC ${RAPIDJSON_INCLUDE_DIR})
 endif()
 
-target_link_libraries(yoai_core PUBLIC
+target_link_libraries(bodyclock_core PUBLIC
     CURL::libcurl
     OpenSSL::SSL
     OpenSSL::Crypto
@@ -83,9 +83,9 @@ target_link_libraries(yoai_core PUBLIC
 # platform/log.cpp routes to the platform's own log sink where there is one --
 # stderr reaches nobody on a phone.
 if(CMAKE_SYSTEM_NAME STREQUAL "Android")
-    target_link_libraries(yoai_core PUBLIC log)
+    target_link_libraries(bodyclock_core PUBLIC log)
 elseif(OHOS OR CMAKE_SYSTEM_NAME STREQUAL "OHOS")
-    target_link_libraries(yoai_core PUBLIC libhilog_ndk.z.so)
+    target_link_libraries(bodyclock_core PUBLIC libhilog_ndk.z.so)
 endif()
 
 #-------------------------------------------------------------------------------
@@ -104,12 +104,12 @@ endif()
 # On HarmonyOS nobody sets either variable by hand: `harmony/build.cmd <abi>
 # llama` (or .sh) assembles the SDK at harmony/prebuilt/llama-sdk/<abi> and the
 # app's CMakeLists finds it there. Building the SDK IS turning the lane on.
-option(YOAI_ONDEVICE_LLM "Build the on-device LLM engine (llama.cpp + GGUF)" OFF)
+option(BODYCLOCK_ONDEVICE_LLM "Build the on-device LLM engine (llama.cpp + GGUF)" OFF)
 
-if(YOAI_ONDEVICE_LLM)
+if(BODYCLOCK_ONDEVICE_LLM)
     if(NOT DEFINED LLAMA_CPP_DIR)
         message(FATAL_ERROR
-            "YOAI_ONDEVICE_LLM=ON requires -DLLAMA_CPP_DIR=<llama.cpp SDK dir (include/, lib/)>")
+            "BODYCLOCK_ONDEVICE_LLM=ON requires -DLLAMA_CPP_DIR=<llama.cpp SDK dir (include/, lib/)>")
     endif()
 
     # find_library caches, so without clearing it a changed LLAMA_CPP_DIR
@@ -156,19 +156,19 @@ if(YOAI_ONDEVICE_LLM)
     unset(_llama_h)
     unset(_llama_h_flat)
 
-    target_compile_definitions(yoai_core PUBLIC YOAI_ONDEVICE_LLM)
-    target_include_directories(yoai_core PRIVATE "${LLAMA_CPP_DIR}/include")
+    target_compile_definitions(bodyclock_core PUBLIC BODYCLOCK_ONDEVICE_LLM)
+    target_include_directories(bodyclock_core PRIVATE "${LLAMA_CPP_DIR}/include")
 
     # llama first: with static archives the linker resolves left to right, and
     # llama references ggml, not the other way round.
-    target_link_libraries(yoai_core PUBLIC "${LLAMA_LIB}")
+    target_link_libraries(bodyclock_core PUBLIC "${LLAMA_LIB}")
     foreach(_lib GGML_LIB GGML_CPU_LIB GGML_BASE_LIB)
         if(${_lib})
-            target_link_libraries(yoai_core PUBLIC "${${_lib}}")
+            target_link_libraries(bodyclock_core PUBLIC "${${_lib}}")
         endif()
     endforeach()
 
-    message(STATUS "yoai_core: on-device LLM ON -> ${LLAMA_LIB}")
+    message(STATUS "bodyclock_core: on-device LLM ON -> ${LLAMA_LIB}")
 endif()
 
 #-------------------------------------------------------------------------------
@@ -178,13 +178,13 @@ endif()
 # Off when cross-compiling: a HAP has nowhere to put a companion executable, and
 # the device refuses to exec a standalone binary anyway.
 if(CMAKE_CROSSCOMPILING)
-    set(_yoai_cli_default OFF)
+    set(_bodyclock_cli_default OFF)
 else()
-    set(_yoai_cli_default ON)
+    set(_bodyclock_cli_default ON)
 endif()
-option(YOAI_BUILD_CLI "Build the desktop CLI harness (cli/)" ${_yoai_cli_default})
+option(BODYCLOCK_BUILD_CLI "Build the desktop CLI harness (cli/)" ${_bodyclock_cli_default})
 
-if(YOAI_BUILD_CLI)
-    add_executable(yoai-cli cli/main.cpp)
-    target_link_libraries(yoai-cli PRIVATE yoai_core)
+if(BODYCLOCK_BUILD_CLI)
+    add_executable(bodyclock-cli cli/main.cpp)
+    target_link_libraries(bodyclock-cli PRIVATE bodyclock_core)
 endif()

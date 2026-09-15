@@ -1,4 +1,4 @@
-// yoai-cli -- a desktop harness for the core's C ABI.
+// bodyclock-cli -- a desktop harness for the core's C ABI.
 //
 // Not a product: it exists so the library can be exercised on a workstation,
 // against a real provider, without a phone in the loop. It talks to the core
@@ -6,16 +6,16 @@
 // transcript, stream the events back -- so a turn that works here has proven the
 // same path the HarmonyOS module uses.
 //
-//   yoai-cli --base-url URL --key KEY --model NAME ["one question"]
+//   bodyclock-cli --base-url URL --key KEY --model NAME ["one question"]
 //
-// Each flag falls back to an environment variable (YOAI_BASE_URL, YOAI_API_KEY,
-// YOAI_MODEL), which is the sane way to pass a key: a flag lands in the shell
+// Each flag falls back to an environment variable (BODYCLOCK_BASE_URL, BODYCLOCK_API_KEY,
+// BODYCLOCK_MODEL), which is the sane way to pass a key: a flag lands in the shell
 // history and in `ps`.
 //
 // With a question argument it runs that one turn and exits. Without one it goes
 // interactive and keeps the transcript, so multi-turn context is exercised too.
 
-#include "yoai.h"
+#include "bodyclock.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -44,12 +44,12 @@ std::string from_env(const char* name) {
 
 void usage() {
     std::cerr <<
-        "usage: yoai-cli [options] [\"question\"]\n"
+        "usage: bodyclock-cli [options] [\"question\"]\n"
         "\n"
         "  --base-url URL   OpenAI-compatible API root, no /chat/completions\n"
-        "                   (env YOAI_BASE_URL)\n"
-        "  --key KEY        bearer token (env YOAI_API_KEY)\n"
-        "  --model NAME     model to send in the request (env YOAI_MODEL)\n"
+        "                   (env BODYCLOCK_BASE_URL)\n"
+        "  --key KEY        bearer token (env BODYCLOCK_API_KEY)\n"
+        "  --model NAME     model to send in the request (env BODYCLOCK_MODEL)\n"
         "  --system TEXT    system prompt\n"
         "  --no-thinking    drop reasoning output instead of dimming it\n"
         "  --usage          print the token/cost summary after each turn\n"
@@ -60,9 +60,9 @@ void usage() {
 
 // Returns false when the arguments are unusable, having already explained why.
 bool parse_args(int argc, char** argv, Options* opt) {
-    opt->base_url = from_env("YOAI_BASE_URL");
-    opt->api_key  = from_env("YOAI_API_KEY");
-    opt->model    = from_env("YOAI_MODEL");
+    opt->base_url = from_env("BODYCLOCK_BASE_URL");
+    opt->api_key  = from_env("BODYCLOCK_API_KEY");
+    opt->model    = from_env("BODYCLOCK_MODEL");
 
     bool debug = false;
     for (int i = 1; i < argc; ++i) {
@@ -71,7 +71,7 @@ bool parse_args(int argc, char** argv, Options* opt) {
         // out of bounds.
         auto next = [&](const char* what) -> const char* {
             if (i + 1 >= argc) {
-                std::cerr << "yoai-cli: " << what << " needs a value\n";
+                std::cerr << "bodyclock-cli: " << what << " needs a value\n";
                 return nullptr;
             }
             return argv[++i];
@@ -99,18 +99,18 @@ bool parse_args(int argc, char** argv, Options* opt) {
             usage();
             return false;
         } else if (!a.empty() && a[0] == '-') {
-            std::cerr << "yoai-cli: unknown option " << a << "\n";
+            std::cerr << "bodyclock-cli: unknown option " << a << "\n";
             return false;
         } else {
             opt->question = a;
         }
     }
 
-    yoai_set_log_level(debug ? "debug" : "warn");
+    bodyclock_set_log_level(debug ? "debug" : "warn");
 
     if (opt->base_url.empty() || opt->api_key.empty() || opt->model.empty()) {
-        std::cerr << "yoai-cli: --base-url, --key and --model are all required "
-                     "(or their YOAI_* environment variables)\n\n";
+        std::cerr << "bodyclock-cli: --base-url, --key and --model are all required "
+                     "(or their BODYCLOCK_* environment variables)\n\n";
         usage();
         return false;
     }
@@ -205,7 +205,7 @@ bool run_turn(const Options& opt, std::vector<Message>* history) {
     st.show_usage    = opt.show_usage;
 
     const std::string json = to_messages_json(*history);
-    const int rc = yoai_chat(kProviderId, json.c_str(),
+    const int rc = bodyclock_chat(kProviderId, json.c_str(),
                              opt.system_prompt.empty() ? nullptr : opt.system_prompt.c_str(),
                              on_event, &st);
     std::cout << "\n";
@@ -227,9 +227,9 @@ int main(int argc, char** argv) {
     Options opt;
     if (!parse_args(argc, argv, &opt)) return 2;
 
-    if (yoai_provider_set(kProviderId, opt.base_url.c_str(), opt.api_key.c_str(),
+    if (bodyclock_provider_set(kProviderId, opt.base_url.c_str(), opt.api_key.c_str(),
                           opt.model.c_str(), nullptr) != 0) {
-        std::cerr << "yoai-cli: could not register the provider\n";
+        std::cerr << "bodyclock-cli: could not register the provider\n";
         return 1;
     }
 
@@ -243,7 +243,7 @@ int main(int argc, char** argv) {
         return run_turn(opt, &history) ? 0 : 1;
     }
 
-    std::cerr << "yoai " << yoai_version() << " -- " << opt.model
+    std::cerr << "bodyclock " << bodyclock_version() << " -- " << opt.model
               << " @ " << opt.base_url << "\n"
                  "Type a message, or Ctrl-D to quit.\n";
     std::string line;

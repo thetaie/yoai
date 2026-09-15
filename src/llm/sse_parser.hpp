@@ -4,7 +4,7 @@
 #include <functional>
 #include <string>
 
-namespace yoai { namespace llm {
+namespace bodyclock { namespace llm {
 
 // Splits a raw HTTP byte stream into SSE event payloads.
 //

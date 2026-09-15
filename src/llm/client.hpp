@@ -24,7 +24,7 @@
 #include <utility>
 #include <vector>
 
-namespace yoai { namespace llm {
+namespace bodyclock { namespace llm {
 
 //------------------------------------------------------------------------------
 

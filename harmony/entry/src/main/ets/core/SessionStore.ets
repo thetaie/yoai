@@ -1,7 +1,7 @@
 /**
  * Locally persisted chat sessions -- what the history drawer lists.
  *
- * There is nothing to sync with: YoAI talks straight to the provider the user
+ * There is nothing to sync with: Body Clock talks straight to the provider the user
  * configured and has no account, so history is purely local and stays that way.
  *
  * Storage layout: one preferences store, with the session INDEX (ids, titles,
@@ -62,7 +62,7 @@ export class SessionStore {
     try {
       list = JSON.parse(raw) as SessionMeta[];
     } catch (err) {
-      hilog.error(0x0000, 'yoai', 'session index unreadable, starting empty');
+      hilog.error(0x0000, 'bodyclock', 'session index unreadable, starting empty');
       return [];
     }
     list.sort((a: SessionMeta, b: SessionMeta) => b.updatedAt - a.updatedAt);
@@ -81,7 +81,7 @@ export class SessionStore {
     try {
       return JSON.parse(raw) as ChatMessage[];
     } catch (err) {
-      hilog.error(0x0000, 'yoai', 'session %{public}s unreadable', id);
+      hilog.error(0x0000, 'bodyclock', 'session %{public}s unreadable', id);
       return [];
     }
   }

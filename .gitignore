@@ -8,3 +8,7 @@
 /.vscode
 /.idea
 compile_commands.json
+
+# Python bytecode from the design scripts
+__pycache__/
+*.pyc

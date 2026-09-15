@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-namespace yoai { namespace llm {
+namespace bodyclock { namespace llm {
 
 // Mirrors the dict shapes yielded by the Python reference clients
 // (pub/agents/base/clients.py): {"type": ..., "content": ..., "tool_id": ...}.

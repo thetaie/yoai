@@ -15,7 +15,7 @@ Three scripts here write into the app, and are the only thing that should:
 the icon assets, `sync-locales.py` the untranslated locale directories and the
 status table above.
 
-Upstream is the Claude Design project **"YoAI"**
+Upstream is the Claude Design project **"Body Clock"**
 (`claude.ai/design/p/eb024405-8fa1-4804-9672-1e9eafc6e05f`), built on the Tanka
 design system. It is a review canvas, not a finished spec: rounds 1, 5, 10, 11
 and 16, each carrying several candidates. What is recorded here is only what has
@@ -40,7 +40,7 @@ personal-data storage, not yet":
   or a local file.
 
 The chat UI stays as it is today. The design's `1e` Ask screen is a chat over
-your own entries, which is a different surface from the model chat YoAI already
+your own entries, which is a different surface from the model chat Body Clock already
 has.
 
 **Eleven interface languages**: Chinese, English, French, Spanish, German,

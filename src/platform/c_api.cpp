@@ -1,4 +1,4 @@
-// Implementation of the public C ABI (src/yoai.h).
+// Implementation of the public C ABI (src/bodyclock.h).
 //
 // Thin by design: the registry is a map, and a remote turn is one
 // OpenAIChatClient built from a copy of the matching entry. No session state, no
@@ -10,7 +10,7 @@
 // Reloading per turn would make on-device chat unusable, which is why this file
 // keeps clients for one kind of entry and not the other.
 
-#include "yoai.h"
+#include "bodyclock.h"
 
 #include "client/http_client.hpp"
 #include "llm/local.hpp"
@@ -30,20 +30,20 @@
 
 namespace {
 
-using yoai::llm::ChatMessage;
-using yoai::llm::Event;
-using yoai::llm::EventType;
-using yoai::llm::LocalClient;
-using yoai::llm::LocalOptions;
-using yoai::llm::LocalStats;
-using yoai::llm::OpenAIChatOptions;
+using bodyclock::llm::ChatMessage;
+using bodyclock::llm::Event;
+using bodyclock::llm::EventType;
+using bodyclock::llm::LocalClient;
+using bodyclock::llm::LocalOptions;
+using bodyclock::llm::LocalStats;
+using bodyclock::llm::OpenAIChatOptions;
 
 //------------------------------------------------------------------------------
 // Registry
 //------------------------------------------------------------------------------
 
 // One entry, of either kind. A tagged struct rather than two maps because the
-// id namespace is shared: yoai_chat, yoai_providers and yoai_provider_remove all
+// id namespace is shared: bodyclock_chat, bodyclock_providers and bodyclock_provider_remove all
 // take an id without being told which lane it is, and two maps would let the
 // same id exist twice with nothing deciding which one wins.
 struct Entry {
@@ -57,7 +57,7 @@ std::mutex& registry_mutex() {
     return m;
 }
 
-// Guarded by registry_mutex(). Ordered rather than hashed so yoai_providers()
+// Guarded by registry_mutex(). Ordered rather than hashed so bodyclock_providers()
 // lists ids in a stable order -- a menu that reshuffles itself when a key is
 // added would be a UI bug sourced here.
 std::map<std::string, Entry>& registry() {
@@ -80,7 +80,7 @@ std::map<std::string, std::shared_ptr<LocalClient> >& local_clients() {
 // the first one a host calls.
 void ensure_curl() {
     static std::once_flag once;
-    std::call_once(once, []() { yoai::client::HttpClient::global_init(); });
+    std::call_once(once, []() { bodyclock::client::HttpClient::global_init(); });
 }
 
 // Look up `id` and hand back a COPY of its entry, so the turn that follows is
@@ -98,7 +98,7 @@ bool lookup(const std::string& id, Entry* out) {
 //
 // The client is constructed under the lock -- cheap, it only initializes the
 // llama.cpp backend -- but the WEIGHTS are not read here: that happens on the
-// first ainvoke() or in yoai_local_load, both of which run with no lock held.
+// first ainvoke() or in bodyclock_local_load, both of which run with no lock held.
 // Holding the registry mutex across a multi-second, multi-gigabyte read would
 // stall every other entry point in this file for the duration.
 std::shared_ptr<LocalClient> local_client_for(const std::string& id) {
@@ -117,7 +117,7 @@ std::shared_ptr<LocalClient> local_client_for(const std::string& id) {
 // Expects registry_mutex() to be HELD -- the erase has to be atomic with the
 // registry edit that made the engine stale.
 //
-// Safe to call during a turn: yoai_chat holds its own shared_ptr for the
+// Safe to call during a turn: bodyclock_chat holds its own shared_ptr for the
 // duration, so erasing here only means the NEXT turn builds a fresh engine. The
 // running one finishes against the model it started with, and the weights are
 // freed when it lets go.
@@ -146,7 +146,7 @@ const char* tag_for(EventType t) {
     return "error";
 }
 
-std::string usage_json(const yoai::llm::CostStatistics& c) {
+std::string usage_json(const bodyclock::llm::CostStatistics& c) {
     rapidjson::StringBuffer buf;
     rapidjson::Writer<rapidjson::StringBuffer> w(buf);
     w.StartObject();
@@ -194,8 +194,8 @@ void apply_local_options(const char* options_json, LocalOptions* opt) {
     rapidjson::Document doc;
     doc.Parse(options_json);
     if (doc.HasParseError() || !doc.IsObject()) {
-        yoai::platform::log_warn(
-            "yoai_local_set: ignoring options_json, not a JSON object: %.120s", options_json);
+        bodyclock::platform::log_warn(
+            "bodyclock_local_set: ignoring options_json, not a JSON object: %.120s", options_json);
         return;
     }
 
@@ -244,7 +244,7 @@ bool parse_messages(const char* json, std::vector<ChatMessage>* out) {
     return true;
 }
 
-// Backing store for yoai_providers()' return value. Thread-local so two threads
+// Backing store for bodyclock_providers()' return value. Thread-local so two threads
 // listing at once do not overwrite each other's buffer.
 std::string& providers_buffer() {
     static thread_local std::string buf;
@@ -259,26 +259,26 @@ bool blank(const char* s) { return s == nullptr || *s == '\0'; }
 // Diagnostics
 //------------------------------------------------------------------------------
 
-extern "C" const char* yoai_version(void) {
+extern "C" const char* bodyclock_version(void) {
     return "0.1.0";
 }
 
-extern "C" void yoai_set_log_level(const char* level) {
+extern "C" void bodyclock_set_log_level(const char* level) {
     if (blank(level)) return;
-    yoai::platform::set_log_level(level);
+    bodyclock::platform::set_log_level(level);
 }
 
 //------------------------------------------------------------------------------
 // Provider registry
 //------------------------------------------------------------------------------
 
-extern "C" int yoai_provider_set(const char* id,
+extern "C" int bodyclock_provider_set(const char* id,
                                  const char* base_url,
                                  const char* api_key,
                                  const char* model,
                                  const char* extra_json) {
     if (blank(id) || blank(base_url) || blank(api_key) || blank(model)) {
-        yoai::platform::log_warn("yoai_provider_set: id, base_url, api_key and model are all required");
+        bodyclock::platform::log_warn("bodyclock_provider_set: id, base_url, api_key and model are all required");
         return 1;
     }
 
@@ -304,24 +304,24 @@ extern "C" int yoai_provider_set(const char* id,
         forget_local_client(id);
     }
     // The key is deliberately absent from this line.
-    yoai::platform::log_info("provider registered: %s -> %s (%s)", id, base_url, model);
+    bodyclock::platform::log_info("provider registered: %s -> %s (%s)", id, base_url, model);
     return 0;
 }
 
-extern "C" int yoai_provider_remove(const char* id) {
+extern "C" int bodyclock_provider_remove(const char* id) {
     if (blank(id)) return 0;
     std::lock_guard<std::mutex> lock(registry_mutex());
     forget_local_client(id);
     return registry().erase(id) > 0 ? 1 : 0;
 }
 
-extern "C" void yoai_provider_clear(void) {
+extern "C" void bodyclock_provider_clear(void) {
     std::lock_guard<std::mutex> lock(registry_mutex());
     registry().clear();
     local_clients().clear();
 }
 
-extern "C" const char* yoai_providers(void) {
+extern "C" const char* bodyclock_providers(void) {
     std::string& buf = providers_buffer();
     buf.clear();
     std::lock_guard<std::mutex> lock(registry_mutex());
@@ -336,15 +336,15 @@ extern "C" const char* yoai_providers(void) {
 // On-device models
 //------------------------------------------------------------------------------
 
-extern "C" int yoai_local_available(void) {
+extern "C" int bodyclock_local_available(void) {
     return LocalClient::available() ? 1 : 0;
 }
 
-extern "C" int yoai_local_set(const char* id,
+extern "C" int bodyclock_local_set(const char* id,
                               const char* model_path,
                               const char* options_json) {
     if (blank(id) || blank(model_path)) {
-        yoai::platform::log_warn("yoai_local_set: id and model_path are both required");
+        bodyclock::platform::log_warn("bodyclock_local_set: id and model_path are both required");
         return 1;
     }
 
@@ -364,23 +364,23 @@ extern "C" int yoai_local_set(const char* id,
         // next turn builds a fresh engine from what was just registered.
         forget_local_client(id);
     }
-    yoai::platform::log_info("on-device model registered: %s -> %s", id, model_path);
+    bodyclock::platform::log_info("on-device model registered: %s -> %s", id, model_path);
     return 0;
 }
 
-extern "C" int yoai_local_load(const char* id) {
+extern "C" int bodyclock_local_load(const char* id) {
     if (blank(id)) return 1;
 
     // Outside the registry lock, deliberately: this reads gigabytes.
     std::shared_ptr<LocalClient> client = local_client_for(id);
     if (!client) {
-        yoai::platform::log_warn("yoai_local_load: %s is not an on-device model", id);
+        bodyclock::platform::log_warn("bodyclock_local_load: %s is not an on-device model", id);
         return 1;
     }
 
     std::string err;
     if (!client->load(err)) {
-        yoai::platform::log_warn("yoai_local_load(%s): %s", id, err.c_str());
+        bodyclock::platform::log_warn("bodyclock_local_load(%s): %s", id, err.c_str());
         return 1;
     }
     return 0;
@@ -390,10 +390,10 @@ extern "C" int yoai_local_load(const char* id) {
 // Chat
 //------------------------------------------------------------------------------
 
-extern "C" int yoai_chat(const char* provider_id,
+extern "C" int bodyclock_chat(const char* provider_id,
                          const char* messages_json,
                          const char* system_prompt,
-                         yoai_chat_handler on_event,
+                         bodyclock_chat_handler on_event,
                          void* user_data) {
     if (on_event == nullptr) return 1;
 
@@ -401,7 +401,7 @@ extern "C" int yoai_chat(const char* provider_id,
     // return code: the host has a place to show text and no way to turn an int
     // into one.
     auto fail = [&](const std::string& msg) {
-        yoai::platform::log_warn("yoai_chat: %s", msg.c_str());
+        bodyclock::platform::log_warn("bodyclock_chat: %s", msg.c_str());
         on_event("error", msg.c_str(), user_data);
         return 1;
     };
@@ -425,7 +425,7 @@ extern "C" int yoai_chat(const char* provider_id,
 
     // One handler for both lanes: the clients speak the same Event vocabulary, so
     // the only per-lane work is which client runs the turn.
-    const yoai::llm::EventHandler forward = [&](const Event& e) -> bool {
+    const bodyclock::llm::EventHandler forward = [&](const Event& e) -> bool {
         const std::string payload = (e.type == EventType::CostStatistics)
                                   ? usage_json(e.cost)
                                   : e.content;
@@ -449,7 +449,7 @@ extern "C" int yoai_chat(const char* provider_id,
         // cancelled: a partial count presented as a total is worse than none.
         if (ok) {
             const LocalStats st = client->stats();
-            yoai::llm::CostStatistics cost;
+            bodyclock::llm::CostStatistics cost;
             cost.model         = file_name(entry.on_device.model_path);
             cost.input_tokens  = st.prompt_tokens;
             cost.output_tokens = st.decoded_tokens;
@@ -458,7 +458,7 @@ extern "C" int yoai_chat(const char* provider_id,
             const std::string payload = usage_json(cost);
             on_event("usage", payload.c_str(), user_data);
 
-            yoai::platform::log_info(
+            bodyclock::platform::log_info(
                 "on-device turn: %d prompt + %d decoded tokens, ctx %d, "
                 "load %.0fms prefill %.0fms decode %.0fms, %d msgs dropped",
                 st.prompt_tokens, st.decoded_tokens, st.n_ctx,
@@ -469,7 +469,7 @@ extern "C" int yoai_chat(const char* provider_id,
 
     ensure_curl();
 
-    yoai::llm::OpenAIChatClient client(entry.remote);
+    bodyclock::llm::OpenAIChatClient client(entry.remote);
     const bool ok = client.ainvoke(messages, system, forward);
 
     return ok ? 0 : 1;

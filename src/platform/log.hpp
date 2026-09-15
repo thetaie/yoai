@@ -10,12 +10,12 @@
 // (it does in this build), but consult _MSVC_LANG anyway so a stray include
 // of this header from a project that forgot the flag still works.
 #if defined(_MSVC_LANG)
-    static_assert(_MSVC_LANG  >= 201103L, "yoai requires C++11 or newer");
+    static_assert(_MSVC_LANG  >= 201103L, "bodyclock requires C++11 or newer");
 #else
-    static_assert(__cplusplus >= 201103L, "yoai requires C++11 or newer");
+    static_assert(__cplusplus >= 201103L, "bodyclock requires C++11 or newer");
 #endif
 
-namespace yoai { namespace platform {
+namespace bodyclock { namespace platform {
 
 // Minimum severity that will be emitted. Anything below the current level is
 // dropped. Mirrors the LOG_LEVEL config values; the threshold is process-wide.

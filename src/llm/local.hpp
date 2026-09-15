@@ -8,7 +8,7 @@
 // the client needs to know a turn ran locally -- see llm/client.hpp, which was
 // written for exactly this second implementation.
 //
-// Built only when configured with -DYOAI_ONDEVICE_LLM=ON and pointed at a
+// Built only when configured with -DBODYCLOCK_ONDEVICE_LLM=ON and pointed at a
 // llama.cpp SDK via -DLLAMA_CPP_DIR=<dir with include/llama.h + lib/>.
 // Otherwise a stub compiles in: available() is false and ainvoke() reports a
 // single Error event. That is the supported off state, not a degraded one --
@@ -32,7 +32,7 @@
 #include <string>
 #include <vector>
 
-namespace yoai { namespace llm {
+namespace bodyclock { namespace llm {
 
 struct LocalOptions {
     std::string model_path;      // absolute path to a .gguf
@@ -188,7 +188,7 @@ private:
 
 class LocalClient {
 public:
-    /// True when compiled against llama.cpp (YOAI_ONDEVICE_LLM).
+    /// True when compiled against llama.cpp (BODYCLOCK_ONDEVICE_LLM).
     static bool available();
 
     explicit LocalClient(LocalOptions opt);

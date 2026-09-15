@@ -1,9 +1,9 @@
-# YoAI
+# Body Clock
 
 *[中文](README.zh-CN.md)*
 
-Your AI. Your conversations live on your device, and models are called with
-your own API keys — there is no YoAI account and no YoAI server.
+Your conversations live on your device, and models are called with your own API
+keys — there is no Body Clock account and no Body Clock server.
 
 HarmonyOS first, Android next.
 
@@ -18,7 +18,7 @@ the same C ABI, and nothing above it had to learn about lanes.
 
 ```
 src/                  the core -- a static library plus a C ABI
-  yoai.h                the whole public surface (~150 lines of contract)
+  bodyclock.h                the whole public surface (~150 lines of contract)
   llm/                  one streaming client per provider protocol
   client/               HTTP + TLS
   platform/             logging, and the C ABI's implementation
@@ -33,11 +33,11 @@ owns persistence and settings, tells the core which models the user has keys
 for, and asks it to run a turn:
 
 ```c
-yoai_provider_set("zhipu/glm-4.7-flash",
+bodyclock_provider_set("zhipu/glm-4.7-flash",
                   "https://open.bigmodel.cn/api/paas/v4",
                   api_key, "glm-4.7-flash", NULL);
 
-yoai_chat("zhipu/glm-4.7-flash", messages_json, NULL, on_event, user_data);
+bodyclock_chat("zhipu/glm-4.7-flash", messages_json, NULL, on_event, user_data);
 ```
 
 Two consequences worth stating plainly, because they are the design and not an
@@ -46,11 +46,11 @@ implementation detail:
 - **Keys never touch our disk.** The registry is process memory. On HarmonyOS the
   key comes out of the platform's encrypted asset store at the moment it is
   handed to the core, and the app refills the registry after every cold start.
-- **The host owns history.** `yoai_chat` takes the whole transcript every turn.
+- **The host owns history.** `bodyclock_chat` takes the whole transcript every turn.
   One place decides what to keep and what to trim, so two policies cannot
   disagree.
 
-`yoai_chat` blocks and streams through a callback on the calling thread;
+`bodyclock_chat` blocks and streams through a callback on the calling thread;
 returning 0 from that callback cancels the turn. Everything above it — a worker
 thread per turn, a threadsafe function back to the UI — is the host's business,
 which is why the ABI stays this small.
@@ -74,14 +74,14 @@ Then talk to a real provider without a phone in the loop:
 
 ```
 rem Windows
-set YOAI_API_KEY=...
-build\yoai-cli.exe --base-url https://open.bigmodel.cn/api/paas/v4 --model glm-4.7-flash
+set BODYCLOCK_API_KEY=...
+build\bodyclock-cli.exe --base-url https://open.bigmodel.cn/api/paas/v4 --model glm-4.7-flash
 ```
 
 ```
 # macOS / Linux
-export YOAI_API_KEY=...
-./build/yoai-cli --base-url https://open.bigmodel.cn/api/paas/v4 --model glm-4.7-flash
+export BODYCLOCK_API_KEY=...
+./build/bodyclock-cli --base-url https://open.bigmodel.cn/api/paas/v4 --model glm-4.7-flash
 ```
 
 With no question argument it goes interactive and keeps the transcript, so
@@ -93,8 +93,8 @@ the model name change. Google Gemini is worth spelling out because its
 compatibility layer sits at a path nobody guesses:
 
 ```
-export YOAI_API_KEY=...          # from https://aistudio.google.com/apikey
-./build/yoai-cli --base-url https://generativelanguage.googleapis.com/v1beta/openai \
+export BODYCLOCK_API_KEY=...          # from https://aistudio.google.com/apikey
+./build/bodyclock-cli --base-url https://generativelanguage.googleapis.com/v1beta/openai \
                  --model gemini-3.6-flash
 ```
 
@@ -142,7 +142,7 @@ build.cmd             # Windows       -- or `build.cmd llama` for just the engin
 ./build.sh            # macOS / Linux
 ```
 
-It costs about 4.3 MiB in `libyoai.so`, a ~200 MB checkout, and a few minutes of
+It costs about 4.3 MiB in `libbodyclock.so`, a ~200 MB checkout, and a few minutes of
 cross-compile. `build.cmd deps hap` builds the app without it.
 
 The checkout goes beside the repo (`LLAMA_SRC` moves it) and is never updated
@@ -173,13 +173,20 @@ model never deletes it. From there it is a model like any other in the picker.
 
 ## The name
 
-**YoAI** is *Your AI*, which is the whole product in two words. Read it in
-Chinese and it is **有爱** — the same two syllables, meaning warm, or fond of
-someone.
+**Body Clock** is the ordinary English term for the body's own sense of time.
 
-Always written `YoAI`. The capital `A` is what splits it into `Yo` + `AI`, so
-`Yoai` and `YOAI` both throw the name away. The C ABI keeps its own lowercase
-`yoai_` prefix and does not follow the product name.
+Always written with the space. The wordmark depends on it: the ring stands in
+for the `o` of *Body*, and the rest is set as `dy Clock`.
+
+The launcher label is the one exception — `BodyClock`, closed up. Closing the
+space buys back about half a character of width, which is 5–6% of the label
+across the usual UI sans faces, and the launcher is the only place the name has
+to survive a hard width limit. It is a separate resource from the app name
+(`EntryAbility_label`, not `app_name`), so nothing else follows it.
+
+Where a single token is needed, it is lowercase `bodyclock`: the C ABI's
+`bodyclock_` prefix, `libbodyclock.so`, the bundle id `ai.bodyclock.app`. Never
+`BodyClock` as a second display spelling.
 
 ## License
 

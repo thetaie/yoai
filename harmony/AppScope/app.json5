@@ -1,7 +1,7 @@
 {
   "app": {
-    "bundleName": "ai.yoai.app",
-    "vendor": "yoai",
+    "bundleName": "ai.bodyclock.app",
+    "vendor": "bodyclock",
     "versionCode": 1000000,
     "versionName": "0.1.0",
     "icon": "$media:app_icon",

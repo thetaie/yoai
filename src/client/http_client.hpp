@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace yoai { namespace client {
+namespace bodyclock { namespace client {
 
 struct HttpResponse {
     long status = 0;

@@ -11,7 +11,7 @@ import ConfigurationConstant from '@ohos.app.ability.ConfigurationConstant';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { Prefs } from '../core/Prefs';
 
-const TAG: string = 'yoai';
+const TAG: string = 'bodyclock';
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {

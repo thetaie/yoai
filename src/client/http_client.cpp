@@ -7,7 +7,7 @@
 #include <cctype>
 #include <stdexcept>
 
-namespace yoai { namespace client {
+namespace bodyclock { namespace client {
 
 namespace {
 

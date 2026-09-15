@@ -37,46 +37,37 @@ RING_STROKE = 11.0
 INK = "#08131F"
 ACCENT = "#0072E8"
 # the design's rounded tile, which here becomes the layered icon's background
-# layer; nothing inside the mark is filled with it, so the foreground is correct
-# over any ground
+# layer; nothing in the mark is filled with it to fake a hole, though the two
+# dimmed segments are translucent and are meant to sit on it
 GROUND = "#E7EEF6"
 # the plus, on the accent disc -- a shade lighter than the tile
 PLUS_GLYPH = "#FAFDFF"
-FIGURE = "#4E6478"
-FIGURE_OPACITY = 0.32
+FIGURE = "#B7C9DA"
 
 # (visible arc length, dash offset, opacity) as the design declares them;
 # the last segment is the current state and carries the accent color
 SEGMENTS = [
     (68, 0, INK, 0.9),
-    (39, 78, INK, 0.5),
-    (53, 125, INK, 0.28),
+    (39, 78, INK, 0.45),
+    (53, 125, INK, 0.26),
     (59, 186, ACCENT, 1.0),
 ]
 
-# The standing figure, drawn in a 58 x 200 box of its own and placed inside the
-# ring by the transform below. It is a shadow layer: one flat neutral at low
-# opacity, so it never competes with the arcs.
-FIGURE_BOX = "translate(38.5 15) scale(0.33)"
-FIGURE_PATH = (
-    "M23.5 0.0L34.1 0.0L38.8 4.7L41.2 9.4L41.2 18.8L38.8 21.2L36.5 28.2L34.1 29.4"
-    "L37.6 32.9L42.4 35.3L45.9 35.3L51.8 40.0L52.9 43.5L54.1 64.7L56.5 70.6"
-    "L57.6 105.9L55.3 110.6L51.8 112.9L54.1 109.4L52.9 107.1L51.8 108.2L51.8 98.8"
-    "L54.1 95.3L54.1 91.8L52.9 90.6L51.8 81.2L49.4 76.5L48.2 62.4L47.1 61.2"
-    "L47.1 57.6L45.9 56.5L44.7 57.6L43.5 74.1L42.4 75.3L42.4 81.2L43.5 82.4"
-    "L44.7 92.9L47.1 98.8L47.1 120.0L45.9 121.2L45.9 128.2L44.7 129.4L44.7 165.9"
-    "L43.5 167.1L43.5 172.9L41.2 180.0L41.2 190.6L44.7 198.8L43.5 200.0L36.5 198.8"
-    "L36.5 194.1L35.3 192.9L36.5 174.1L34.1 165.9L34.1 142.4L31.8 135.3L30.6 121.2"
-    "L28.2 118.8L25.9 127.1L25.9 135.3L23.5 141.2L23.5 167.1L22.4 168.2L22.4 176.5"
-    "L21.2 177.6L22.4 192.9L21.2 194.1L21.2 198.8L18.8 200.0L14.1 200.0L12.9 198.8"
-    "L16.5 190.6L16.5 181.2L15.3 180.0L15.3 174.1L12.9 165.9L12.9 130.6L11.8 129.4"
-    "L11.8 121.2L10.6 120.0L10.6 100.0L11.8 98.8L11.8 92.9L12.9 91.8L14.1 80.0"
-    "L15.3 78.8L14.1 76.5L14.1 64.7L12.9 61.2L11.8 60.0L9.4 62.4L9.4 70.6L8.2 71.8"
-    "L7.1 81.2L4.7 85.9L4.7 97.6L5.9 98.8L7.1 108.2L5.9 108.2L4.7 104.7L3.5 105.9"
-    "L3.5 109.4L5.9 112.9L2.4 110.6L0.0 105.9L0.0 81.2L1.2 80.0L1.2 70.6L4.7 58.8"
-    "L4.7 43.5L9.4 36.5L15.3 35.3L23.5 30.6L23.5 28.2L21.2 25.9L16.5 25.9L15.3 24.7"
-    "L15.3 21.2L14.1 20.0L15.3 18.8L14.1 15.3L16.5 12.9L16.5 9.4L17.6 8.2L17.6 2.4"
-    "L22.4 1.2Z"
+# The standing figure: head, neck, torso, arms on the hips, legs and feet, each
+# a plain shape in a 100 x 200 box of its own, placed by the transform below.
+# It is drawn before the arcs and is not clipped to them, so the head and the
+# feet pass behind the ring rather than stopping at it.
+FIGURE_BOX = "translate(26.5 5) scale(0.43)"
+FIGURE_PARTS = (
+    '<circle cx="50" cy="32" r="30"/>'
+    '<rect x="43" y="56" width="14" height="14" rx="7"/>'
+    '<path d="M33 78c0-8 6-13 17-13s17 5 17 13v30c0 8-7 13-17 13s-17-5-17-13z"/>'
+    '<path d="M36 80 25 108 46 66" fill="none" stroke-width="13"/>'
+    '<path d="M66 82 85 104 70 118" fill="none" stroke-width="13"/>'
+    '<path d="M42 116 36 182" fill="none" stroke-width="16"/>'
+    '<path d="M58 116 66 182" fill="none" stroke-width="16"/>'
+    '<ellipse cx="34" cy="188" rx="10" ry="7"/>'
+    '<ellipse cx="68" cy="188" rx="10" ry="7"/>'
 )
 
 # --- output geometry ---
@@ -127,23 +118,24 @@ def build_svg():
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{RENDER}"'
         f' height="{RENDER}" viewBox="0 0 96 96" fill="none">\n'
-        # the figure, behind everything, clipped to the ring's inner circle
-        '  <clipPath id="inner"><circle cx="48" cy="48" r="33"/></clipPath>\n'
-        f'  <g opacity="{FIGURE_OPACITY}" fill="{FIGURE}" clip-path="url(#inner)">\n'
-        f'    <path transform="{FIGURE_BOX}" d="{FIGURE_PATH}"/>\n'
-        "  </g>\n"
+        # the figure, behind the arcs. Round caps and joins on the whole group:
+        # the limbs are strokes, and their ends are what read as shoulders,
+        # elbows and ankles.
+        f'  <g transform="{FIGURE_BOX}" fill="{FIGURE}" stroke="{FIGURE}"'
+        ' stroke-linecap="round" stroke-linejoin="round">'
+        f"{FIGURE_PARTS}</g>\n"
         + "\n".join(paths)
         # hands, and the hub that makes them read as a clock rather than a
         # corner. The axis sits above center so they cross the figure's chest
         # rather than its face.
-        + f'\n  <path d="M48 44V34M48 44h9" stroke="{INK}" stroke-width="2.4"'
+        + f'\n  <path d="M48 44V33M48 44h10" stroke="{INK}" stroke-width="2.6"'
         ' stroke-linecap="round"/>\n'
-        f'  <circle cx="48" cy="44" r="2.6" fill="{INK}"/>\n'
+        f'  <circle cx="48" cy="44" r="2.8" fill="{INK}"/>\n'
         # the plus badge: a solid accent disc laid straight over the ring, with
         # no washer under it -- at this weight the disc reads cleanly against
-        # the arc it covers
+        # the arc it covers. The glyph runs nearly the full width of the disc.
         f'  <circle cx="74" cy="74" r="15" fill="{ACCENT}"/>\n'
-        f'  <path d="M74 67v14M67 74h14" stroke="{PLUS_GLYPH}" stroke-width="2.8"'
+        f'  <path d="M74 61v26M61 74h26" stroke="{PLUS_GLYPH}" stroke-width="2.8"'
         ' stroke-linecap="round"/>\n</svg>\n'
     )
 

@@ -3,7 +3,7 @@
 #include <cstring>
 #include <string>
 
-namespace yoai { namespace llm {
+namespace bodyclock { namespace llm {
 
 namespace {
 

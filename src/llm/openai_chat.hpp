@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace yoai { namespace llm {
+namespace bodyclock { namespace llm {
 
 // OpenAI-compatible Chat Completions client.
 //

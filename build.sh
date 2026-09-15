@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Desktop build: yoai_core plus the CLI harness, into build/.
+# Desktop build: bodyclock_core plus the CLI harness, into build/.
 #
 # The point of a desktop build is that the core can be exercised without a
 # device -- see cli/main.cpp. It is not a shipping target.

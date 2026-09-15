@@ -1,6 +1,6 @@
 # Icons
 
-Source: Claude Design project "YoAI 有爱", round 11.
+Source: Claude Design project "Body Clock", round 11.
 
 ## The set
 
@@ -29,7 +29,7 @@ put.
 - **RTL mirrors direction only** — back, send. Clock and camera do not mirror.
 
 2px settles what round 11 left as a live control. 1.5 was the proposal, but it
-is not what the design file draws: every icon in `yoai-design` is between 1.75
+is not what the design file draws: every icon in `bodyclock-design` is between 1.75
 and 2.6 — plus 2.2, lock 1.9–2, camera 1.75, and the selected-row tick 2.6.
 
 The tick keeps the design's own 2.6: it is the one icon that has to read as a
@@ -84,7 +84,7 @@ in from memory.
 **Where the design file and Lucide differ, the design file wins.** Its `check`
 is `m5 13 4 4L19 7` at stroke 2.6, which sits lower and heavier than Lucide's
 `M20 6 9 17l-5-5` at 1.5, and the heavier one is what the screens were signed
-off on. Take path data and weight from `yoai-design`; fall back to Lucide only
+off on. Take path data and weight from `bodyclock-design`; fall back to Lucide only
 for icons the design file does not draw.
 
 **A Unicode glyph is not a substitute.** The screens first shipped with
