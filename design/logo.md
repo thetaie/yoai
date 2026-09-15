@@ -56,9 +56,12 @@ launcher happens to draw them at.
 
 ## The two variants
 
-Drawn in the default theme's colors — `daylight-arctic` and `midnight-arctic`
-from [palettes.json](palettes.json), except the tile, which is the design's own
-app-icon ground:
+The mark carries its own colors, and they do not track
+[palettes.json](palettes.json). They started as the `daylight-arctic` and
+`midnight-arctic` pair, but round 10 moved every palette onto one shared
+neutral ground, and the mark did not follow: only the accent still coincides
+with the palette's. That is the right way round — a launcher icon cannot follow
+a theme the user picks inside the app, so the mark has to be fixed.
 
 | | Light | Dark |
 |---|---|---|
@@ -202,7 +205,7 @@ two dimmed segments are a real exception: they are translucent ink and only read
 as the design intends once composited over that ground.
 
 `startIcon.png` carries its own ground rather than being transparent over
-`$color:start_window_background` — that color is `#101315` in the dark theme,
+`$color:start_window_background` — that color is `#16181A` in the dark theme,
 and the mark's `#08131F` arcs would all but vanish on it.
 
 ## Open

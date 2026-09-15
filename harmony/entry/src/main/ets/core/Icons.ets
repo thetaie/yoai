@@ -35,13 +35,14 @@
 const GRID: number = 24;
 
 /**
- * Default stroke width, in grid units.
+ * Stroke width, in grid units. One weight for every icon.
  *
- * 2, not the 1.5 design/icons.md proposes. 1.5 was never what the design
- * actually drew -- every icon in the design file is between 1.75 and 2.6, and
- * icons.md itself records 1.5 as unconfirmed and left as a live control.
+ * This was 2 for a while, on the strength of per-icon weights measured off an
+ * earlier design file -- which is not in this repo and cannot be checked. The
+ * canvas settles it at 1.5: that is its default, its stated rule, and what it
+ * renders. There is no longer a per-icon exception.
  */
-const STROKE: number = 2;
+const STROKE: number = 1.5;
 
 /**
  * The three sizes, in vp, matching design/icons.md.
@@ -63,24 +64,30 @@ interface IconDef {
 }
 
 /**
- * The path data, taken from the design file rather than from Lucide.
+ * The path data, transcribed from third_party/lucide -- a pinned copy of the
+ * icons at one version, which is the source of record.
  *
- * Where the two differ the design wins: its `check` is `m5 13 4 4L19 7` at
- * stroke 2.6, which sits lower and heavier than Lucide's `M20 6 9 17l-5-5` at
- * 1.5, and the heavier one is what the screens were signed off on.
+ * It used to come from an earlier design file instead, on the reasoning that
+ * the canvas had been signed off with those shapes. That was wrong twice over:
+ * the file is gone, and what the canvas draws IS Lucide -- it loads the library
+ * live and only falls back to its own simplified paths when offline, saying so
+ * in the corner when it does. The shapes reviewed were Lucide's.
  *
- * Only these six. design/icons.md lists 24 for the design as a whole; the
- * rest belong to screens that do not exist yet, and inventing their path data
- * would ship the wrong glyph under the right name.
+ * Only these six. design/icons.md lists the full set; the rest belong to
+ * screens that do not exist yet, and inventing their path data would ship the
+ * wrong glyph under the right name.
+ *
+ * When adding one: take EVERY element from the .svg, not just the `d`
+ * attributes. Several icons carry a `<circle>` or `<rect>` that has to be
+ * converted -- `settings` below is a gear path plus a circle rewritten as two
+ * arcs -- and dropping it loses part of the glyph silently.
  */
 const ICONS: IconDef[] = [
-  { name: 'menu', commands: ['M4 6h16', 'M4 12h16', 'M4 18h16'], stroke: STROKE },
+  { name: 'menu', commands: ['M4 5h16', 'M4 12h16', 'M4 19h16'], stroke: STROKE },
   { name: 'chevron-left', commands: ['m15 18-6-6 6-6'], stroke: STROKE },
   { name: 'chevron-right', commands: ['m9 18 6-6-6-6'], stroke: STROKE },
   { name: 'chevron-down', commands: ['m6 9 6 6 6-6'], stroke: STROKE },
-  // 2.6 is the design's own weight for the tick; it is the one icon that has
-  // to read as a state at a glance rather than as decoration.
-  { name: 'check', commands: ['m5 13 4 4L19 7'], stroke: 2.6 },
+  { name: 'check', commands: ['M20 6 9 17l-5-5'], stroke: STROKE },
   {
     name: 'settings',
     commands: [

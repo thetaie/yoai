@@ -1,0 +1,170 @@
+/* ============================================================
+   TANKA · COLOR TOKENS
+   Source: framer-colors-backup (59 styles). Light is the default
+   theme; [data-theme="dark"] overrides. Base values first, then
+   semantic aliases that components should reference.
+   ============================================================ */
+
+:root {
+  /* ---- Brand flag (the logo gradient: green → cyan → blue) ---- */
+  --brand-green:      #00DF5D;
+  --brand-cyan:       #00B9E3;
+  --brand-blue:       #2D7AFF;
+  --brand-blue-deep:  #0050DC;
+  --brand-gradient:   linear-gradient(135deg, #00DF5D 0%, #00B9E3 45%, #2D7AFF 100%); /* @kind color */
+
+  /* ---- Core ---- */
+  --primary:          #0096F8;
+  --highlight:        #0093F4;
+  --active:           rgba(0, 150, 248, 0.15);
+  --link:             #0066AC;
+
+  /* ---- Primitive neutrals ---- */
+  --white:            #FAFCFE;
+  --black:            #000001;
+  --ink:              #040608;   /* near-black text */
+  --ink-soft:         #13161A;   /* secondary dark surface */
+
+  /* ---- Gray ramp ---- */
+  --gray-50:          #FCFDFD;
+  --gray-100:         #ECEEF0;
+  --gray-200:         #DADDE0;
+  --gray-300:         #CACED3;
+  --gray-400:         #8D9094;
+  --gray-500:         #47484A;
+  --gray-600:         #0A0A0B;
+
+  /* ---- Theme ramp (primary tints, solid) ---- */
+  --theme-100:        #008EEC;
+  --theme-200:        #0087DF;
+  --theme-300:        #0078C6;
+  --theme-400:        #0069AE;
+  --theme-500:        #005A95;
+  --theme-600:        #004B7C;
+  /* alpha tints of primary */
+  --theme-a100:       rgba(0, 150, 248, 0.05);
+  --theme-a200:       rgba(0, 150, 248, 0.15);
+  --theme-a300:       rgba(0, 150, 248, 0.20);
+  --theme-a400:       rgba(0, 150, 248, 0.30);
+  --theme-a500:       rgba(0, 150, 248, 0.50);
+  --theme-a600:       rgba(0, 150, 248, 0.80);
+
+  /* ---- Semantic: text ---- */
+  --text-primary:     #040608;
+  --text-secondary:   #44484D;
+  --text-tertiary:    #5F6469;
+  --text-disabled:    #AAAEB3;
+  --text-placeholder: #AAAEB3;
+  --text-inverse:     #FAFCFE;
+  --text-link:        var(--link);
+  --text-accent:      var(--primary);
+
+  /* ---- Semantic: surfaces ---- */
+  --surface-page:     #FAFCFE;
+  --surface-card:     #FFFFFF;
+  --surface-sunken:   #F3F5F8;
+  --surface-inverse:  #13161A;
+
+  /* ---- Semantic: buttons ---- */
+  --button-bg:           #FAFCFE;
+  --button-bg-secondary: #F3F5F8;
+  --button-bg-inverse:   #040608;
+  --button-bg-disabled:  #EBEFF2;
+  --bg-hover:            rgba(0, 0, 1, 0.07);
+  --bg-pressed:          rgba(0, 0, 1, 0.13);
+
+  /* ---- Semantic: fields ---- */
+  --field-bg:            #FAFCFE;
+  --field-bg-hover:      #F3F5F8;
+  --field-bg-pressed:    #EBEFF2;
+  --field-text:          #040608;
+  --field-text-secondary:#5F6469;
+
+  /* ---- Semantic: borders & dividers ---- */
+  --border:           #DEE2E6;
+  --border-secondary: #AAAEB3;
+  --border-hover:     rgba(0, 0, 1, 0.10);
+  --border-pressed:   rgba(0, 0, 1, 0.20);
+  --divider:          rgba(130, 135, 140, 0.15);
+
+  /* ---- Semantic: status ---- */
+  --success:          #00B254;
+  --warning:          #D6A100;
+  --danger:           #D64846;
+  --info:             var(--primary);
+
+  /* ---- Shadow color ---- */
+  --shadow-color:     rgba(0, 0, 1, 0.20);
+}
+
+/* ============================================================
+   DARK THEME
+   ============================================================ */
+[data-theme="dark"] {
+  --primary:          #36A4FF;
+  --highlight:        #63B4FF;
+  --active:           rgba(0, 150, 248, 0.20);
+  --link:             #0093F4;
+
+  --white:            #FAFCFE;
+  --ink:              #FAFCFE;
+  --ink-soft:         #EBEFF2;
+
+  --gray-50:          #F6F6F6;
+  --gray-100:         #BEBFC1;
+  --gray-200:         #7C7F82;
+  --gray-300:         #44484D;
+  --gray-400:         #303236;
+  --gray-500:         #18191B;
+  --gray-600:         #030404;
+
+  --theme-100:        #40A9FF;
+  --theme-200:        #4AADFF;
+  --theme-300:        #5EB6FF;
+  --theme-400:        #72BFFF;
+  --theme-500:        #86C8FF;
+  --theme-600:        #9AD2FF;
+  --theme-a100:       rgba(54, 164, 255, 0.10);
+  --theme-a200:       rgba(54, 164, 255, 0.20);
+  --theme-a300:       rgba(54, 164, 255, 0.25);
+  --theme-a400:       rgba(54, 164, 255, 0.30);
+  --theme-a500:       rgba(54, 164, 255, 0.50);
+  --theme-a600:       rgba(54, 164, 255, 0.80);
+
+  --text-primary:     #FAFCFE;
+  --text-secondary:   #DEE2E6;
+  --text-tertiary:    #CACED3;
+  --text-disabled:    #5F6469;
+  --text-placeholder: #5F6469;
+  --text-inverse:     #040608;
+
+  --surface-page:     #0E1115;
+  --surface-card:     #13161A;
+  --surface-sunken:   #2A2E32;
+  --surface-inverse:  #FAFCFE;
+
+  --button-bg:           #13161A;
+  --button-bg-secondary: #2A2E32;
+  --button-bg-inverse:   #FAFCFE;
+  --button-bg-disabled:  #2A2E32;
+  --bg-hover:            rgba(250, 252, 254, 0.10);
+  --bg-pressed:          rgba(250, 252, 254, 0.18);
+
+  --field-bg:            #2A2E32;
+  --field-bg-hover:      #44484D;
+  --field-bg-pressed:    #5F6469;
+  --field-text:          #FAFCFE;
+  --field-text-secondary:#CACED3;
+
+  --border:           #44484D;
+  --border-secondary: #5F6469;
+  --border-hover:     rgba(250, 252, 254, 0.15);
+  --border-pressed:   rgba(250, 252, 254, 0.25);
+  --divider:          rgba(170, 174, 179, 0.25);
+
+  --success:          #2EC36B;
+  --warning:          #E0B53A;
+  --danger:           #A93534;
+
+  --shadow-color:     rgba(0, 0, 1, 0.40);
+}

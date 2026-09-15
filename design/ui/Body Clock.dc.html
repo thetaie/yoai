@@ -1,0 +1,1545 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/tanka-design-system-31dfeb73-c4fd-494b-828e-b82d3d857185/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/tanka-design-system-31dfeb73-c4fd-494b-828e-b82d3d857185/tokens/colors.css">
+<link rel="stylesheet" href="_ds/tanka-design-system-31dfeb73-c4fd-494b-828e-b82d3d857185/tokens/typography.css">
+<link rel="stylesheet" href="_ds/tanka-design-system-31dfeb73-c4fd-494b-828e-b82d3d857185/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/tanka-design-system-31dfeb73-c4fd-494b-828e-b82d3d857185/styles.css">
+<script src="_ds/tanka-design-system-31dfeb73-c4fd-494b-828e-b82d3d857185/_ds_bundle.js"></script>
+<script src="./image-slot.js"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<style>
+body{margin:0;background:#f0eee9;font-family:var(--font-ui),system-ui,sans-serif}
+a{color:var(--link)}a:hover{color:var(--primary)}
+.dv-turn{padding:40px 44px 32px;border-bottom:1px solid rgba(0,0,0,.08)}
+.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 20px}
+.dv-tid{font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:#1a1a1a;color:#fff;border-radius:4px;text-decoration:none}
+.dv-tname{font:600 13px/1.2 system-ui,sans-serif;color:#1a1a1a}
+.dv-sub{font:600 11px/1 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:rgba(0,0,0,.4);margin:26px 0 14px}
+.dv-opts{display:flex;flex-wrap:wrap;gap:32px;align-items:flex-start}
+.dv-opt{flex:none;display:flex;flex-direction:column;gap:9px;scroll-margin-top:16px}
+.dv-oid{font:600 10.5px ui-monospace,Menlo,monospace;padding:3px 7px;background:rgba(0,0,0,.08);color:#1a1a1a;border-radius:5px;text-decoration:none}
+.dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 system-ui,sans-serif;color:rgba(0,0,0,.55)}
+.dv-opt:target .dv-oid{background:#2a78d6;color:#fff}
+.dv-next{margin:26px 0 0;font:12px/1.5 system-ui,sans-serif;color:rgba(0,0,0,.5)}
+.dv-note{max-width:760px;font:13px/1.6 system-ui,sans-serif;color:rgba(0,0,0,.6);margin:0 0 8px}
+@keyframes wv{0%,100%{transform:scaleY(.25)}50%{transform:scaleY(1)}}
+@keyframes pulse{0%,100%{opacity:.35;transform:scale(1)}50%{opacity:.08;transform:scale(1.18)}}
+@keyframes blink{0%,100%{opacity:.25}50%{opacity:1}}
+.hscroll{overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-ms-overflow-style:none}
+.hscroll::-webkit-scrollbar{display:none}
+</style></helmet>
+
+<section class="dv-turn" class="dv-turn" id="t16">
+<div class="dv-thd"><a class="dv-tid" href="#t16">16</a><span class="dv-tname">Logo —— 一天的分段环</span></div>
+<p class="dv-note">定稿方向：环由若干弧段组成，每段是一种状态、当前段用强调色；中间是时针分针（画满的圆 + 明确指针＝钟，不会被读成电源键），右下角蓝色加号是"记一笔"——加号的位置有统一比例：圆心沿 45° 外移 <span style="font-family:ui-monospace,monospace">0.78 × 半径</span>，加号半径 <span style="font-family:ui-monospace,monospace">0.42 × 半径</span>，所有尺寸和 <a class="dv-oid" href="#13c">13c</a> 都照此换算。字标只写 Body Clock，图形不含文字，十一种语言共用一套资源。<a class="dv-oid" href="#13c">13c</a> 是找回来的横向字标，供网站和平板用——它把 Body 的 o 换成了同一套分段环，和 <a class="dv-oid" href="#16d">16d</a> 一家人。左明右暗，各附小尺寸。定稿 <a class="dv-oid" href="#16d">16d</a>：圆角底 + 一个中性灰的人像剪影当阴影层——环放大到四周顶住边界（r 35→41），线宽翻倍（5.5→11）；人像是全身站立剪影（头、躯干、双臂、双腿），居中于环内、脚落在内圆下缘；指针改短并上移，轴心落在头顶之上，不横穿人脸。加号改成"底色垫圈 + 实心蓝"，压在环上也不糊。</p>
+<div class="dv-opts">
+<div class="dv-opt" id="16d"><div class="dv-olabel"><a class="dv-oid" href="#16d">16d</a>定稿 —— 背景 + 人像阴影 + 分段环 + 指针 + 加号</div>
+<div style="display:flex;gap:14px">
+  <div style="width:236px;background:#FAFDFF;border:1px solid rgba(0,0,0,.1);border-radius:18px;padding:24px;font-family:var(--font-ui)">
+    <svg width="92" height="92" viewBox="0 0 96 96" fill="none">
+      <defs><clipPath id="16dL"><rect x="0" y="0" width="96" height="96" rx="22"></rect></clipPath></defs>
+      <g clip-path="url(#16dL)"><rect width="96" height="96" fill="#E7EEF6"></rect>
+        <g transform="translate(26.5 5) scale(0.43)"><g fill="#B7C9DA" stroke="#B7C9DA" stroke-linecap="round" stroke-linejoin="round"><circle cx="50" cy="32" r="30"></circle><rect x="43" y="56" width="14" height="14" rx="7"></rect><path d="M33 78c0-8 6-13 17-13s17 5 17 13v30c0 8-7 13-17 13s-17-5-17-13z"></path><path d="M36 80 25 108 46 66" fill="none" stroke-width="13"></path><path d="M66 82 85 104 70 118" fill="none" stroke-width="13"></path><path d="M42 116 36 182" fill="none" stroke-width="16"></path><path d="M58 116 66 182" fill="none" stroke-width="16"></path><ellipse cx="34" cy="188" rx="10" ry="7"></ellipse><ellipse cx="68" cy="188" rx="10" ry="7"></ellipse></g></g>
+        <g transform="rotate(-90 48 48)" fill="none" stroke-linecap="round" stroke-width="11">
+        <circle cx="48" cy="48" r="41" stroke="#08131F" stroke-dasharray="68 190" opacity="0.9"></circle>
+        <circle cx="48" cy="48" r="41" stroke="#08131F" stroke-dasharray="39 219" stroke-dashoffset="-78" opacity="0.45"></circle>
+        <circle cx="48" cy="48" r="41" stroke="#08131F" stroke-dasharray="53 205" stroke-dashoffset="-125" opacity="0.26"></circle>
+        <circle cx="48" cy="48" r="41" stroke="#0072E8" stroke-dasharray="59 199" stroke-dashoffset="-186"></circle>
+      </g>
+        <path d="M48 44V33M48 44h10" stroke="#08131F" stroke-width="2.6" stroke-linecap="round"></path>
+      <circle cx="48" cy="44" r="2.8" fill="#08131F"></circle>
+        <circle cx="74" cy="74" r="15" fill="#0072E8"></circle>
+      <path d="M74 61v26M61 74h26" stroke="#FAFDFF" stroke-width="2.8" stroke-linecap="round"></path></g>
+    </svg>
+    <div style="font-size:28px;font-weight:600;letter-spacing:-.02em;color:#08131F;margin-top:16px">Body Clock</div>
+    <div style="display:flex;align-items:center;gap:14px;margin-top:16px;padding-top:14px;border-top:1px solid #CFDEEA">
+      <svg width="46" height="46" viewBox="0 0 96 96" fill="none">
+        <rect x="0" y="0" width="96" height="96" rx="22" fill="#E7EEF6"></rect>
+        <g transform="rotate(-90 48 48)" fill="none" stroke-linecap="round" stroke-width="18">
+          <circle cx="48" cy="48" r="38" stroke="#08131F" stroke-dasharray="63 176" opacity=".9"></circle>
+          <circle cx="48" cy="48" r="38" stroke="#08131F" stroke-dasharray="45 194" stroke-dashoffset="-76" opacity=".45"></circle>
+          <circle cx="48" cy="48" r="38" stroke="#0072E8" stroke-dasharray="70 169" stroke-dashoffset="-138"></circle>
+        </g>
+        <path d="M48 48V31M48 48h12" stroke="#08131F" stroke-width="5.5" stroke-linecap="round"></path>
+        <circle cx="48" cy="48" r="3.4" fill="#08131F"></circle>
+        <circle cx="74" cy="74" r="17" fill="#0072E8"></circle>
+        <path d="M74 66.5v15M66.5 74h15" stroke="#FAFDFF" stroke-width="4" stroke-linecap="round"></path>
+      </svg>
+      <span style="font:400 11px/1.5 system-ui,sans-serif;color:rgba(0,0,0,.42)">小图标不放人像<br>只留环 + 指针 + 加号</span>
+    </div>
+  </div>
+  <div style="width:236px;background:#0B1622;border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:24px;font-family:var(--font-ui)">
+    <svg width="92" height="92" viewBox="0 0 96 96" fill="none">
+      <defs><clipPath id="16dD"><rect x="0" y="0" width="96" height="96" rx="22"></rect></clipPath></defs>
+      <g clip-path="url(#16dD)"><rect width="96" height="96" fill="#16233A"></rect>
+        <g transform="translate(26.5 5) scale(0.43)"><g fill="#2B4160" stroke="#2B4160" stroke-linecap="round" stroke-linejoin="round"><circle cx="50" cy="32" r="30"></circle><rect x="43" y="56" width="14" height="14" rx="7"></rect><path d="M33 78c0-8 6-13 17-13s17 5 17 13v30c0 8-7 13-17 13s-17-5-17-13z"></path><path d="M36 80 25 108 46 66" fill="none" stroke-width="13"></path><path d="M66 82 85 104 70 118" fill="none" stroke-width="13"></path><path d="M42 116 36 182" fill="none" stroke-width="16"></path><path d="M58 116 66 182" fill="none" stroke-width="16"></path><ellipse cx="34" cy="188" rx="10" ry="7"></ellipse><ellipse cx="68" cy="188" rx="10" ry="7"></ellipse></g></g>
+        <g transform="rotate(-90 48 48)" fill="none" stroke-linecap="round" stroke-width="11">
+        <circle cx="48" cy="48" r="41" stroke="#EAF3FB" stroke-dasharray="68 190" opacity="0.9"></circle>
+        <circle cx="48" cy="48" r="41" stroke="#EAF3FB" stroke-dasharray="39 219" stroke-dashoffset="-78" opacity="0.42"></circle>
+        <circle cx="48" cy="48" r="41" stroke="#EAF3FB" stroke-dasharray="53 205" stroke-dashoffset="-125" opacity="0.24"></circle>
+        <circle cx="48" cy="48" r="41" stroke="#4FB2FF" stroke-dasharray="59 199" stroke-dashoffset="-186"></circle>
+      </g>
+        <path d="M48 44V33M48 44h10" stroke="#EAF3FB" stroke-width="2.6" stroke-linecap="round"></path>
+      <circle cx="48" cy="44" r="2.8" fill="#EAF3FB"></circle>
+        <circle cx="74" cy="74" r="15" fill="#4FB2FF"></circle>
+      <path d="M74 61v26M61 74h26" stroke="#0B1622" stroke-width="2.8" stroke-linecap="round"></path></g>
+    </svg>
+    <div style="font-size:28px;font-weight:600;letter-spacing:-.02em;color:#EAF3FB;margin-top:16px">Body Clock</div>
+    <div style="display:flex;align-items:center;gap:14px;margin-top:16px;padding-top:14px;border-top:1px solid #31435A">
+      <svg width="46" height="46" viewBox="0 0 96 96" fill="none">
+        <rect x="0" y="0" width="96" height="96" rx="22" fill="#16233A"></rect>
+        <g transform="rotate(-90 48 48)" fill="none" stroke-linecap="round" stroke-width="18">
+          <circle cx="48" cy="48" r="38" stroke="#EAF3FB" stroke-dasharray="63 176" opacity=".9"></circle>
+          <circle cx="48" cy="48" r="38" stroke="#EAF3FB" stroke-dasharray="45 194" stroke-dashoffset="-76" opacity=".42"></circle>
+          <circle cx="48" cy="48" r="38" stroke="#4FB2FF" stroke-dasharray="70 169" stroke-dashoffset="-138"></circle>
+        </g>
+          <path d="M48 48V31M48 48h12" stroke="#EAF3FB" stroke-width="5.5" stroke-linecap="round"></path>
+          <circle cx="48" cy="48" r="3.4" fill="#EAF3FB"></circle>
+        <circle cx="74" cy="74" r="17" fill="#4FB2FF"></circle>
+        <path d="M74 66.5v15M66.5 74h15" stroke="#0B1622" stroke-width="4" stroke-linecap="round"></path>
+      </svg>
+      <span style="font:400 11px/1.5 system-ui,sans-serif;color:rgba(255,255,255,.45)">应用图标（自带底）</span>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="dv-opt" id="13c"><div class="dv-olabel"><a class="dv-oid" href="#13c">13c</a>横向字标（网站 / 平板）—— Body 的 o 就是那个环</div>
+<div style="display:flex;gap:14px">
+  <div style="width:236px;background:#FAFDFF;border:1px solid rgba(0,0,0,.1);border-radius:18px;padding:24px;font-family:var(--font-ui)">
+    <div style="display:flex;align-items:center;gap:1px;height:92px">
+      <span style="font-size:40px;font-weight:600;letter-spacing:-.03em;color:#08131F;line-height:1">B</span>
+      <svg width="34" height="34" viewBox="0 0 48 48" fill="none" style="margin:7px 0 0">
+        <g transform="rotate(-90 21 21)" fill="none" stroke-linecap="round" stroke-width="3">
+          <circle cx="21" cy="21" r="16" stroke="#08131F" stroke-dasharray="27 74" opacity=".9"></circle>
+          <circle cx="21" cy="21" r="16" stroke="#08131F" stroke-dasharray="15 86" stroke-dashoffset="-30" opacity=".5"></circle>
+          <circle cx="21" cy="21" r="16" stroke="#08131F" stroke-dasharray="22 79" stroke-dashoffset="-48" opacity=".7"></circle>
+          <circle cx="21" cy="21" r="16" stroke="#0072E8" stroke-dasharray="23 78" stroke-dashoffset="-73"></circle>
+        </g>
+        <path d="M21 21v-8M21 21h6" stroke="#08131F" stroke-width="1.6" stroke-linecap="round"></path>
+        <circle cx="33.5" cy="33.5" r="6.7" fill="#FAFDFF" stroke="#0072E8" stroke-width="1.6"></circle>
+        <path d="M33.5 30v7M30 33.5h7" stroke="#0072E8" stroke-width="1.6" stroke-linecap="round"></path>
+      </svg>
+      <span style="font-size:40px;font-weight:600;letter-spacing:-.03em;color:#08131F;line-height:1">dy&nbsp;Clock</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px;margin-top:18px;padding-top:14px;border-top:1px solid #CFDEEA">
+      <div style="display:flex;align-items:center;gap:.5px">
+        <span style="font-size:19px;font-weight:600;letter-spacing:-.03em;color:#08131F">B</span>
+        <svg width="16" height="16" viewBox="0 0 48 48" fill="none" style="margin-top:3px">
+          <g transform="rotate(-90 21 21)" fill="none" stroke-linecap="round" stroke-width="6">
+            <circle cx="21" cy="21" r="15" stroke="#08131F" stroke-dasharray="26 69" opacity=".9"></circle>
+            <circle cx="21" cy="21" r="15" stroke="#08131F" stroke-dasharray="32 63" stroke-dashoffset="-30" opacity=".7"></circle>
+            <circle cx="21" cy="21" r="15" stroke="#0072E8" stroke-dasharray="23 72" stroke-dashoffset="-66"></circle>
+          </g>
+          <circle cx="32.7" cy="32.7" r="6.3" fill="#0072E8"></circle>
+          <path d="M32.7 29.5v6.4M29.5 32.7h6.4" stroke="#FAFDFF" stroke-width="3" stroke-linecap="round"></path>
+        </svg>
+        <span style="font-size:19px;font-weight:600;letter-spacing:-.03em;color:#08131F">dy&nbsp;Clock</span>
+      </div>
+      <span style="font:400 11px/1.5 system-ui,sans-serif;color:rgba(0,0,0,.42)">网页页眉 / 平板侧栏<br>图标位仍用 <a class="dv-oid" href="#16d">16d</a></span>
+    </div>
+  </div>
+  <div style="width:236px;background:#0B1622;border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:24px;font-family:var(--font-ui)">
+    <div style="display:flex;align-items:center;gap:1px;height:92px">
+      <span style="font-size:40px;font-weight:600;letter-spacing:-.03em;color:#EAF3FB;line-height:1">B</span>
+      <svg width="34" height="34" viewBox="0 0 48 48" fill="none" style="margin:7px 0 0">
+        <g transform="rotate(-90 21 21)" fill="none" stroke-linecap="round" stroke-width="3">
+          <circle cx="21" cy="21" r="16" stroke="#EAF3FB" stroke-dasharray="27 74" opacity=".9"></circle>
+          <circle cx="21" cy="21" r="16" stroke="#EAF3FB" stroke-dasharray="15 86" stroke-dashoffset="-30" opacity=".45"></circle>
+          <circle cx="21" cy="21" r="16" stroke="#EAF3FB" stroke-dasharray="22 79" stroke-dashoffset="-48" opacity=".65"></circle>
+          <circle cx="21" cy="21" r="16" stroke="#4FB2FF" stroke-dasharray="23 78" stroke-dashoffset="-73"></circle>
+        </g>
+        <path d="M21 21v-8M21 21h6" stroke="#EAF3FB" stroke-width="1.6" stroke-linecap="round"></path>
+        <circle cx="33.5" cy="33.5" r="6.7" fill="#0B1622" stroke="#4FB2FF" stroke-width="1.6"></circle>
+        <path d="M33.5 30v7M30 33.5h7" stroke="#4FB2FF" stroke-width="1.6" stroke-linecap="round"></path>
+      </svg>
+      <span style="font-size:40px;font-weight:600;letter-spacing:-.03em;color:#EAF3FB;line-height:1">dy&nbsp;Clock</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px;margin-top:18px;padding-top:14px;border-top:1px solid #31435A">
+      <div style="display:flex;align-items:center;gap:.5px">
+        <span style="font-size:19px;font-weight:600;letter-spacing:-.03em;color:#EAF3FB">B</span>
+        <svg width="16" height="16" viewBox="0 0 48 48" fill="none" style="margin-top:3px">
+          <g transform="rotate(-90 21 21)" fill="none" stroke-linecap="round" stroke-width="6">
+            <circle cx="21" cy="21" r="15" stroke="#EAF3FB" stroke-dasharray="26 69" opacity=".9"></circle>
+            <circle cx="21" cy="21" r="15" stroke="#EAF3FB" stroke-dasharray="32 63" stroke-dashoffset="-30" opacity=".65"></circle>
+            <circle cx="21" cy="21" r="15" stroke="#4FB2FF" stroke-dasharray="23 72" stroke-dashoffset="-66"></circle>
+          </g>
+          <circle cx="32.7" cy="32.7" r="6.3" fill="#4FB2FF"></circle>
+          <path d="M32.7 29.5v6.4M29.5 32.7h6.4" stroke="#0B1622" stroke-width="3" stroke-linecap="round"></path>
+        </svg>
+        <span style="font-size:19px;font-weight:600;letter-spacing:-.03em;color:#EAF3FB">dy&nbsp;Clock</span>
+      </div>
+      <span style="font:400 11px/1.5 system-ui,sans-serif;color:rgba(255,255,255,.45)">反白同一套线<br>最小 18px 高</span>
+    </div>
+  </div>
+</div>
+</div>
+
+<p class="dv-next">可以说："出全套 app 图标尺寸与 SVG" · "分段换成真实状态色" · "做一版加载动画：弧段依次画出"</p>
+</section>
+
+<section class="dv-turn" id="t11">
+<div class="dv-thd"><a class="dv-tid" href="#t11">11</a><span class="dv-tname">图标 —— 细线一套</span></div>
+<p class="dv-note">建议就用 <strong>Lucide</strong>（MIT、开源、24px 网格、圆头圆角），设计系统里也是它——不用 icon font：字体图标不能双色、在无障碍朗读里是乱码、缩放时描边会跟着字重变。统一规则：24px 画布、描边 <strong>1.5px</strong>、圆头圆角、只用描边不填充，界面里渲染 20–22px，行内 16px。下面这排按钮可以改描边粗细看效果，选定后我把五屏里的图标统一过一遍。</p>
+<div class="dv-opts">
+
+<div class="dv-opt" id="11a"><div class="dv-olabel"><a class="dv-oid" href="#11a">11a</a>图标表 —— 点上方数字换描边粗细</div>
+<div style="width:520px;background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:18px;padding:20px 22px;font-family:var(--font-ui)">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+    <span style="font:600 11px/1 system-ui,sans-serif;letter-spacing:.06em;color:rgba(0,0,0,.4)">描边</span>
+    <sc-for list="{{ strokeOptions }}" as="o" hint-placeholder-count="4">
+      <div onClick="{{ o.onClick }}" style="height:28px;padding:0 12px;display:flex;align-items:center;border-radius:999px;cursor:pointer;font:600 12px/1 ui-monospace,monospace;background:{{ o.bg }};color:{{ o.fg }};border:1px solid {{ o.bd }}">{{ o.label }}</div>
+    </sc-for>
+    <span style="font:400 11px/1 system-ui,sans-serif;color:rgba(0,0,0,.4);margin-inline-start:4px">{{ iconSource }} · {{ iconStroke }}px</span>
+  </div>
+
+  <div style="display:flex;gap:18px;align-items:center;padding:16px 18px;background:var(--surface-sunken);border-radius:14px;margin-bottom:18px;color:var(--text-primary)">
+    <sc-for list="{{ iconsBig }}" as="i" hint-placeholder-count="6">
+      {{ i.el }}
+    </sc-for>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:14px 10px">
+    <sc-for list="{{ icons }}" as="i" hint-placeholder-count="24">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
+        <div style="width:100%;aspect-ratio:1.1;border:1px solid var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;background:var(--surface-card);color:var(--text-primary)">
+          {{ i.el }}
+        </div>
+        <span style="font:400 10px/1 ui-monospace,monospace;color:rgba(0,0,0,.45)">{{ i.name }}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="display:flex;gap:16px;margin-top:20px;padding-top:16px;border-top:1px solid var(--divider)">
+    <div style="flex:1">
+      <div style="font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:5px">用法</div>
+      <div style="font-size:12.5px;line-height:1.6;color:var(--text-secondary);text-wrap:pretty">导航与工具栏 22px；行内与元信息 16px；状态格子里的色条不是图标，别换成图形。图标一律 <span style="font-family:ui-monospace,monospace">currentColor</span>，颜色由文字色决定。</div>
+    </div>
+    <div style="flex:1">
+      <div style="font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:5px">不要</div>
+      <div style="font-size:12.5px;line-height:1.6;color:var(--text-secondary);text-wrap:pretty">不要 icon font、不要实心版本混用、不要给图标加圆形底色（除非是可点的独立按钮）、RTL 下只镜像方向性图标（返回、发送），时钟与相机不镜像。</div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+<p class="dv-next">可以说："就用 1.5px，把五屏统一过一遍" · "补上导出用的 SVG sprite" · "再看看 2px 的粗一点版本"</p>
+</section>
+
+<section class="dv-turn" id="t10">
+<div class="dv-thd"><a class="dv-tid" href="#t10">10</a><span class="dv-tname">六套并排 —— 一张总表</span></div>
+<p class="dv-note">上排明、下排暗，左起暖 → 冷 → 低饱和，一一对位。每列都是同一块 UI，横着看是色温差异，竖着看是明暗差异；角标是这套配色最初的编号。每列下方那 9 个小格是补齐的语义色：bg_bubble / bg_overlay / text_secondary / text_disabled / divider / scrim / on_brand / danger / success，加上此前的 muted-on-inverse 与 accent-on-inverse，一共 19 个键。<a class="dv-oid" href="#10g">10g</a> 是六套合并后的 color.json。</p>
+<div class="dv-opts">
+
+<div class="dv-opt" id="10all"><div class="dv-olabel"><a class="dv-oid" href="#10all">10</a>总表</div>
+<div style="display:grid;grid-template-columns:repeat(3,236px);gap:16px;background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:18px;padding:20px;font-family:var(--font-ui)">
+  <sc-for list="{{ allPalettes }}" as="p" hint-placeholder-count="6">
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:baseline;gap:7px">
+        <span style="font-size:14px;font-weight:700;letter-spacing:-.01em;color:#1a1a1a">{{ p.name }}</span>
+        <span class="dv-oid">{{ p.src }}</span>
+      </div>
+      <div style="font-family:ui-monospace,monospace;font-size:10.5px;color:rgba(0,0,0,.45)">{{ p.key }}</div>
+      <div style="background:{{ p.page }};border:1px solid rgba(0,0,0,.08);border-radius:14px;padding:11px">
+        <div style="border-radius:12px;background:{{ p.inverse }};padding:10px 11px;position:relative;overflow:hidden">
+          <span style="position:absolute;inset-inline-start:0;top:0;bottom:0;width:3px;background:{{ p.accent }}"></span>
+          <div style="font-family:ui-monospace,monospace;font-size:9px;letter-spacing:.06em;color:{{ p.mutedInv }}">当前状态</div>
+          <div style="font-size:16px;font-weight:700;letter-spacing:-.02em;color:{{ p.page }};margin-top:3px">工作中</div>
+          <div style="font-family:ui-monospace,monospace;font-size:10.5px;color:{{ p.mutedInv }};margin-top:2px">已 1:22:47</div>
+        </div>
+        <div style="display:flex;gap:7px;margin-top:8px">
+          <div style="flex:1;aspect-ratio:1.2;background:{{ p.card }};border:1px solid {{ p.line }};border-radius:11px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px">
+            <span style="width:18px;height:3px;border-radius:2px;background:{{ p.accent }};margin-bottom:3px"></span>
+            <span style="font-size:12px;font-weight:700;color:{{ p.ink }}">用餐中</span>
+          </div>
+          <div style="flex:1;aspect-ratio:1.2;background:{{ p.accentSoft }};border:1px solid {{ p.line }};border-radius:11px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px">
+            <span style="width:18px;height:3px;border-radius:2px;background:{{ p.accent }};margin-bottom:3px"></span>
+            <span style="font-size:12px;font-weight:700;color:{{ p.accent }}">午睡中</span>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:4px">
+        <sc-for list="{{ p.swatches }}" as="sw" hint-placeholder-count="8">
+          <div style="flex:1;height:22px;border-radius:5px;background:{{ sw.bg }};border:1px solid rgba(0,0,0,.08)"></div>
+        </sc-for>
+      </div>
+      <div style="display:flex;gap:4px">
+        <sc-for list="{{ p.rampCells }}" as="r" hint-placeholder-count="4">
+          <div style="flex:1;height:14px;border-radius:4px;background:{{ r.bg }}"></div>
+        </sc-for>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px 6px">
+        <sc-for list="{{ p.extras }}" as="e" hint-placeholder-count="9">
+          <div style="display:flex;align-items:center;gap:5px;min-width:0">
+            <span style="width:14px;height:14px;border-radius:4px;flex:none;background:{{ e.bg }};box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)"></span>
+            <span style="font:400 8.5px/1.1 ui-monospace,monospace;color:rgba(0,0,0,.5);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ e.token }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="font-family:ui-monospace,monospace;font-size:10px;color:rgba(0,0,0,.5);text-transform:uppercase">{{ p.accent }}</div>
+    </div>
+  </sc-for>
+</div>
+</div>
+
+<div class="dv-opt" id="10g"><div class="dv-olabel"><a class="dv-oid" href="#10g">10g</a>color.json —— 六套合并</div>
+<div style="width:430px;max-height:760px;background:#13161A;border-radius:16px;padding:18px 20px;overflow:auto">
+  <div style="font-family:ui-monospace,monospace;font-size:10.5px;letter-spacing:.06em;color:#8D9094;margin-bottom:10px">color.json · 6 themes</div>
+  <div style="font-family:ui-monospace,Menlo,monospace;font-size:10.5px;line-height:1.7;color:#DEE2E6;white-space:pre">{{ allJson }}</div>
+</div>
+</div>
+</div>
+<p class="dv-next">可以说："默认用哪套，其余进设置" · "给每套配一张 5a 首页整屏" · "加一套高对比无障碍"</p>
+</section>
+
+<section class="dv-turn" id="t5">
+<div class="dv-thd"><a class="dv-tid" href="#t5">5</a><span class="dv-tname">格子 = 状态切换器 · 导航收进悬浮按钮</span></div>
+<p class="dv-note">拍照并进了「用餐中」：不自建取景框，直接调起系统相机（美颜、夜景、HDR 都归系统），回来只剩一张确认卡（<a class="dv-oid" href="#5d">5d</a>），这一餐结束后留下详情页（<a class="dv-oid" href="#5e">5e</a>）。上方两排开关：配色六套、界面语言四种（中/英/德/العربية，含 RTL），<a class="dv-oid" href="#5a">5a</a> 会实时切换，规则见 <a class="dv-oid" href="#5f">5f</a>。这五屏会实时换色（默认 Daylight Arctic，六套见第 <a class="dv-oid" href="#t10">10</a> 轮总表）。改动很关键：点格子不是"记一件事"，而是<strong>把当前状态切过去</strong>——上一个状态自动结束并写下时长，所以一天不需要任何补录就是连续的。首页顶部永远是"你现在处于什么状态、已经多久"。进入某个状态后，页面只提供这个状态需要的输入（用餐给拍照和吃了什么，午睡给一块黑屏和计时）。底部彻底不要导航栏了：<strong>每一屏右下角都是同一个悬浮按钮</strong>（5a / 5b / 5c 都在），点开是一叠药丸菜单——"问它"（主色，随手一问）、"此刻 / 今天"、"设置"，收起时只是一个圆点。返回只有这一种操作，不会出现有的屏用返回箭头、有的屏用 tab；从状态屏点"此刻"回去不结束状态、计时继续，要结束仍用屏底的"切换状态"。原来的"金库"并入设置——数据与模型本来就是设置属性。<a class="dv-oid" href="#5a">5a</a> 的悬浮按钮可以真点开关，格子也可以真点，计时会跑，切换记录会写进今天。</p>
+<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 18px"><span style="font:600 11px/1 system-ui,sans-serif;letter-spacing:.06em;color:rgba(0,0,0,.4)">配色</span><sc-for list="{{ t5Themes }}" as="th" hint-placeholder-count="6"><div onClick="{{ th.onClick }}" style="display:flex;align-items:center;gap:7px;height:30px;padding:0 12px 0 8px;border-radius:999px;cursor:pointer;font:600 12px/1 system-ui,sans-serif;background:{{ th.bg }};color:{{ th.fg }};border:1px solid {{ th.bd }}"><span style="display:flex;gap:2px"><span style="width:9px;height:14px;border-radius:3px 0 0 3px;background:{{ th.sw1 }}"></span><span style="width:9px;height:14px;background:{{ th.sw2 }}"></span><span style="width:9px;height:14px;border-radius:0 3px 3px 0;background:{{ th.sw3 }}"></span></span>{{ th.label }}</div></sc-for></div>
+<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 18px"><span style="font:600 11px/1 system-ui,sans-serif;letter-spacing:.06em;color:rgba(0,0,0,.4)">界面语言</span><sc-for list="{{ t5Langs }}" as="lg" hint-placeholder-count="4"><div onClick="{{ lg.onClick }}" style="height:30px;padding:0 13px;display:flex;align-items:center;border-radius:999px;cursor:pointer;font:600 12px/1 system-ui,sans-serif;background:{{ lg.bg }};color:{{ lg.fg }};border:1px solid {{ lg.bd }}">{{ lg.label }}</div></sc-for><span style="font:400 11px/1.4 system-ui,sans-serif;color:rgba(0,0,0,.4)">影响 5a / 5c / 5g —— 记录内容保持用户输入时的语言</span></div>
+<div class="dv-opts" style="{{ t5Vars }}">
+
+<div class="dv-opt" id="5a"><div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>首页 = 当前状态 + 可切换的九格（计时在跑）</div>
+<x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" hint-size="428px,908px">
+<div dir="{{ uiDir }}" lang="{{ uiLang }}" style="display:flex;flex-direction:column;min-height:100%;background:var(--a-page,#EEF4FA);font-family:var(--font-ui)">
+  <sc-if value="{{ running }}" hint-placeholder-val="{{ true }}">
+  <div style="margin:14px 14px 0;padding:18px 18px 16px;border-radius:22px;background:var(--a-inverse,#0B1622);position:relative;overflow:hidden">
+    <span style="position:absolute;inset-inline-start:0;top:0;bottom:0;width:4px;background:{{ curColor }}"></span>
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <span style="font-family:var(--font-mono);font-size:10.5px;letter-spacing:.08em;color:var(--a-mutedinv,#96ACC0)">{{ L.cur }} · {{ sinceLabel }}</span>
+      <span onClick="{{ endNow }}" style="font-size:12.5px;font-weight:600;color:var(--a-accentinv,#7FC0FF);cursor:pointer">{{ L.end }}</span>
+    </div>
+    <div style="font-size:26px;font-weight:700;line-height:1.2;letter-spacing:-.02em;color:var(--a-white,#F5FAFF);margin-top:8px;overflow-wrap:break-word">{{ curState }}</div>
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-top:6px">
+      <div style="font-family:var(--font-mono);font-size:14px;color:var(--a-mutedinv,#96ACC0)">{{ elapsed }}</div>
+      <div onClick="{{ toggleNote }}" style="display:flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:999px;background:var(--a-fillinv,rgba(255,255,255,.10));border:1px solid var(--a-mutedinv,#96ACC0);color:var(--a-white,#F5FAFF);font-size:12.5px;font-weight:600;cursor:pointer;flex:none">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>{{ L.note }}
+      </div>
+    </div>
+    <sc-if value="{{ noteOpen }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:12px">
+        <sc-for list="{{ noteChips }}" as="n" hint-placeholder-count="3">
+          <div onClick="{{ n.onClick }}" style="height:32px;padding:0 12px;display:flex;align-items:center;border-radius:999px;background:var(--a-white,#F5FAFF);color:var(--a-ink,#08131F);font-size:12.5px;font-weight:600;cursor:pointer">{{ n.label }}</div>
+        </sc-for>
+        <div style="width:32px;height:32px;border-radius:50%;border:1px solid var(--a-mutedinv,#96ACC0);display:flex;align-items:center;justify-content:center;color:var(--a-white,#F5FAFF);cursor:pointer">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path></svg>
+        </div>
+        <div style="width:32px;height:32px;border-radius:50%;border:1px solid var(--a-mutedinv,#96ACC0);display:flex;align-items:center;justify-content:center;color:var(--a-white,#F5FAFF);cursor:pointer">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z"></path><circle cx="12" cy="13" r="3.4"></circle></svg>
+        </div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ hasNotes }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:12px;padding-top:11px;border-top:1px solid var(--a-divinv,rgba(255,255,255,.16))">
+        <sc-for list="{{ notes }}" as="n" hint-placeholder-count="1">
+          <div style="display:flex;align-items:baseline;gap:8px">
+            <span style="width:4px;height:4px;border-radius:50%;background:{{ curColor }};flex:none"></span>
+            <span style="font-size:13.5px;line-height:1.45;color:var(--a-white,#F5FAFF)">{{ n.text }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ idle }}" hint-placeholder-val="{{ false }}">
+  <div style="margin:14px 14px 0;padding:18px 18px 16px;border-radius:22px;background:var(--a-card,#FAFDFF);border:1px dashed var(--a-line2,#A9BFD2);position:relative">
+    <div style="font-family:var(--font-mono);font-size:10.5px;letter-spacing:.08em;color:var(--a-muted,#4E6478)">{{ endedLine }}</div>
+    <div style="font-size:26px;font-weight:700;line-height:1.2;letter-spacing:-.02em;color:var(--a-ink,#08131F);margin-top:8px;overflow-wrap:break-word">{{ L.idleT }}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:6px">
+      <div style="font-family:var(--font-mono);font-size:14px;color:var(--a-muted,#4E6478)">{{ idleElapsed }}</div>
+      <div onClick="{{ resumeNow }}" style="display:flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:999px;background:var(--a-card,#FAFDFF);border:1px solid var(--a-line,#CFDEEA);color:var(--a-ink2,#33475C);font-size:12.5px;font-weight:600;cursor:pointer;flex:none">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14l-4-4 4-4"></path><path d="M5 10h9a5 5 0 0 1 0 10h-3"></path></svg>{{ resumeLabel }}
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+
+  <div style="padding:13px 18px 4px;font-size:12.5px;line-height:1.45;color:var(--a-muted,#4E6478);text-wrap:pretty">{{ L.hint }}</div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:9px;padding:4px 16px 0">
+    <sc-for list="{{ states }}" as="st" hint-placeholder-count="9">
+      <div onClick="{{ st.onClick }}" style="aspect-ratio:1;background:{{ st.bg }};border:1px solid {{ st.bd }};border-radius:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:8px 7px;box-sizing:border-box;text-align:center;overflow:hidden;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,1,.05)">
+        <span style="width:24px;height:4px;border-radius:2px;background:{{ st.color }};margin-bottom:5px;flex:none"></span>
+        <span style="font-size:15px;font-weight:700;line-height:1.2;letter-spacing:-.01em;color:{{ st.fg }};hyphens:auto;overflow-wrap:break-word;max-width:100%">{{ st.name }}</span>
+        <span style="font-size:10.5px;line-height:1.25;color:{{ st.subFg }};overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;max-width:100%">{{ st.sub }}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="padding:14px 18px 0">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px">
+      <span style="font-size:12px;font-weight:700;letter-spacing:.06em;color:var(--a-muted,#4E6478)">{{ L.today }}</span>
+      <span style="font-family:var(--font-mono);font-size:11px;color:var(--a-muted,#4E6478)">{{ logCount }}</span>
+    </div>
+    <sc-for list="{{ logTop }}" as="l" hint-placeholder-count="3">
+      <div style="display:flex;gap:13px;padding:9px 0;border-bottom:1px solid var(--a-divider,rgba(78,100,120,.18))">
+        <span style="font-family:var(--font-mono);font-size:11.5px;color:var(--a-muted,#4E6478);flex:none;padding-top:2px">{{ l.time }}</span>
+        <span style="font-size:14.5px;line-height:1.5;color:var(--a-ink,#08131F);text-wrap:pretty">{{ l.text }}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="flex:1;min-height:40px"></div>
+  <div style="position:sticky;bottom:0;align-self:flex-end;padding:0 16px 18px"><div style="position:relative;width:58px;height:58px"><sc-if value="{{ fabOpen }}" hint-placeholder-val="{{ true }}">
+      <div style="position:absolute;bottom:100%;inset-inline-end:-8px;margin-bottom:9px;padding:10px;border-radius:28px;background:var(--a-scrim,rgba(238,244,250,.9));backdrop-filter:blur(8px);box-shadow:0 10px 30px rgba(0,40,90,.14);display:flex;flex-direction:column;align-items:stretch;width:max-content;gap:9px"><div style="display:flex;align-items:center;gap:9px;height:42px;padding:0 16px;border-radius:999px;cursor:pointer;background:var(--a-accent,#0072E8);border:1px solid transparent;box-shadow:0 4px 14px rgba(0,40,90,.14)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"></path><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"></path></svg><span style="flex:1;text-align:end;font-size:14px;font-weight:700;white-space:nowrap;color:#FFFFFF">{{ L.nav3 }}</span>
+      </div>
+        <div style="display:flex;align-items:center;gap:9px;height:42px;padding:0 16px;border-radius:999px;cursor:pointer;background:var(--a-card,#FAFDFF);border:1px solid var(--a-line,#CFDEEA);box-shadow:0 4px 14px rgba(0,40,90,.14)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4E6478" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"></rect><path d="M3 10h18M8 3v4M16 3v4"></path></svg><span style="flex:1;text-align:end;font-size:14px;font-weight:700;white-space:nowrap;color:var(--a-ink2,#33475C)">{{ L.nav2 }}</span>
+      </div>
+        <div style="display:flex;align-items:center;gap:9px;height:42px;padding:0 16px;border-radius:999px;cursor:pointer;background:var(--a-card,#FAFDFF);border:1px solid var(--a-line,#CFDEEA);box-shadow:0 4px 14px rgba(0,40,90,.14)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4E6478" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="3"></rect><path d="M3 9h18M8 2v4M16 2v4M8 13h3M14 13h3M8 17h3"></path></svg><span style="flex:1;text-align:end;font-size:14px;font-weight:700;white-space:nowrap;color:var(--a-ink2,#33475C)">{{ L.calNav }}</span></div>
+        <div style="display:flex;align-items:center;gap:9px;height:42px;padding:0 16px;border-radius:999px;cursor:pointer;background:var(--a-card,#FAFDFF);border:1px solid var(--a-line,#CFDEEA);box-shadow:0 4px 14px rgba(0,40,90,.14)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4E6478" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg><span style="flex:1;text-align:end;font-size:14px;font-weight:700;white-space:nowrap;color:var(--a-ink2,#33475C)">{{ L.nav4 }}</span>
+      </div>
+      </div>
+    </sc-if>
+    <div onClick="{{ toggleFab }}" style="width:58px;height:58px;border-radius:50%;background:var(--a-ink,#08131F);box-shadow:0 8px 22px rgba(0,40,90,.3);display:flex;align-items:center;justify-content:center;cursor:pointer">
+      <sc-if value="{{ fabOpen }}" hint-placeholder-val="{{ true }}"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></sc-if>
+      <sc-if value="{{ fabClosed }}" hint-placeholder-val="{{ false }}"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"></path><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"></path></svg></sc-if>
+    </div>
+    </div>
+  </div>
+</div>
+</x-import>
+</div>
+
+<div class="dv-opt" id="5h"><div class="dv-olabel"><a class="dv-oid" href="#5h">5h</a>点了「结束」之后 —— 此刻没有状态，缺口不会自己补上</div>
+<x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" hint-size="428px,908px">
+<div dir="{{ uiDir }}" lang="{{ uiLang }}" style="display:flex;flex-direction:column;min-height:100%;background:var(--a-page,#EEF4FA);font-family:var(--font-ui)">
+  <div style="margin:14px 14px 0;padding:18px 18px 16px;border-radius:22px;background:var(--a-card,#FAFDFF);border:1px dashed var(--a-line2,#A9BFD2);position:relative">
+    <div style="font-family:var(--font-mono);font-size:10.5px;letter-spacing:.08em;color:var(--a-muted,#4E6478)">刚结束「工作中」· 共 1h23m</div>
+    <div style="font-size:26px;font-weight:700;line-height:1.2;letter-spacing:-.02em;color:var(--a-ink,#08131F);margin-top:8px;overflow-wrap:break-word">此刻没有状态</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:6px">
+      <div style="font-family:var(--font-mono);font-size:14px;color:var(--a-muted,#4E6478)">空 6 分钟</div>
+      <div style="display:flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:999px;background:var(--a-card,#FAFDFF);border:1px solid var(--a-line,#CFDEEA);color:var(--a-ink2,#33475C);font-size:12.5px;font-weight:600;cursor:pointer;flex:none">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14l-4-4 4-4"></path><path d="M5 10h9a5 5 0 0 1 0 10h-3"></path></svg>撤销，回到 工作中
+      </div>
+    </div>
+  </div>
+
+
+  <div style="padding:13px 18px 4px;font-size:12.5px;line-height:1.45;color:var(--a-muted,#4E6478);text-wrap:pretty">{{ L.hint }}</div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:9px;padding:4px 16px 0">
+    <sc-for list="{{ states }}" as="st" hint-placeholder-count="9">
+      <div onClick="{{ st.onClick }}" style="aspect-ratio:1;background:{{ st.bg }};border:1px solid {{ st.bd }};border-radius:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:8px 7px;box-sizing:border-box;text-align:center;overflow:hidden;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,1,.05)">
+        <span style="width:24px;height:4px;border-radius:2px;background:{{ st.color }};margin-bottom:5px;flex:none"></span>
+        <span style="font-size:15px;font-weight:700;line-height:1.2;letter-spacing:-.01em;color:{{ st.fg }};hyphens:auto;overflow-wrap:break-word;max-width:100%">{{ st.name }}</span>
+        <span style="font-size:10.5px;line-height:1.25;color:{{ st.subFg }};overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;max-width:100%">{{ st.sub }}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="padding:14px 18px 0">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px">
+      <span style="font-size:12px;font-weight:700;letter-spacing:.06em;color:var(--a-muted,#4E6478)">{{ L.today }}</span>
+      <span style="font-family:var(--font-mono);font-size:11px;color:var(--a-muted,#4E6478)">{{ logCount }}</span>
+    </div>
+    <sc-for list="{{ logTop }}" as="l" hint-placeholder-count="3">
+      <div style="display:flex;gap:13px;padding:9px 0;border-bottom:1px solid var(--a-divider,rgba(78,100,120,.18))">
+        <span style="font-family:var(--font-mono);font-size:11.5px;color:var(--a-muted,#4E6478);flex:none;padding-top:2px">{{ l.time }}</span>
+        <span style="font-size:14.5px;line-height:1.5;color:var(--a-ink,#08131F);text-wrap:pretty">{{ l.text }}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="flex:1;min-height:40px"></div>
+  <div style="position:sticky;bottom:0;align-self:flex-end;padding:0 16px 18px"><div style="position:relative;width:58px;height:58px"><sc-if value="{{ fabOpen }}" hint-placeholder-val="{{ true }}">
+      <div style="position:absolute;bottom:100%;inset-inline-end:-8px;margin-bottom:9px;padding:10px;border-radius:28px;background:var(--a-scrim,rgba(238,244,250,.9));backdrop-filter:blur(8px);box-shadow:0 10px 30px rgba(0,40,90,.14);display:flex;flex-direction:column;align-items:stretch;width:max-content;gap:9px"><div style="display:flex;align-items:center;gap:9px;height:42px;padding:0 16px;border-radius:999px;cursor:pointer;background:var(--a-accent,#0072E8);border:1px solid transparent;box-shadow:0 4px 14px rgba(0,40,90,.14)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"></path><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"></path></svg><span style="flex:1;text-align:end;font-size:14px;font-weight:700;white-space:nowrap;color:#FFFFFF">{{ L.nav3 }}</span>
+      </div>
+        <div style="display:flex;align-items:center;gap:9px;height:42px;padding:0 16px;border-radius:999px;cursor:pointer;background:var(--a-card,#FAFDFF);border:1px solid var(--a-line,#CFDEEA);box-shadow:0 4px 14px rgba(0,40,90,.14)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4E6478" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"></rect><path d="M3 10h18M8 3v4M16 3v4"></path></svg><span style="flex:1;text-align:end;font-size:14px;font-weight:700;white-space:nowrap;color:var(--a-ink2,#33475C)">{{ L.nav2 }}</span>
+      </div>
+        <div style="display:flex;align-items:center;gap:9px;height:42px;padding:0 16px;border-radius:999px;cursor:pointer;background:var(--a-card,#FAFDFF);border:1px solid var(--a-line,#CFDEEA);box-shadow:0 4px 14px rgba(0,40,90,.14)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4E6478" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="3"></rect><path d="M3 9h18M8 2v4M16 2v4M8 13h3M14 13h3M8 17h3"></path></svg><span style="flex:1;text-align:end;font-size:14px;font-weight:700;white-space:nowrap;color:var(--a-ink2,#33475C)">{{ L.calNav }}</span></div>
+        <div style="display:flex;align-items:center;gap:9px;height:42px;padding:0 16px;border-radius:999px;cursor:pointer;background:var(--a-card,#FAFDFF);border:1px solid var(--a-line,#CFDEEA);box-shadow:0 4px 14px rgba(0,40,90,.14)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4E6478" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg><span style="flex:1;text-align:end;font-size:14px;font-weight:700;white-space:nowrap;color:var(--a-ink2,#33475C)">{{ L.nav4 }}</span>
+      </div>
+      </div>
+    </sc-if>
+    <div onClick="{{ toggleFab }}" style="width:58px;height:58px;border-radius:50%;background:var(--a-ink,#08131F);box-shadow:0 8px 22px rgba(0,40,90,.3);display:flex;align-items:center;justify-content:center;cursor:pointer">
+      <sc-if value="{{ fabOpen }}" hint-placeholder-val="{{ true }}"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></sc-if>
+      <sc-if value="{{ fabClosed }}" hint-placeholder-val="{{ false }}"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"></path><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"></path></svg></sc-if>
+    </div>
+    </div>
+  </div>
+</div>
+</x-import>
+</div>
+
+<div class="dv-opt" id="5b"><div class="dv-olabel"><a class="dv-oid" href="#5b">5b</a>状态内页 —— 每个状态只给它需要的输入（上方切换看三种）</div>
+<x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" hint-size="428px,908px">
+<div style="display:flex;flex-direction:column;min-height:100%;background:var(--a-page,#EEF4FA);font-family:var(--font-ui)">
+  <div style="display:flex;gap:6px;padding:12px 14px;background:var(--a-sunken,#E3ECF5);border-bottom:1px solid var(--a-divider,rgba(78,100,120,.18))">
+    <sc-for list="{{ demoTabs }}" as="d" hint-placeholder-count="3">
+      <div onClick="{{ d.onClick }}" style="flex:1;height:32px;display:flex;align-items:center;justify-content:center;border-radius:999px;cursor:pointer;font-size:12.5px;font-weight:600;background:{{ d.bg }};color:{{ d.fg }};border:1px solid var(--a-line,#CFDEEA)">{{ d.name }}</div>
+    </sc-for>
+  </div>
+
+
+  <sc-if value="{{ demoEat }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:1;display:flex;flex-direction:column;padding:20px 18px 0">
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--a-r1,#00A6C9)">用餐中 · 已 12 分 04 秒</div>
+      <div style="font-size:24px;font-weight:700;letter-spacing:-.02em;color:var(--a-ink,#08131F);margin-top:6px">这顿吃了什么？</div>
+      <div style="height:150px;margin-top:16px"><image-slot id="eat-5b" shape="rounded" radius="18" placeholder="拍一张 / 拖入照片"></image-slot></div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:14px">
+        <sc-for list="{{ foodTags }}" as="f" hint-placeholder-count="4">
+          <div onClick="{{ f.onClick }}" style="height:32px;padding:0 13px;display:flex;align-items:center;border-radius:999px;cursor:pointer;font-size:13px;font-weight:600;background:{{ f.bg }};color:{{ f.fg }};border:1px solid {{ f.bd }}">{{ f.label }}</div>
+        </sc-for>
+      </div>
+      <div style="margin-top:18px;font-size:12px;font-weight:700;letter-spacing:.06em;color:var(--a-muted,#4E6478)">几分饱</div>
+      <div style="display:flex;gap:8px;margin-top:9px">
+        <div style="flex:1;height:44px;border-radius:12px;border:1px solid var(--a-line,#CFDEEA);background:var(--a-card,#FAFDFF);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:var(--a-ink2,#33475C)">五分</div>
+        <div style="flex:1;height:44px;border-radius:12px;border:1px solid var(--a-accent,#0072E8);background:var(--a-soft,#E4F0FC);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:var(--a-accent,#0072E8)">七分</div>
+        <div style="flex:1;height:44px;border-radius:12px;border:1px solid var(--a-line,#CFDEEA);background:var(--a-card,#FAFDFF);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:var(--a-ink2,#33475C)">撑了</div>
+      </div>
+      <div style="flex:1;min-height:16px"></div>
+      <div style="padding:0 0 18px">
+        <x-import component-from-global-scope="TankaDesignSystem_31dfeb.Button" size="lg" full-width="{{ true }}" glow="{{ true }}" hint-size="100%,48px">结束用餐 · 回到工作中</x-import>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ demoNap }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:var(--a-napbg,#0A1018);padding:0 24px">
+      <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:.1em;color:var(--a-napmuted,#48596B)">午睡中 · 13:12 开始</div>
+      <div style="font-family:var(--font-mono);font-size:52px;font-weight:300;letter-spacing:-.02em;color:var(--a-napink,#EAF3FB)">26:04</div>
+      <div style="font-size:13px;color:var(--a-napmuted,#48596B);text-align:center;line-height:1.6">屏幕会自动变暗<br>到 30 分钟轻震一下</div>
+      <div style="margin-top:18px;width:132px;height:132px;border-radius:50%;border:1.5px solid var(--a-napline,#31435A);display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:700;color:var(--a-napink,#EAF3FB);cursor:pointer">醒了</div>
+      <div style="margin-top:12px;font-size:12.5px;color:var(--a-napline,#31435A)">睡前一句：下午先写定价</div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ demoWork }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1;display:flex;flex-direction:column;padding:20px 18px 0">
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--a-accent,#0072E8)">工作中 · 已 1 小时 24 分</div>
+      <div style="font-size:24px;font-weight:700;letter-spacing:-.02em;color:var(--a-ink,#08131F);margin-top:6px">在做哪件事？</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:16px">
+        <div style="display:flex;align-items:center;gap:11px;border:1px solid var(--a-accent,#0072E8);background:var(--a-soft,#E4F0FC);border-radius:14px;padding:13px 14px">
+          <span style="width:9px;height:9px;border-radius:50%;background:var(--a-accent,#0072E8)"></span>
+          <span style="flex:1;font-size:15px;font-weight:600;color:var(--a-ink,#08131F)">定价模型</span>
+          <span style="font-family:var(--font-mono);font-size:11.5px;color:var(--a-accent,#0072E8)">今日 2h10m</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:11px;border:1px solid var(--a-line,#CFDEEA);background:var(--a-card,#FAFDFF);border-radius:14px;padding:13px 14px">
+          <span style="width:9px;height:9px;border-radius:50%;background:var(--a-g300,#C2D2E0)"></span>
+          <span style="flex:1;font-size:15px;font-weight:600;color:var(--a-ink,#08131F)">导入器</span>
+          <span style="font-family:var(--font-mono);font-size:11.5px;color:var(--a-muted,#4E6478)">今日 0m</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:11px;border:1px dashed var(--a-line2,#A9BFD2);border-radius:14px;padding:13px 14px;color:var(--a-muted,#4E6478);font-size:14px">+ 新的一件事</div>
+      </div>
+      <div style="margin-top:20px;font-size:12px;font-weight:700;letter-spacing:.06em;color:var(--a-muted,#4E6478)">被打断了？</div>
+      <div style="display:flex;gap:8px;margin-top:9px;flex-wrap:wrap">
+        <div style="height:34px;padding:0 14px;border-radius:999px;border:1px solid var(--a-line,#CFDEEA);background:var(--a-card,#FAFDFF);display:flex;align-items:center;font-size:13px;font-weight:600;color:var(--a-ink,#08131F)">同事来问</div>
+        <div style="height:34px;padding:0 14px;border-radius:999px;border:1px solid var(--a-line,#CFDEEA);background:var(--a-card,#FAFDFF);display:flex;align-items:center;font-size:13px;font-weight:600;color:var(--a-ink,#08131F)">开会</div>
+        <div style="height:34px;padding:0 14px;border-radius:999px;border:1px solid var(--a-line,#CFDEEA);background:var(--a-card,#FAFDFF);display:flex;align-items:center;font-size:13px;font-weight:600;color:var(--a-ink,#08131F)">走神</div>
+      </div>
+      <div style="flex:1;min-height:16px"></div>
+      <div style="padding:0 0 18px">
+        <x-import component-from-global-scope="TankaDesignSystem_31dfeb.Button" size="lg" full-width="{{ true }}" hint-size="100%,48px">切换状态</x-import>
+      </div>
+    </div>
+  </sc-if>
+  <div style="height:18px;flex:none"></div>
+  <div style="position:sticky;bottom:0;align-self:flex-end;padding:0 16px 18px"><div style="position:relative;width:58px;height:58px">
+    <div style="position:absolute;bottom:100%;inset-inline-end:-8px;margin-bottom:9px;padding:10px;border-radius:28px;background:var(--a-scrim,rgba(238,244,250,.9));backdrop-filter:blur(8px);box-shadow:0 10px 30px rgba(0,40,90,.14);display:flex;flex-direction:column;align-items:stretch;width:max-content;gap:9px">
+      <div style="display:flex;align-items:center;gap:9px;height:42px;padding:0 16px;border-radius:999px;cursor:pointer;background:var(--a-accent,#0072E8);border:1px solid transparent;box-shadow:0 4px 14px rgba(0,40,90,.14)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"></path><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"></path></svg><span style="flex:1;text-align:end;font-size:14px;font-weight:700;white-space:nowrap;color:#FFFFFF">{{ L.nav3 }}</span></div>
+      <div style="display:flex;align-items:center;gap:9px;height:42px;padding:0 16px;border-radius:999px;cursor:pointer;background:var(--a-card,#FAFDFF);border:1px solid var(--a-line,#CFDEEA);box-shadow:0 4px 14px rgba(0,40,90,.14)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4E6478" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg><span style="flex:1;text-align:end;font-size:14px;font-weight:700;white-space:nowrap;color:var(--a-ink2,#33475C)">{{ L.nav1 }}</span></div>
+      <div style="display:flex;align-items:center;gap:9px;height:42px;padding:0 16px;border-radius:999px;cursor:pointer;background:var(--a-card,#FAFDFF);border:1px solid var(--a-line,#CFDEEA);box-shadow:0 4px 14px rgba(0,40,90,.14)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4E6478" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"></rect><path d="M3 10h18M8 3v4M16 3v4"></path></svg><span style="flex:1;text-align:end;font-size:14px;font-weight:700;white-space:nowrap;color:var(--a-ink2,#33475C)">{{ L.nav2 }}</span></div>
+      <div style="display:flex;align-items:center;gap:9px;height:42px;padding:0 16px;border-radius:999px;cursor:pointer;background:var(--a-card,#FAFDFF);border:1px solid var(--a-line,#CFDEEA);box-shadow:0 4px 14px rgba(0,40,90,.14)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4E6478" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg><span style="flex:1;text-align:end;font-size:14px;font-weight:700;white-space:nowrap;color:var(--a-ink2,#33475C)">{{ L.nav4 }}</span></div>
+    </div>
+    <div style="width:58px;height:58px;border-radius:50%;background:var(--a-ink,#08131F);box-shadow:0 8px 22px rgba(0,40,90,.3);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></div>
+  </div></div>
+</div>
+</x-import>
+</div>
+
+<div class="dv-opt" id="5c"><div class="dv-olabel"><a class="dv-oid" href="#5c">5c</a>一天 —— 状态连成条，缺口才需要补</div>
+<x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" hint-size="428px,908px">
+<div style="display:flex;flex-direction:column;min-height:100%;background:var(--a-page,#EEF4FA);font-family:var(--font-ui)">
+  <div style="padding:20px 18px 4px;display:flex;align-items:center;justify-content:space-between">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="font-size:20px;font-weight:700;letter-spacing:-.02em;color:var(--a-ink,#08131F)">{{ calSelLabel }}</div>
+      <div style="display:flex;align-items:center;gap:5px;height:30px;padding:0 11px;border-radius:999px;border:1px solid var(--a-line,#CFDEEA);background:var(--a-card,#FAFDFF);cursor:pointer">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4E6478" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"></rect><path d="M3 10h18M8 3v4M16 3v4"></path></svg>
+        <span style="font-size:12.5px;font-weight:700;color:var(--a-ink2,#33475C)">{{ L.calNav }}</span>
+      </div>
+    </div>
+    <div style="font-family:var(--font-mono);font-size:11px;color:var(--a-muted,#4E6478)">{{ L.cov }}</div>
+  </div>
+
+  <div style="padding:14px 18px 0">
+    <div style="display:flex;height:26px;border-radius:8px;overflow:hidden;gap:1.5px">
+      <sc-for list="{{ dayBlocks }}" as="b" hint-placeholder-count="7">
+        <div style="width:{{ b.w }};background:{{ b.color }}"></div>
+      </sc-for>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:6px;font-family:var(--font-mono);font-size:10px;color:var(--a-muted,#4E6478)">
+      <span>00</span><span>06</span><span>12</span><span>18</span><span>24</span>
+    </div>
+  </div>
+
+  <div style="padding:18px 18px 0;display:flex;flex-direction:column;gap:2px">
+    <sc-for list="{{ dayBlocks }}" as="b" hint-placeholder-count="7">
+      <div style="display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--a-divider,rgba(78,100,120,.18))">
+        <span style="width:8px;height:32px;border-radius:4px;background:{{ b.color }};flex:none"></span>
+        <span style="flex:1;font-size:15px;font-weight:600;color:var(--a-ink,#08131F)">{{ b.label }}</span>
+        <span style="font-family:var(--font-mono);font-size:12.5px;color:var(--a-ink2,#33475C)">{{ b.dur }}</span>
+      </div>
+    </sc-for>
+    <div style="display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px dashed var(--a-line2,#A9BFD2)">
+      <span style="width:8px;height:32px;border-radius:4px;background:var(--a-g200,#D3DFEA);flex:none"></span>
+      <span style="flex:1;font-size:15px;font-weight:600;color:var(--a-muted,#4E6478)">19:40 – 20:15 没有状态</span>
+      <span style="font-size:13px;font-weight:700;color:var(--a-accent,#0072E8);cursor:pointer">补上</span>
+    </div>
+  </div>
+
+  <div style="padding:20px 18px 0">
+    <x-import component-from-global-scope="TankaDesignSystem_31dfeb.MemoryChip" label="它注意到" time="近 7 天" hint-size="100%,68px">午睡超过 25 分钟的日子，你当天的"工作中"平均多 47 分钟。</x-import>
+  </div>
+
+  <div style="flex:1;min-height:44px"></div>
+  <div style="position:sticky;bottom:0;align-self:flex-end;padding:0 16px 18px"><div style="position:relative;width:58px;height:58px"><div style="position:absolute;bottom:100%;inset-inline-end:-8px;margin-bottom:9px;padding:10px;border-radius:28px;background:var(--a-scrim,rgba(238,244,250,.9));backdrop-filter:blur(8px);box-shadow:0 10px 30px rgba(0,40,90,.14);display:flex;flex-direction:column;align-items:stretch;width:max-content;gap:9px"><div style="display:flex;align-items:center;gap:9px;height:42px;padding:0 16px;border-radius:999px;cursor:pointer;background:var(--a-accent,#0072E8);border:1px solid transparent;box-shadow:0 4px 14px rgba(0,40,90,.14)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"></path><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"></path></svg><span style="flex:1;text-align:end;font-size:14px;font-weight:700;white-space:nowrap;color:#FFFFFF">{{ L.nav3 }}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:9px;height:42px;padding:0 16px;border-radius:999px;cursor:pointer;background:var(--a-card,#FAFDFF);border:1px solid var(--a-line,#CFDEEA);box-shadow:0 4px 14px rgba(0,40,90,.14)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4E6478" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg><span style="flex:1;text-align:end;font-size:14px;font-weight:700;white-space:nowrap;color:var(--a-ink2,#33475C)">{{ L.nav1 }}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:9px;height:42px;padding:0 16px;border-radius:999px;cursor:pointer;background:var(--a-card,#FAFDFF);border:1px solid var(--a-line,#CFDEEA);box-shadow:0 4px 14px rgba(0,40,90,.14)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4E6478" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg><span style="flex:1;text-align:end;font-size:14px;font-weight:700;white-space:nowrap;color:var(--a-ink2,#33475C)">{{ L.nav4 }}</span>
+      </div>
+    </div>
+    <div style="width:58px;height:58px;border-radius:50%;background:var(--a-ink,#08131F);box-shadow:0 8px 22px rgba(0,40,90,.3);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></div>
+    </div>
+  </div>
+</div>
+</x-import>
+</div>
+<div class="dv-opt" id="5g"><div class="dv-olabel"><a class="dv-oid" href="#5g">5g</a>月历 —— 点一天进 <a class="dv-oid" href="#5c">5c</a>；格子里那条就是当天的覆盖</div>
+<x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" hint-size="428px,908px">
+<div style="display:flex;flex-direction:column;min-height:100%;background:var(--a-page,#EEF4FA);font-family:var(--font-ui)">
+  <div style="padding:20px 18px 6px;display:flex;align-items:center;justify-content:space-between">
+    <div style="font-size:20px;font-weight:700;letter-spacing:-.02em;color:var(--a-ink,#08131F)">{{ L.mon }}</div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <div style="width:34px;height:34px;border-radius:50%;border:1px solid var(--a-line,#CFDEEA);background:var(--a-card,#FAFDFF);display:flex;align-items:center;justify-content:center;cursor:pointer">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4E6478" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg>
+      </div>
+      <div style="width:34px;height:34px;border-radius:50%;border:1px solid var(--a-line,#CFDEEA);background:var(--a-card,#FAFDFF);display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:.45">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4E6478" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"></path></svg>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;padding:8px 14px 0">
+    <sc-for list="{{ calWeek }}" as="c" hint-placeholder-count="7">
+      <div style="text-align:center;font-size:11px;font-weight:700;color:var(--a-muted,#4E6478)">{{ c.w }}</div>
+    </sc-for>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;padding:8px 14px 0">
+    <sc-for list="{{ calDays }}" as="c" hint-placeholder-count="35">
+      <div onClick="{{ c.onClick }}" style="aspect-ratio:.82;border-radius:12px;border:1px solid {{ c.bd }};background:{{ c.bg }};display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:6px 4px 5px;box-sizing:border-box;cursor:pointer">
+        <span style="font-family:var(--font-mono);font-size:12px;font-weight:600;color:{{ c.fg }}">{{ c.label }}</span>
+        <sc-if value="{{ c.hasBar }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;width:100%;height:6px;border-radius:3px;overflow:hidden;gap:1px">
+            <sc-for list="{{ c.stripes }}" as="sp" hint-placeholder-count="6">
+              <div style="width:{{ sp.w }};background:{{ sp.color }}"></div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="padding:18px 18px 0;display:flex;align-items:center;justify-content:space-between">
+    <div>
+      <div style="font-size:16px;font-weight:700;letter-spacing:-.02em;color:var(--a-ink,#08131F)">{{ calSelLabel }}</div>
+      <div style="font-size:12.5px;color:var(--a-muted,#4E6478);margin-top:2px">{{ L.covSeg }}</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;height:36px;padding:0 15px;border-radius:999px;background:var(--a-ink,#08131F);color:var(--a-white,#F5FAFF);font-size:13.5px;font-weight:700;cursor:pointer">
+      {{ L.seeDay }}
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F5FAFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"></path></svg>
+    </div>
+  </div>
+
+  <div style="padding:20px 18px 0">
+    <x-import component-from-global-scope="TankaDesignSystem_31dfeb.MemoryChip" label="{{ L.noticed }}" time="{{ L.calWhen }}" hint-size="100%,68px">{{ L.calNote }}</x-import>
+  </div>
+
+  <div style="flex:1;min-height:174px"></div>
+  <div style="position:sticky;bottom:0;align-self:flex-end;padding:0 16px 18px"><div style="position:relative;width:58px;height:58px">
+    <div style="position:absolute;bottom:100%;inset-inline-end:-8px;margin-bottom:9px;padding:10px;border-radius:28px;background:var(--a-scrim,rgba(238,244,250,.9));backdrop-filter:blur(8px);box-shadow:0 10px 30px rgba(0,40,90,.14);display:flex;flex-direction:column;align-items:stretch;width:max-content;gap:9px">
+      <div style="display:flex;align-items:center;gap:9px;height:42px;padding:0 16px;border-radius:999px;cursor:pointer;background:var(--a-accent,#0072E8);border:1px solid transparent;box-shadow:0 4px 14px rgba(0,40,90,.14)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"></path><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"></path></svg><span style="flex:1;text-align:end;font-size:14px;font-weight:700;white-space:nowrap;color:#FFFFFF">{{ L.nav3 }}</span></div>
+      <div style="display:flex;align-items:center;gap:9px;height:42px;padding:0 16px;border-radius:999px;cursor:pointer;background:var(--a-card,#FAFDFF);border:1px solid var(--a-line,#CFDEEA);box-shadow:0 4px 14px rgba(0,40,90,.14)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4E6478" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg><span style="flex:1;text-align:end;font-size:14px;font-weight:700;white-space:nowrap;color:var(--a-ink2,#33475C)">{{ L.nav1 }}</span></div>
+      <div style="display:flex;align-items:center;gap:9px;height:42px;padding:0 16px;border-radius:999px;cursor:pointer;background:var(--a-card,#FAFDFF);border:1px solid var(--a-line,#CFDEEA);box-shadow:0 4px 14px rgba(0,40,90,.14)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4E6478" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"></rect><path d="M3 10h18M8 3v4M16 3v4"></path></svg><span style="flex:1;text-align:end;font-size:14px;font-weight:700;white-space:nowrap;color:var(--a-ink2,#33475C)">{{ L.nav2 }}</span></div>
+      <div style="display:flex;align-items:center;gap:9px;height:42px;padding:0 16px;border-radius:999px;cursor:pointer;background:var(--a-card,#FAFDFF);border:1px solid var(--a-line,#CFDEEA);box-shadow:0 4px 14px rgba(0,40,90,.14)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4E6478" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg><span style="flex:1;text-align:end;font-size:14px;font-weight:700;white-space:nowrap;color:var(--a-ink2,#33475C)">{{ L.nav4 }}</span></div>
+    </div>
+    <div style="width:58px;height:58px;border-radius:50%;background:var(--a-ink,#08131F);box-shadow:0 8px 22px rgba(0,40,90,.3);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></div>
+  </div></div>
+</div>
+</x-import>
+</div>
+<div class="dv-opt" id="5d"><div class="dv-olabel"><a class="dv-oid" href="#5d">5d</a>拍照走系统相机 —— 回来只剩一张确认卡（标签可点）</div>
+<x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" hint-size="428px,908px">
+<div style="position:relative;min-height:100%;background:var(--a-page,#EEF4FA);font-family:var(--font-ui)">
+  <div style="padding:20px 18px 0;opacity:.45;filter:blur(1.5px)">
+    <div style="font-family:var(--font-mono);font-size:11px;color:var(--a-r1,#00A6C9)">用餐中 · 已 12 分</div>
+    <div style="font-size:24px;font-weight:700;letter-spacing:-.02em;color:var(--a-ink,#08131F);margin-top:6px">这顿吃了什么？</div>
+    <div style="height:150px;margin-top:16px;border-radius:18px;background:var(--a-card,#FAFDFF);border:1px solid var(--a-line,#CFDEEA)"></div>
+    <div style="height:32px;margin-top:14px;border-radius:999px;width:70%;background:var(--a-card,#FAFDFF);border:1px solid var(--a-line,#CFDEEA)"></div>
+  </div>
+  <div style="position:absolute;inset:0;background:rgba(0,0,1,.4)"></div>
+  <div style="position:absolute;left:0;right:0;bottom:0;background:var(--a-card,#FAFDFF);border-radius:22px 22px 0 0;padding:10px 18px 20px;box-shadow:0 -12px 40px rgba(0,0,1,.25)">
+    <div style="width:36px;height:4px;border-radius:2px;background:var(--a-g300,#C2D2E0);margin:0 auto 14px"></div>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+      <div style="width:64px;height:64px;flex:none"><image-slot id="shot-5d" shape="rounded" radius="14" placeholder="照片"></image-slot></div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:15px;font-weight:700;color:var(--a-ink,#08131F)">来自系统相机</div>
+        <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--a-muted,#4E6478);margin-top:3px">12:41 · 原图留在相册</div>
+      </div>
+      <span style="font-size:13px;font-weight:600;color:var(--a-accent,#0072E8);cursor:pointer">重拍</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px">
+      <span style="width:22px;height:22px;border-radius:7px;background:var(--a-soft2,#D7E9FC);display:flex;align-items:center;justify-content:center;color:var(--a-accent,#0072E8)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5a3 3 0 0 0-3 3 3 3 0 0 0-1 5.8V16a2 2 0 0 0 4 0M12 5a3 3 0 0 1 3 3 3 3 0 0 1 1 5.8V16a2 2 0 0 1-4 0M12 5V19"></path></svg>
+      </span>
+      <span style="font-size:11.5px;font-weight:700;letter-spacing:.05em;color:var(--a-accent,#0072E8)">识别结果 · 可直接改</span>
+    </div>
+    <div style="font-size:17px;line-height:1.5;font-weight:600;letter-spacing:-.01em;color:var(--a-ink,#08131F);text-wrap:pretty">午餐：牛肉面 + 一份青菜，汤没喝完。</div>
+    <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:12px">
+      <sc-for list="{{ foodTags }}" as="f" hint-placeholder-count="4">
+        <div onClick="{{ f.onClick }}" style="height:32px;padding:0 13px;display:flex;align-items:center;border-radius:999px;cursor:pointer;font-size:13px;font-weight:600;background:{{ f.bg }};color:{{ f.fg }};border:1px solid {{ f.bd }}">{{ f.label }}</div>
+      </sc-for>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <div style="height:48px;padding:0 18px;border-radius:12px;border:1px solid var(--a-line,#CFDEEA);background:var(--a-sunken,#E3ECF5);display:flex;align-items:center;font-size:14px;font-weight:600;color:var(--a-ink,#08131F);cursor:pointer">再拍一张</div>
+      <x-import component-from-global-scope="TankaDesignSystem_31dfeb.Button" size="lg" full-width="{{ true }}" glow="{{ true }}" hint-size="100%,48px">存进这一餐</x-import>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:12px;font-family:var(--font-mono);font-size:10.5px;color:var(--a-muted,#4E6478);text-align:center;line-height:1.5">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10" width="16" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>
+      用系统相机拍摄 · 只有这句文字进入索引
+    </div>
+  </div>
+</div>
+</x-import>
+</div>
+
+<div class="dv-opt" id="5e"><div class="dv-olabel"><a class="dv-oid" href="#5e">5e</a>这一餐的详情 —— 状态结束后留下的记忆</div>
+<x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" hint-size="428px,908px">
+<div style="display:flex;flex-direction:column;min-height:100%;background:var(--a-page,#EEF4FA);font-family:var(--font-ui)">
+  <div style="height:300px;position:relative;flex:none">
+    <image-slot id="photo-5e" shape="rect" placeholder="把一张食物照片拖进来"></image-slot>
+  </div>
+  <div style="margin-top:-22px;background:var(--a-page,#EEF4FA);border-radius:22px 22px 0 0;padding:18px 20px 24px;position:relative">
+    <div style="font-family:var(--font-mono);font-size:11px;color:var(--a-muted,#4E6478)">今天 12:41 · 楼下面馆</div>
+    <div style="font-size:20px;line-height:1.45;font-weight:700;letter-spacing:-.02em;color:var(--a-ink,#08131F);margin-top:6px;text-wrap:pretty">午餐：牛肉面 + 一份青菜，汤没喝完。</div>
+    <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:12px">
+      <sc-for list="{{ foodTags }}" as="f" hint-placeholder-count="4">
+        <div onClick="{{ f.onClick }}" style="height:30px;padding:0 12px;display:flex;align-items:center;border-radius:999px;cursor:pointer;font-size:12.5px;font-weight:600;background:{{ f.bg }};color:{{ f.fg }};border:1px solid {{ f.bd }}">{{ f.label }}</div>
+      </sc-for>
+    </div>
+
+    <div style="margin-top:20px">
+      <x-import component-from-global-scope="TankaDesignSystem_31dfeb.MemoryChip" label="它注意到" time="近 14 天" hint-size="100%,68px">这是你这两周第 5 次吃面，其中 4 次在工作日中午、都在 12:30 之后。</x-import>
+    </div>
+
+    <div style="margin-top:18px;font-size:11.5px;font-weight:700;letter-spacing:.06em;color:var(--a-muted,#4E6478)">可以接着问</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+      <div style="border:1px solid var(--a-softbd,#B9D6F2);background:var(--a-soft,#E4F0FC);color:var(--a-accent,#0072E8);border-radius:12px;padding:11px 13px;font-size:13.5px;font-weight:600">我这周中午都吃了什么？</div>
+      <div style="border:1px solid var(--a-softbd,#B9D6F2);background:var(--a-soft,#E4F0FC);color:var(--a-accent,#0072E8);border-radius:12px;padding:11px 13px;font-size:13.5px;font-weight:600">吃面的日子下午更困吗？</div>
+    </div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:20px;padding-top:14px;border-top:1px solid var(--a-divider,rgba(78,100,120,.18));font-size:13px;color:var(--a-muted,#4E6478)">
+      <span>照片仅存本机 · 214 MB / 4 GB</span>
+      <span style="font-weight:600;color:var(--danger);cursor:pointer">删除这条</span>
+    </div>
+  </div>
+</div>
+</x-import>
+</div>
+<div class="dv-opt" id="5f"><div class="dv-olabel"><a class="dv-oid" href="#5f">5f</a>本地化规则 —— 交给工程的一页</div>
+<div style="width:520px;background:var(--surface-card);border:1px solid var(--border);border-radius:18px;padding:22px 24px;font-family:var(--font-ui);box-shadow:0 1px 3px rgba(0,0,1,.06)">
+  <div style="font-size:17px;font-weight:700;letter-spacing:-.01em;color:var(--text-primary)">11 种语言的布局约定</div>
+  <div style="font-size:13px;color:var(--text-tertiary);margin-top:4px">中 · 英 · 法 · 西 · 德 · 意 · 日 · 韩 · 俄 · العربية · עברית</div>
+
+  <div style="margin-top:18px;display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;gap:12px">
+      <span style="width:4px;border-radius:2px;background:var(--brand-gradient);flex:none"></span>
+      <div>
+        <div style="font-size:14px;font-weight:700;color:var(--text-primary)">镜像的</div>
+        <div style="font-size:13px;line-height:1.6;color:var(--text-secondary);margin-top:3px;text-wrap:pretty">整体流向、九宫格顺序、列表项内的图标与文字、返回箭头、进度条方向、一天的状态条（右起为 00:00）、底部导航顺序。</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:12px">
+      <span style="width:4px;border-radius:2px;background:var(--gray-200);flex:none"></span>
+      <div>
+        <div style="font-size:14px;font-weight:700;color:var(--text-primary)">不镜像的</div>
+        <div style="font-size:13px;line-height:1.6;color:var(--text-secondary);margin-top:3px;text-wrap:pretty">时钟与计时器（<span style="font-family:var(--font-mono)">1:22:47</span> 恒为 LTR）、时间戳、播放/录音按钮、品牌标志、照片本身、数字与单位。给它们单独套 <span style="font-family:var(--font-mono);font-size:12px">dir="ltr"</span>。</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:12px">
+      <span style="width:4px;border-radius:2px;background:var(--gray-200);flex:none"></span>
+      <div>
+        <div style="font-size:14px;font-weight:700;color:var(--text-primary)">代码约定</div>
+        <div style="font-size:13px;line-height:1.6;color:var(--text-secondary);margin-top:3px;text-wrap:pretty">一律用逻辑属性：<span style="font-family:var(--font-mono);font-size:12px">margin-inline</span> / <span style="font-family:var(--font-mono);font-size:12px">padding-inline</span> / <span style="font-family:var(--font-mono);font-size:12px">inset-inline-start</span> / <span style="font-family:var(--font-mono);font-size:12px">text-align:start</span>。绝不写 left/right。</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:12px">
+      <span style="width:4px;border-radius:2px;background:var(--gray-200);flex:none"></span>
+      <div>
+        <div style="font-size:14px;font-weight:700;color:var(--text-primary)">留白预算</div>
+        <div style="font-size:13px;line-height:1.6;color:var(--text-secondary);margin-top:3px;text-wrap:pretty">德语/俄语按中文的 <strong>+60%</strong> 估算，格子标题允许两行、副标题两行截断；日韩不打断行内数字；阿拉伯语与希伯来语行高 +0.15。按钮永远自适应宽度，不写死。</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:12px">
+      <span style="width:4px;border-radius:2px;background:var(--gray-200);flex:none"></span>
+      <div>
+        <div style="font-size:14px;font-weight:700;color:var(--text-primary)">字体</div>
+        <div style="font-size:13px;line-height:1.6;color:var(--text-secondary);margin-top:3px;text-wrap:pretty">Inter 覆盖拉丁/西里尔/希腊；中日韩与阿拉伯、希伯来需各自的备用字族，按 <span style="font-family:var(--font-mono);font-size:12px">:lang()</span> 切换，字号统一 +0～1px 视觉对齐。</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:12px">
+      <span style="width:4px;border-radius:2px;background:var(--gray-200);flex:none"></span>
+      <div>
+        <div style="font-size:14px;font-weight:700;color:var(--text-primary)">本地模型这一层</div>
+        <div style="font-size:13px;line-height:1.6;color:var(--text-secondary);margin-top:3px;text-wrap:pretty">识别与问答用<strong>用户输入的语言</strong>回答，不做翻译；界面语言与记录语言可以不同（在设置页分别设置）。语音转写按语言下载对应模型，体积在设置页标明。</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+<p class="dv-next">可以说："给 <a class="dv-oid" href="#5d">5d</a> 的识别结果做成可直接改字的输入框" · "状态之间加自动建议（到饭点提示切换到用餐中）" · "按状态切换重画一版手表版" · "设计一个自定义状态的界面"</p>
+</section>
+
+<section class="dv-turn" id="t1">
+<div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">其余屏 —— 问它 / 设置</span></div>
+<p class="dv-note">首页方向定在第 <a class="dv-oid" href="#t5">5</a> 轮的状态切换；这几屏是它之外的部分。<a class="dv-oid" href="#1g">1g</a> 界面设置和 <a class="dv-oid" href="#1h">1h</a> 模型设置是新加的，配色和语言两项与第 5 轮共享状态——在这里选，第 5 轮会跟着变。<a class="dv-oid" href="#1e">1e</a>、<a class="dv-oid" href="#1f">1f</a> 文案仍是英文，等定稿后统一本地化。</p>
+<div class="dv-opts">
+<div class="dv-opt" id="1e"><div class="dv-olabel"><a class="dv-oid" href="#1e">1e</a>Ask — chat over your own entries; tap a suggestion</div>
+<x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" hint-size="428px,908px">
+<div style="display:flex;flex-direction:column;min-height:100%;background:var(--surface-page);font-family:var(--font-ui)">
+  <div style="display:flex;align-items:center;gap:11px;padding:12px 16px;border-bottom:1px solid var(--divider);position:sticky;top:0;background:var(--surface-page);z-index:2">
+    <div style="width:34px;height:34px;border-radius:50%;background:var(--brand-gradient);display:flex;align-items:center;justify-content:center;color:#fff">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5a3 3 0 0 0-3 3 3 3 0 0 0-1 5.8V16a2 2 0 0 0 4 0M12 5a3 3 0 0 1 3 3 3 3 0 0 1 1 5.8V16a2 2 0 0 1-4 0M12 5V19"></path></svg>
+    </div>
+    <div style="flex:1">
+      <div style="font-size:15px;font-weight:700;letter-spacing:-.01em;color:var(--text-primary)">Ask your memory</div>
+      <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-tertiary)">{{ techLine }}</div>
+    </div>
+    <div style="font-size:12px;font-weight:600;color:var(--primary);cursor:pointer" onClick="{{ resetChat }}">Clear</div>
+  </div>
+
+  <div style="flex:1;display:flex;flex-direction:column;gap:14px;padding:16px 16px 8px">
+    <sc-for list="{{ msgs }}" as="m" hint-placeholder-count="3">
+      <div style="display:flex;flex-direction:column;gap:8px;align-items:{{ m.align }};width:100%">
+        <x-import component-from-global-scope="TankaDesignSystem_31dfeb.MessageBubble" me="{{ m.me }}" time="{{ m.time }}" dc-props="{{ m.bubbleProps }}" hint-size="auto,44px">{{ m.text }}</x-import>
+        <sc-if value="{{ m.hasMem }}" hint-placeholder-val="{{ true }}">
+          <div style="width:100%">
+            <x-import component-from-global-scope="TankaDesignSystem_31dfeb.MemoryChip" label="{{ m.memLabel }}" time="{{ m.memTime }}" hint-size="100%,64px">{{ m.mem }}</x-import>
+          </div>
+        </sc-if>
+      </div>
+    </sc-for>
+    <sc-if value="{{ thinking }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;align-items:center;gap:7px;color:var(--text-tertiary);font-size:12.5px">
+        <span style="width:7px;height:7px;border-radius:50%;background:var(--primary);animation:blink 1.1s ease-in-out infinite"></span>
+        <span style="font-family:var(--font-mono);font-size:11px">searching 1,284 memory units…</span>
+      </div>
+    </sc-if>
+  </div>
+
+  <div style="position:sticky;bottom:0;background:var(--surface-page);padding:8px 12px 10px;border-top:1px solid var(--divider)">
+    <div class="hscroll" style="display:flex;gap:8px;padding-bottom:9px">
+      <sc-for list="{{ suggestions }}" as="s" hint-placeholder-count="3">
+        <div onClick="{{ s.onClick }}" style="flex:none;max-width:70%;padding:8px 13px;border-radius:999px;border:1px solid var(--theme-a300);background:var(--theme-a100);color:var(--primary);font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.label }}</div>
+      </sc-for>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;background:var(--surface-card);border:1px solid var(--border);border-radius:12px;padding:10px 12px">
+      <span style="flex:1;font-size:14px;color:var(--text-placeholder)">Ask about anything you logged…</span>
+      <span style="font-size:13.5px;font-weight:700;color:var(--primary);cursor:pointer">Send</span>
+    </div>
+  </div>
+</div>
+</x-import>
+</div>
+
+<div class="dv-opt" id="1f"><div class="dv-olabel"><a class="dv-oid" href="#1f">1f</a>Settings · Data — storage, local API and what may read it</div>
+<x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" hint-size="428px,908px">
+<div style="display:flex;flex-direction:column;min-height:100%;background:var(--surface-page);font-family:var(--font-ui);padding-bottom:24px">
+  <div style="padding:16px 18px 8px">
+    <div style="font-size:22px;font-weight:700;letter-spacing:-.02em;color:var(--text-primary)">Settings · Data</div>
+    <div style="font-size:13px;color:var(--text-secondary);margin-top:3px">Body Clock · everything below runs on this phone.</div>
+  </div>
+
+  <div style="padding:12px 16px 0">
+    <div style="font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:9px">Local model</div>
+    <div style="display:flex;flex-direction:column;gap:9px">
+      <sc-for list="{{ models }}" as="mo" hint-placeholder-count="3">
+        <div onClick="{{ mo.onClick }}" style="display:flex;align-items:center;gap:12px;background:var(--surface-card);border:1.5px solid {{ mo.bd }};border-radius:16px;padding:13px 14px;cursor:pointer">
+          <div style="width:20px;height:20px;flex:none;border-radius:50%;border:2px solid {{ mo.dot }};display:flex;align-items:center;justify-content:center">
+            <div style="width:10px;height:10px;border-radius:50%;background:{{ mo.fill }}"></div>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14.5px;font-weight:600;color:var(--text-primary)">{{ mo.name }}</div>
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-tertiary);margin-top:2px">{{ mo.meta }}</div>
+          </div>
+          <div style="font-size:11px;font-weight:700;color:{{ mo.tagFg }};background:{{ mo.tagBg }};border-radius:999px;padding:4px 9px">{{ mo.tag }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="padding:20px 16px 0">
+    <div style="font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:9px">Memory &amp; indexing</div>
+    <div style="background:var(--surface-card);border:1px solid var(--border);border-radius:16px;overflow:hidden">
+      <sc-for list="{{ toggles }}" as="tg" hint-placeholder-count="3">
+        <div style="display:flex;align-items:center;gap:12px;padding:14px;border-bottom:1px solid var(--divider)">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">{{ tg.label }}</div>
+            <div style="font-size:12px;color:var(--text-tertiary);line-height:1.4;margin-top:2px;text-wrap:pretty">{{ tg.help }}</div>
+          </div>
+          <x-import component-from-global-scope="TankaDesignSystem_31dfeb.Switch" checked="{{ tg.on }}" on-change="{{ tg.onChange }}" hint-size="44px,24px"></x-import>
+        </div>
+      </sc-for>
+      <div style="padding:14px">
+        <div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--text-secondary);margin-bottom:7px">
+          <span>1,284 memory units · 214 MB</span><span style="font-family:var(--font-mono);color:var(--text-tertiary)">of 4 GB</span>
+        </div>
+        <div style="height:7px;border-radius:4px;background:var(--surface-sunken);overflow:hidden">
+          <div style="width:24%;height:100%;background:var(--brand-gradient)"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="padding:20px 16px 0">
+    <div style="font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:9px">Apps that may read your data</div>
+    <div style="background:var(--surface-card);border:1px solid var(--border);border-radius:16px;padding:6px 14px">
+      <sc-for list="{{ apps }}" as="ap" hint-placeholder-count="2">
+        <div style="display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid var(--divider)">
+          <div style="width:30px;height:30px;border-radius:9px;background:var(--surface-sunken);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--text-secondary)">{{ ap.initial }}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">{{ ap.name }}</div>
+            <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-tertiary)">{{ ap.scope }}</div>
+          </div>
+          <div style="font-size:11.5px;font-weight:700;color:{{ ap.fg }};background:{{ ap.bg }};border-radius:999px;padding:4px 9px">{{ ap.state }}</div>
+        </div>
+      </sc-for>
+      <div style="padding:12px 0 4px;font-size:13px;font-weight:600;color:var(--primary);cursor:pointer">+ Grant access to an app</div>
+    </div>
+  </div>
+
+  <div style="padding:22px 16px 0">
+    <x-import component-from-global-scope="TankaDesignSystem_31dfeb.Button" variant="danger" full-width="{{ true }}" hint-size="100%,40px">Erase all memory</x-import>
+    <div style="text-align:center;font-size:11.5px;color:var(--text-tertiary);margin-top:10px;line-height:1.5">No account. No sync. Deleting the app deletes everything.</div>
+  </div>
+</div>
+</x-import>
+</div>
+</div>
+
+<div class="dv-opt" id="1g"><div class="dv-olabel"><a class="dv-oid" href="#1g">1g</a>界面设置 —— 配色 / 语言 / 文字大小（都可点，会联动第 5 轮）</div>
+<x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" hint-size="428px,908px">
+<div style="display:flex;flex-direction:column;min-height:100%;background:var(--surface-page);font-family:var(--font-ui);padding-bottom:24px">
+  <div style="padding:16px 18px 8px">
+    <div style="font-size:22px;font-weight:700;letter-spacing:-.02em;color:var(--text-primary)">界面</div>
+    <div style="font-size:13px;color:var(--text-secondary);margin-top:3px">改动即时生效，无需重启。</div>
+  </div>
+
+  <div style="padding:12px 16px 0">
+    <div style="font-size:11.5px;font-weight:700;letter-spacing:.06em;color:var(--text-tertiary);margin-bottom:9px">配色</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <sc-for list="{{ themeRows }}" as="t" hint-placeholder-count="6">
+        <div onClick="{{ t.onClick }}" style="display:flex;align-items:center;gap:12px;background:{{ t.rowBg }};border:1.5px solid {{ t.rowBd }};border-radius:14px;padding:11px 13px;cursor:pointer">
+          <span style="display:flex;gap:2px;flex:none">
+            <span style="width:12px;height:24px;border-radius:5px 0 0 5px;background:{{ t.sw1 }};border:1px solid rgba(0,0,1,.08)"></span>
+            <span style="width:12px;height:24px;background:{{ t.sw2 }}"></span>
+            <span style="width:12px;height:24px;border-radius:0 5px 5px 0;background:{{ t.sw3 }}"></span>
+          </span>
+          <span style="flex:1;font-size:14.5px;font-weight:600;color:var(--text-primary)">{{ t.label }}</span>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="{{ t.tick }}" stroke-width="2.6" stroke-linecap="round"><path d="m5 13 4 4L19 7"></path></svg>
+        </div>
+      </sc-for>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;padding:11px 13px;border:1px solid var(--border);border-radius:14px;background:var(--surface-card)">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:600;color:var(--text-primary)">跟随系统深浅色</div>
+        <div style="font-size:12px;color:var(--text-tertiary);margin-top:2px">日间用明色，夜间自动切到同色系的暗色</div>
+      </div>
+      <x-import component-from-global-scope="TankaDesignSystem_31dfeb.Switch" checked="{{ swFollow.on }}" on-change="{{ swFollow.onChange }}" hint-size="44px,24px"></x-import>
+    </div>
+  </div>
+
+  <div style="padding:20px 16px 0">
+    <div style="font-size:11.5px;font-weight:700;letter-spacing:.06em;color:var(--text-tertiary);margin-bottom:9px">界面语言</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <sc-for list="{{ langRows }}" as="l" hint-placeholder-count="4">
+        <div onClick="{{ l.onClick }}" style="display:flex;align-items:center;gap:12px;background:{{ l.rowBg }};border:1.5px solid {{ l.rowBd }};border-radius:14px;padding:12px 13px;cursor:pointer">
+          <span style="flex:1;font-size:14.5px;font-weight:600;color:var(--text-primary)">{{ l.label }}</span>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="{{ l.tick }}" stroke-width="2.6" stroke-linecap="round"><path d="m5 13 4 4L19 7"></path></svg>
+        </div>
+      </sc-for>
+    </div>
+    <div style="font-size:12px;line-height:1.5;color:var(--text-tertiary);margin-top:9px;text-wrap:pretty">只改界面。已经记下的内容保持你当时输入的语言，模型也用同一种语言回答。</div>
+  </div>
+
+  <div style="padding:20px 16px 0">
+    <div style="font-size:11.5px;font-weight:700;letter-spacing:.06em;color:var(--text-tertiary);margin-bottom:9px">文字大小</div>
+    <div style="display:flex;gap:8px">
+      <sc-for list="{{ sizeOptions }}" as="z" hint-placeholder-count="4">
+        <div onClick="{{ z.onClick }}" style="flex:1;height:46px;display:flex;align-items:center;justify-content:center;border-radius:12px;cursor:pointer;font-weight:700;font-size:{{ z.px }};background:{{ z.bg }};color:{{ z.fg }};border:1px solid {{ z.bd }}">A</div>
+      </sc-for>
+    </div>
+    <div style="margin-top:12px;background:var(--surface-card);border:1px solid var(--border);border-radius:16px;padding:14px">
+      <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-tertiary);margin-bottom:6px">预览 · {{ curSize }}</div>
+      <div style="display:flex;gap:12px">
+        <span style="font-family:var(--font-mono);font-size:{{ curSizeSm }};color:var(--text-tertiary);flex:none">12:40</span>
+        <span style="font-size:{{ curSize }};line-height:1.5;color:var(--text-primary);text-wrap:pretty">午餐：楼下面馆，牛肉面 + 一份青菜</span>
+      </div>
+    </div>
+    <div style="font-size:12px;line-height:1.5;color:var(--text-tertiary);margin-top:9px">格子和按钮的高度会跟着变，最小点击区域始终不小于 48dp。</div>
+  </div>
+</div>
+</x-import>
+</div>
+
+<div class="dv-opt" id="1h"><div class="dv-olabel"><a class="dv-oid" href="#1h">1h</a>模型设置 —— 远程填 Key，本地下载或指定文件</div>
+<x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" hint-size="428px,908px">
+<div style="display:flex;flex-direction:column;min-height:100%;background:var(--surface-page);font-family:var(--font-ui);padding-bottom:24px">
+  <div style="padding:16px 18px 8px">
+    <div style="font-size:22px;font-weight:700;letter-spacing:-.02em;color:var(--text-primary)">模型</div>
+    <div style="font-size:13px;color:var(--text-secondary);margin-top:3px">默认全部本地。用远程模型时会明确告诉你哪些内容离开了手机。</div>
+  </div>
+
+  <div style="padding:12px 16px 0">
+    <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface-card);border:1px solid var(--border);border-radius:16px;padding:13px 14px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:600;color:var(--text-primary)">只用本地模型</div>
+        <div style="font-size:12px;color:var(--text-tertiary);margin-top:2px">开启后下方远程模型全部禁用</div>
+      </div>
+      <x-import component-from-global-scope="TankaDesignSystem_31dfeb.Switch" checked="{{ swLocalOnly.on }}" on-change="{{ swLocalOnly.onChange }}" hint-size="44px,24px"></x-import>
+    </div>
+  </div>
+
+  <div style="padding:20px 16px 0">
+    <div style="font-size:11.5px;font-weight:700;letter-spacing:.06em;color:var(--text-tertiary);margin-bottom:9px">本地模型</div>
+    <div style="display:flex;flex-direction:column;gap:9px">
+      <sc-for list="{{ locals }}" as="m" hint-placeholder-count="3">
+        <div style="background:{{ m.bg }};border:1.5px solid {{ m.bd }};border-radius:16px;padding:13px 14px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:14.5px;font-weight:600;color:var(--text-primary)">{{ m.name }}</div>
+              <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-tertiary);margin-top:2px">{{ m.meta }}</div>
+            </div>
+            <span style="font-size:11.5px;font-weight:700;color:{{ m.fg }};background:var(--surface-card);border:1px solid var(--border);border-radius:999px;padding:5px 10px;cursor:pointer">{{ m.state }}</span>
+          </div>
+          <div style="height:5px;border-radius:3px;background:var(--surface-sunken);margin-top:10px;overflow:hidden">
+            <div style="width:{{ m.pct }};height:100%;background:var(--brand-gradient)"></div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+    <div style="display:flex;align-items:center;gap:11px;margin-top:9px;border:1px dashed var(--border-secondary);border-radius:16px;padding:13px 14px;cursor:pointer">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:600;color:var(--text-primary)">指定本机文件</div>
+        <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-tertiary);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">/storage/emulated/0/Models/*.gguf</div>
+      </div>
+      <span style="font-size:13px;font-weight:600;color:var(--primary)">浏览</span>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:9px;padding:12px 14px;border:1px solid var(--border);border-radius:16px;background:var(--surface-card)">
+      <span style="font-size:14px;font-weight:600;color:var(--text-primary)">仅在 Wi-Fi 与充电时下载</span>
+      <x-import component-from-global-scope="TankaDesignSystem_31dfeb.Switch" checked="{{ swWifi.on }}" on-change="{{ swWifi.onChange }}" hint-size="44px,24px"></x-import>
+    </div>
+  </div>
+
+  <div style="padding:20px 16px 0">
+    <div style="font-size:11.5px;font-weight:700;letter-spacing:.06em;color:var(--text-tertiary);margin-bottom:9px">远程模型（可选）</div>
+    <div style="display:flex;flex-direction:column;gap:9px;opacity:{{ remoteOpacity }}">
+      <sc-for list="{{ remotes }}" as="r" hint-placeholder-count="3">
+        <div style="background:var(--surface-card);border:1px solid var(--border);border-radius:16px;padding:13px 14px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="flex:1;font-size:14.5px;font-weight:600;color:var(--text-primary)">{{ r.name }}</span>
+            <span style="font-size:11.5px;font-weight:700;color:{{ r.fg }};background:{{ r.bg }};border-radius:999px;padding:4px 9px">{{ r.state }}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:10px;background:var(--field-bg);border:1px solid var(--border);border-radius:12px;padding:11px 12px">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="1.9" stroke-linecap="round"><rect x="4" y="10" width="16" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>
+            <span style="flex:1;font-family:var(--font-mono);font-size:12px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.key }}</span>
+            <span style="font-size:12.5px;font-weight:700;color:var(--primary);cursor:pointer">编辑</span>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+    <div style="font-size:12px;line-height:1.55;color:var(--text-tertiary);margin-top:10px;text-wrap:pretty">{{ remoteNote }}</div>
+  </div>
+</div>
+</x-import>
+</div>
+
+<p class="dv-next">可以说："把 <a class="dv-oid" href="#1e">1e</a>、<a class="dv-oid" href="#1f">1f</a> 也改成中文" · "<a class="dv-oid" href="#1h">1h</a> 加一个下载失败/断点续传的状态"</p>
+</section>
+</x-dc>
+<script data-dc-script data-props='{"techVisible":{"editor":"boolean","default":true,"tsType":"boolean","section":"Technical layer"},"modelName":{"editor":"text","default":"llama-3.2-3b-q4","tsType":"string","section":"Technical layer"}}'>
+const ANSWERS = {
+  q1:{text:"Twice, both this week. On Monday you called it \u201Cthe thing I keep not deciding\u201D; tonight you said the honest answer is no and money is the only thing holding you.",mem:'Walked the long way home\u2026 the honest answer is no, and the thing stopping me is money.',memLabel:'From your entry',memTime:'today 21:40'},
+  q2:{text:"Three open ones: the pricing model for Priya (Friday), a reply to the landlord, and booking the dentist \u2014 that one has moved forward four times.",mem:'Priya wants the pricing model by Friday. Three tiers, cap the middle at 20 seats.',memLabel:'Oldest unresolved',memTime:'today 18:05'},
+  q3:{text:"6h 22m average over the last seven nights, against 7h 15m the week before. Every short night this week followed an entry logged after 22:30.",mem:'Slept 6h10. Woke at 4 again. Third short night this week.',memLabel:'Pattern across 7 entries',memTime:'today 09:12'}
+};
+class Component extends DCLogic {
+  state = {
+    msgs:[
+      {me:false,text:"I've indexed everything through 21:40 today. Ask me anything \u2014 nothing leaves the phone.",time:'21:46',align:'flex-start',hasMem:false},
+      {me:true,text:'How much of this week went to “Working”?',time:'21:47',align:'flex-end',hasMem:false},
+      {me:false,text:'31h 12m across five weekdays — 6h 14m a day on average, and the two days you napped were the two longest. Tuesday was the outlier at 8h 40m, mostly the pricing model.',time:'21:47',align:'flex-start',hasMem:true,mem:'Tue · Working 8h 40m · pricing model 5h 05m',memLabel:'Longest day',memTime:'this week'}
+    ],
+    thinking:false, model:'llama', voiceIdx:true, autoDigest:true, apiAccess:false,
+    log:[
+      {time:'12:40',text:'午餐：楼下面馆，牛肉面 + 一份青菜'},
+      {time:'10:05',text:'和 Priya 过了一遍定价，周五前给她模型'},
+      {time:'08:12',text:'开始吃早餐了'},
+      {time:'07:36',text:'起床了'}
+    ],
+    toast:null, shot:false, foodTags:['牛肉面','青菜'],
+    cur:'工作中', curIdx:0, uiLang:'zh', textSize:'标准',
+    followSystem:true, localOnly:true, wifiOnly:true, notes:[], noteOpen:false, iconStroke:1.5, since: Date.now()-4940*1000, blocks:[], demo:'用餐中', t5theme:'daylight-arctic'
+  };
+  componentDidMount(){ this._iv = setInterval(()=>this.forceUpdate(), 1000); }
+  componentWillUnmount(){ clearTimeout(this._t); clearTimeout(this._t2); clearInterval(this._iv); }
+  quickAdd(label){
+    const d = new Date();
+    const time = String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+    this.setState(s=>({ log:[{time,text:label},...s.log], toast:label }));
+    clearTimeout(this._t2);
+    this._t2 = setTimeout(()=>this.setState({toast:null}), 1600);
+  }
+  switchState(idx){
+    const dt = new Date(), d = this._d;
+    const time = String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0');
+    const prev = d.names[this.state.curIdx], mins = Math.max(1, Math.round((Date.now()-this.state.since)/60000));
+    this.setState(s=>({
+      curIdx:idx, since:Date.now(), notes:[], noteOpen:false,
+      log:[{time,text:d.sw(d.names[idx], prev, mins)},...s.log],
+      blocks:[...s.blocks,{name:prev,mins}]
+    }));
+  }
+  addNote(text){
+    const dt = new Date();
+    const time = String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0');
+    this.setState(s=>({ notes:[...s.notes, text], noteOpen:false,
+      log:[{time, text}, ...s.log] }));
+  }
+  ask(key,label){
+    const a = ANSWERS[key];
+    this.setState(s=>({msgs:[...s.msgs,{me:true,text:label,time:'now',align:'flex-end',hasMem:false}],thinking:true}));
+    clearTimeout(this._t);
+    this._t = setTimeout(()=>this.setState(s=>({thinking:false,msgs:[...s.msgs,{me:false,wide:true,text:a.text,time:'now',align:'flex-start',hasMem:true,mem:a.mem,memLabel:a.memLabel,memTime:a.memTime}]})),1400);
+  }
+  themeVals(){
+    const all = [...(this._p2||[]), ...(this._p3||[])];
+    const byKey = {}; all.forEach(p=>byKey[p.key]=p);
+    const ORDER = ['daylight-arctic','daylight-amber','quiet-day','midnight-arctic','midnight-amber','quiet-night'];
+    const LABEL = {'daylight-arctic':'Arctic 明','daylight-amber':'Amber 明','quiet-day':'Quiet 明',
+      'midnight-arctic':'Arctic 暗','midnight-amber':'Amber 暗','quiet-night':'Quiet 暗'};
+    const key = this.state.t5theme, p = byKey[key] || byKey['daylight-arctic'];
+    const c = p.c, dark = /night/.test(p.key), mi = p.mi || c.muted, r = p.ramp;
+    const V = {
+      page:c.page, card:c.card, inverse:c.inverse, sunken:(dark?'#202326':'#EFF1EF'), field:c.card,
+      ink:c.ink, ink2:c.muted, muted:c.muted, placeholder:c.muted, white:c.page,
+      line:c.line, line2:c.muted, divider:c.line, g200:c.line, g300:c.line, g400:c.muted,
+      accent:c.accent, highlight:c.accent, soft:c.accentSoft, soft2:c.accentSoft, softbd:c.accent,
+      mutedinv:mi, accentinv: p.ai || c.accent,
+      divinv: dark ? 'rgba(0,0,1,.14)' : 'rgba(255,255,255,.16)',
+      fillinv: dark ? 'rgba(0,0,1,.07)' : 'rgba(255,255,255,.10)', gradient:'linear-gradient(135deg,'+r[2]+' 0%,'+r[0]+' 55%,'+r[3]+' 100%)',
+      napbg: dark ? c.page : c.inverse, napink: dark ? c.ink : c.page,
+      napmuted: dark ? c.muted : mi, napline: dark ? c.line : mi,
+      r1:r[2], r2:r[1], r3:r[3], r4:r[0]
+    };
+    const t5Vars = {};
+    Object.keys(V).forEach(k=>{ t5Vars['--a-'+k] = V[k]; });
+    const t5Themes = ORDER.map(k=>{
+      const q = byKey[k]; if(!q) return null;
+      const on = k===p.key;
+      return {label:LABEL[k], on, onClick:()=>this.setState({t5theme:k}),
+        bg: on?'#1a1a1a':'#fff', fg: on?'#fff':'#1a1a1a', bd: on?'#1a1a1a':'rgba(0,0,0,.15)',
+        sw1:q.c.page, sw2:q.c.accent, sw3:q.c.inverse};
+    }).filter(Boolean);
+    return { t5Vars, t5Themes, T:V, tRamp:r };
+  }
+  lucideInner(pascal){
+    const lib = (typeof window!=='undefined' && window.lucide && window.lucide.icons) || null;
+    if(!lib) return null;
+    const ic = lib[pascal];
+    if(!ic) return null;
+    const kids = (Array.isArray(ic) && Array.isArray(ic[0])) ? ic : (ic && ic.children) || null;
+    if(!Array.isArray(kids)) return null;
+    let html = '';
+    kids.forEach(node=>{
+      if(!Array.isArray(node)) return;
+      const tag = node[0], at = node[1] || {};
+      if(typeof tag !== 'string') return;
+      html += '<'+tag+' '+Object.keys(at).map(k=>k+'="'+String(at[k]).replace(/"/g,'&quot;')+'"').join(' ')+'></'+tag+'>';
+    });
+    return html || null;
+  }
+  iconEl(pascal, fallbackD, size, stroke){
+    const inner = this.lucideInner(pascal);
+    const props = {width:size, height:size, viewBox:'0 0 24 24', fill:'none', stroke:'currentColor',
+      strokeWidth:String(stroke), strokeLinecap:'round', strokeLinejoin:'round'};
+    if(inner) return React.createElement('svg', {...props, dangerouslySetInnerHTML:{__html:inner}});
+    return React.createElement('svg', props, React.createElement('path', {d:fallbackD}));
+  }
+  iconVals(){
+    const P = [
+      ['mic','M9 3h6v11a3 3 0 0 1-6 0zM5 11a7 7 0 0 0 14 0M12 18v3'],
+      ['camera','M4 8h3l1.5-2h7L17 8h3v11H4zM12 16.4a3.4 3.4 0 1 0 0-6.8 3.4 3.4 0 0 0 0 6.8'],
+      ['plus','M12 5v14M5 12h14'],
+      ['check','m5 13 4 4L19 7'],
+      ['search','M18 11a7 7 0 1 1-14 0 7 7 0 0 1 14 0M20 20l-3.2-3.2'],
+      ['brain','M12 5a3 3 0 0 0-3 3 3 3 0 0 0-1 5.8V16a2 2 0 0 0 4 0M12 5a3 3 0 0 1 3 3 3 3 0 0 1 1 5.8V16a2 2 0 0 1-4 0M12 5V19'],
+      ['send','m5 12 14-7-4 7 4 7z'],
+      ['lock','M4 10h16v10H4zM8 10V7a4 4 0 0 1 8 0v3'],
+      ['sun','M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19'],
+      ['moon','M20 14.5A8.5 8.5 0 1 1 9.5 4a6.8 6.8 0 0 0 10.5 10.5'],
+      ['clock','M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0M12 7.5V12l3 2'],
+      ['timer','M10 3h4M12 8v6M20 14a8 8 0 1 1-16 0 8 8 0 0 1 16 0'],
+      ['list','M4 7h16M4 12h16M4 17h10'],
+      ['chart','M5 20V10M12 20V4M19 20v-7'],
+      ['image','M4 5h16v14H4zM4 16l4.5-4.5L13 16M14.5 13.5 17 11l3 3M15 9.2h.01'],
+      ['download','M12 4v10M8 11l4 4 4-4M5 20h14'],
+      ['settings','M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.7-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 3 15H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 9 4.7V4a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1'],
+      ['tag','M4 4h7l9 9-7 7-9-9zM8.5 8.5h.01'],
+      ['trash','M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13'],
+      ['chevron','m9 6 6 6-6 6'],
+      ['close','M6 6l12 12M18 6 6 18'],
+      ['cpu','M7 7h10v10H7zM4 10h3M4 14h3M17 10h3M17 14h3M10 4v3M14 4v3M10 17v3M14 17v3'],
+      ['globe','M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0M4 12h16M12 4c2.2 2.3 3.3 5 3.3 8s-1.1 5.7-3.3 8c-2.2-2.3-3.3-5-3.3-8S9.8 6.3 12 4'],
+      ['type','M5 6h14M12 6v13M9.5 19h5']
+    ];
+    const W = this.state.iconStroke;
+    const LU = {mic:'Mic',camera:'Camera',plus:'Plus',check:'Check',search:'Search',brain:'Brain',send:'Send',
+      lock:'Lock',sun:'Sun',moon:'Moon',clock:'Clock',timer:'Timer',list:'List',chart:'BarChart3',image:'Image',
+      download:'Download',settings:'Settings',tag:'Tag',trash:'Trash2',chevron:'ChevronRight',close:'X',
+      cpu:'Cpu',globe:'Globe',type:'Type'};
+    const usingLucide = !!this.lucideInner('Mic');
+    return {
+      iconStroke: String(W),
+      iconSource: usingLucide ? 'Lucide · 实时载入' : 'Lucide 未加载 · 显示占位描边',
+      icons: P.map(([name,d])=>({name, d, w:String(W), el:this.iconEl(LU[name], d, 22, W)})),
+      iconsBig: P.slice(0,6).map(([name,d])=>({name, d, w:String(W), el:this.iconEl(LU[name], d, 34, W)})),
+      strokeOptions: [1.25,1.5,1.75,2].map(v=>({label:v.toFixed(2).replace(/0$/,''), on:v===W,
+        bg:v===W?'#1a1a1a':'#fff', fg:v===W?'#fff':'#1a1a1a', bd:v===W?'#1a1a1a':'rgba(0,0,0,.15)',
+        onClick:()=>this.setState({iconStroke:v})}))
+    };
+  }
+  logoVals(){
+    const HEART = 'M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z';
+    const mk = (size, stroke) => this.iconEl('Heart', HEART, size, stroke);
+    return { heart64: mk(64,1.5), heart34: mk(34,1.5), heart20: mk(20,1.75), heart14: mk(14,2),
+      heart40: mk(40,1.5), heart26: mk(26,1.5) };
+  }
+  langVals(){
+    const D = {
+      zh:{label:'中文',dir:'ltr',lang:'zh',cur:'当前状态',end:'结束',today:'今天',
+        hint:'切换到 —— 上一个状态会自动结束并记下时长',
+        idleT:'此刻没有状态', idleH:'空着的时间不会被填补——点下面的格子开始新的一段', resume:'撤销，回到', ended:(n,m)=>'刚结束「'+n+'」· 共 '+m, empty:'空 ',
+        calNav:'月历', mon:'2026 年 9 月', week:['一','二','三','四','五','六','日'], seeDay:'看这天',
+        dayFmt:n=>'9 月 '+n+' 日', cov:'已覆盖 15h 20m', covSeg:'已覆盖 15h 20m · 6 段状态',
+        calNote:'这个月有 4 天缺口超过 3 小时，都是周五晚上。', calWhen:'9 月', noticed:'它注意到',
+        nav:['此刻','今天','问它','设置'], since:'自 ',
+        el:(h,m,ss)=>'已 '+(h?h+' 小时 ':'')+m+' 分 '+ss+' 秒',
+        note:'补一句', notes:['喝了一杯奶茶','换了个会议室','有点困'],
+        sw:(a,b,n)=>'切换到「'+a+'」·「'+b+'」持续 '+n+' 分钟',
+        names:['工作中','用餐中','午睡中','通勤中','运动中','阅读中','社交中','休息中','带娃中'],
+        subs:['专注 / 会议','早中晚 / 加餐','小睡 / 补觉','地铁 / 步行','跑步 / 力量','书 / 长文','朋友 / 家人','发呆 / 刷手机','接送 / 陪玩']},
+      en:{label:'English',dir:'ltr',lang:'en',cur:'Current state',end:'End',today:'Today',
+        hint:'Switch to — the previous state ends and its duration is logged',
+        idleT:'No state right now', idleH:'Gaps stay gaps — tap a tile below to start the next one', resume:'Undo, back to ', ended:(n,m)=>'“'+n+'” just ended · '+m+' total', empty:'idle ',
+        calNav:'Calendar', mon:'September 2026', week:['M','T','W','T','F','S','S'], seeDay:'Open this day',
+        dayFmt:n=>'Sep '+n, cov:'15h 20m covered', covSeg:'15h 20m covered · 6 states',
+        calNote:'Four days this month have gaps over 3 hours — all Friday evenings.', calWhen:'September', noticed:'It noticed',
+        nav:['Now','Today','Ask','Settings'], since:'since ',
+        el:(h,m,ss)=>'for '+(h?h+'h ':'')+m+'m '+ss+'s',
+        note:'Add a note', notes:['Had a milk tea','Changed rooms','Feeling sleepy'],
+        sw:(a,b,n)=>'Switched to “'+a+'” · “'+b+'” lasted '+n+' min',
+        names:['Working','Eating','Napping','Commuting','Exercising','Reading','Socialising','Resting','With kids'],
+        subs:['Focus / meeting','Meal / snack','Short sleep','Metro / walk','Run / strength','Book / longread','Friends / family','Phone / drifting','Pickup / play']},
+      de:{label:'Deutsch',dir:'ltr',lang:'de',cur:'Aktueller Zustand',end:'Beenden',today:'Heute',
+        hint:'Wechseln zu — der vorherige Zustand endet automatisch und wird mit Dauer gespeichert',
+        idleT:'Gerade kein Zustand', idleH:'Lücken bleiben Lücken — tippe unten auf eine Karte, um weiterzumachen', resume:'Zurück zu ', ended:(n,m)=>'„'+n+'“ beendet · '+m+' insgesamt', empty:'Leer ',
+        calNav:'Kalender', mon:'September 2026', week:['Mo','Di','Mi','Do','Fr','Sa','So'], seeDay:'Tag öffnen',
+        dayFmt:n=>n+'. Sept.', cov:'15 Std. 20 Min. erfasst', covSeg:'15 Std. 20 Min. · 6 Zustände',
+        calNote:'Vier Tage in diesem Monat haben Lücken über 3 Stunden — alle Freitagabend.', calWhen:'September', noticed:'Aufgefallen',
+        nav:['Jetzt','Heute','Fragen','Einstellungen'], since:'seit ',
+        el:(h,m,ss)=>'seit '+(h?h+' Std. ':'')+m+' Min. '+ss+' Sek.',
+        note:'Notiz hinzufügen', notes:['Bubble Tea getrunken','Raum gewechselt','Etwas müde'],
+        sw:(a,b,n)=>'Zu „'+a+'“ gewechselt · „'+b+'“ dauerte '+n+' Min.',
+        names:['Arbeiten','Mahlzeit','Mittagsschlaf','Pendeln','Sport','Lesen','Verabredung','Pause','Kinderbetreuung'],
+        subs:['Fokus / Meeting','Frühstück / Mittag','Kurzes Nickerchen','U-Bahn / zu Fuß','Laufen / Kraft','Buch / Langtext','Freunde / Familie','Handy / Tagträumen','Bringen / Spielen']},
+      ar:{label:'العربية',dir:'rtl',lang:'ar',cur:'الحالة الآن',end:'إنهاء',today:'اليوم',
+        hint:'التبديل إلى — تنتهي الحالة السابقة تلقائيًا وتُسجَّل مدتها',
+        idleT:'لا حالة الآن', idleH:'الفجوات تبقى فجوات — اختر مربعًا بالأسفل للبدء', resume:'تراجع، عُد إلى ', ended:(n,m)=>'انتهت «'+n+'» · '+m+' إجمالًا', empty:'فراغ ',
+        calNav:'التقويم', mon:'سبتمبر ٢٠٢٦', week:['ن','ث','ر','خ','ج','س','ح'], seeDay:'افتح هذا اليوم',
+        dayFmt:n=>n+' سبتمبر', cov:'تمت تغطية ١٥س ٢٠د', covSeg:'تمت تغطية ١٥س ٢٠د · ٦ حالات',
+        calNote:'أربعة أيام هذا الشهر بها فجوات تتجاوز ٣ ساعات، كلها مساء الجمعة.', calWhen:'سبتمبر', noticed:'لاحظ',
+        nav:['الآن','اليوم','اسأل','الإعدادات'], since:'منذ ',
+        el:(h,m,ss)=>'منذ '+(h?h+' س ':'')+m+' د '+ss+' ث',
+        note:'أضف ملاحظة', notes:['شربت شاي بالحليب','غيّرت الغرفة','أشعر بالنعاس'],
+        sw:(a,b,n)=>'تم التبديل إلى «'+a+'» · استمرت «'+b+'» '+n+' دقيقة',
+        names:['العمل','الطعام','قيلولة','التنقل','رياضة','قراءة','لقاء','راحة','الأطفال'],
+        subs:['تركيز / اجتماع','فطور / غداء','نوم قصير','مترو / مشي','جري / قوة','كتاب / مقال','أصدقاء / عائلة','هاتف / شرود','توصيل / لعب']}
+    };
+    const code = this.state.uiLang || 'zh', d = D[code];
+    return { D, d, uiDir:d.dir, uiLang:d.lang,
+      L:{cur:d.cur, end:d.end, today:d.today, hint:d.hint, note:d.note, nav1:d.nav[0], nav2:d.nav[1], nav3:d.nav[2], nav4:d.nav[3],
+        mon:d.mon, calNav:d.calNav, idleT:d.idleT, idleH:d.idleH,
+        seeDay:d.seeDay, cov:d.cov, covSeg:d.covSeg, calNote:d.calNote, calWhen:d.calWhen, noticed:d.noticed},
+      t5Langs: Object.keys(D).map(k=>({label:D[k].label, onClick:()=>this.setState({uiLang:k}),
+        bg: k===code?'#1a1a1a':'#fff', fg: k===code?'#fff':'#1a1a1a', bd: k===code?'#1a1a1a':'rgba(0,0,0,.15)'}))
+    };
+  }
+  stateVals(){
+    const s = this.state;
+    const T = this._T || {}, R = this._ramp || ['#0072E8','#0050DC','#00A6C9','#4B5FE0'];
+    const d = this._d;
+    const NAMES = d.names;
+    const C = {};
+    NAMES.forEach((n,i)=>{ C[n] = (i===7 ? (T.g300||'#C2D2E0') : R[i % R.length]); });
+    const states = NAMES.map((name,i)=>{
+      const on = s.curIdx===i;
+      return {name, sub:d.subs[i], color:C[name], on,
+        bg: on?(T.inverse||'#0B1622'):(T.card||'#FAFDFF'),
+        fg: on?(T.white||'#F5FAFF'):(T.ink||'#08131F'),
+        subFg: on?(T.mutedinv||'#96ACC0'):(T.muted||'#4E6478'),
+        bd: on?(T.inverse||'#0B1622'):(T.line||'#CFDEEA'),
+        onClick:()=>{ if(!on) this.switchState(i); }};
+    });
+    const secs = Math.floor((Date.now()-s.since)/1000);
+    const h = Math.floor(secs/3600), m = Math.floor(secs%3600/60), ss = secs%60;
+    const sd = new Date(s.since);
+    const DAY = [
+      {name:'睡眠',mins:404,color:R[1]},
+      {name:'洗漱早餐',mins:46,color:R[2]},
+      {name:'通勤',mins:38,color:T.g400||'#7C93A8'},
+      {name:'工作',mins:172,color:R[0]},
+      {name:'午餐',mins:34,color:R[2]},
+      {name:'午睡',mins:26,color:R[1]},
+      {name:'工作',mins:210,color:R[0]}
+    ];
+    const total = DAY.reduce((a,b)=>a+b.mins,0);
+    // 月历：每格是一天，格内一条压缩过的状态条 = 当天的覆盖情况
+    const MC = [R[1], R[2], T.g400||'#7C93A8', R[0], R[1], R[0]];
+    const sel = s.calSel || 3;
+    const calDays = Array.from({length:35}, (_,i)=>{
+      const day = i;                           // 周一起头，2026-09-01 是周二 → index 1
+      const inMonth = day >= 1 && day <= 30;
+      const future = day > 12;
+      const seed = (day*2654435761) % 997;
+      let stripes = [];
+      if (inMonth && !future) {
+        const raw = MC.map((c,k)=>({color:c, v: 5 + ((seed >> (k*2)) % 9)}));
+        const sum = raw.reduce((a,b)=>a+b.v,0);
+        stripes = raw.map(r=>({color:r.color, w:(r.v/sum*100).toFixed(2)+'%'}));
+      }
+      return { label: inMonth ? String(day) : '',
+        fg: !inMonth ? 'transparent' : (day===sel ? (T.white||'#F5FAFF') : (future ? (T.muted||'#4E6478') : (T.ink||'#08131F'))),
+        bg: day===sel ? (T.inverse||'#0B1622') : 'transparent',
+        bd: day===sel ? (T.inverse||'#0B1622') : (inMonth && !future ? (T.line||'#CFDEEA') : 'transparent'),
+        stripes, hasBar: stripes.length>0,
+        onClick: inMonth && !future ? ()=>this.setState({calSel:day}) : null };
+    });
+    const curName = NAMES[s.curIdx];
+    return {
+      notes: s.notes.map(t=>({text:t})), hasNotes: s.notes.length>0,
+      noteOpen: s.noteOpen, noteClosed: !s.noteOpen,
+      toggleNote: ()=>this.setState(st=>({noteOpen:!st.noteOpen})),
+      noteChips: d.notes.map(t=>({label:t, onClick:()=>this.addNote(t)})),
+      idle: !!s.idle, running: !s.idle,
+      idleElapsed: d.empty + Math.max(0, Math.floor((Date.now()-(s.idleSince||Date.now()))/60000)) + (d.lang==='zh'?' 分钟':d.lang==='ar'?' دقيقة':' min'),
+      endedLine: d.ended(NAMES[s.lastIdx==null?s.curIdx:s.lastIdx], (h?h+'h':'')+m+'m'),
+      resumeLabel: d.resume + NAMES[s.lastIdx==null?s.curIdx:s.lastIdx],
+      endNow: ()=>this.setState(st=>({idle:true, lastIdx:st.curIdx, idleSince:Date.now()})),
+      resumeNow: ()=>this.setState(st=>({idle:false, curIdx:st.lastIdx==null?st.curIdx:st.lastIdx, since:Date.now()})),
+      states, curState:curName, curColor:C[curName]||R[0],
+      elapsed: d.el(h, m, String(ss).padStart(2,'0')),
+      sinceLabel: d.since + String(sd.getHours()).padStart(2,'0')+':'+String(sd.getMinutes()).padStart(2,'0'),
+      dayBlocks: DAY.map(b=>({...b, w:(b.mins/total*100).toFixed(2)+'%', label:b.name, dur:(b.mins>=60? Math.floor(b.mins/60)+'h'+(b.mins%60?b.mins%60+'m':'') : b.mins+'m')})),
+      calDays, calWeek:(this.langVals().d.week||['一','二','三','四','五','六','日']).map(w=>({w})),
+      calSelLabel: this.langVals().d.dayFmt(s.calSel||3),
+      demo:s.demo, demoEat:s.demo==='用餐中', demoNap:s.demo==='午睡中', demoWork:s.demo==='工作中',
+      demoTabs:['用餐中','午睡中','工作中'].map(n=>({name:n, on:s.demo===n,
+        bg:s.demo===n?(T.accent||'#0072E8'):(T.card||'#FAFDFF'), fg:s.demo===n?(T.page||'#fff'):(T.muted||'#4E6478'),
+        onClick:()=>this.setState({demo:n})}))
+    };
+  }
+  buildPalettes(P, turn){
+    const LBL = {page:'surface.page',card:'surface.card',ink:'text.primary',muted:'text.tertiary',line:'border',accent:'accent',accentSoft:'accent.soft',inverse:'surface.inverse'};
+    const palettes = P.map((p,i)=>({
+      ...p, ...p.c, id:turn+'abcdef'[i], href:'#'+turn+'abcdef'[i],
+      mutedInv: p.mi || p.c.muted,
+      swatches: Object.keys(p.c).map(k=>({token:LBL[k],hex:p.c[k],bg:p.c[k],bd:(k==='page'||k==='card')?'#DEE2E6':'transparent'})),
+      extras: Object.keys(p.x||{}).map(k=>({token:k, hex:p.x[k], bg:p.x[k]})),
+      rampCells: p.ramp.map(h=>({bg:h,hex:h}))
+    }));
+    const json = '{\n' + P.map(p=>
+      '  "'+p.key+'": {\n    "label": "'+p.name+'",\n    "mode": "'+(/night|midnight/.test(p.key)?'dark':'light')+'",\n'+
+      Object.keys(p.c).map(k=>'    "'+LBL[k].replace('.','-')+'": "'+p.c[k]+'"').join(',\n') +
+      ',\n    "muted-on-inverse": "'+(p.mi||p.c.muted)+'"' +
+      ',\n    "accent-on-inverse": "'+(p.ai||p.c.accent)+'"' +
+      (p.x ? ',\n' + Object.keys(p.x).map(k=>'    "'+k.replace(/_/g,'-')+'": "'+p.x[k]+'"').join(',\n') : '') +
+      ',\n    "state-ramp": ['+p.ramp.map(h=>'"'+h+'"').join(', ')+']\n  }'
+    ).join(',\n') + '\n}';
+    return { palettes, json };
+  }
+  paletteVals3(){
+    const P = [
+      {key:'daylight-arctic', mi:'#9EA4A8', ai:'#7FC0FF', name:'Daylight Arctic', cn:'明 · 冷（加强）', desc:'中性纸面，冷调只体现在强调色与状态色——强调色是更深的电蓝。和 Daylight Amber 并排时冷暖对比最强。',
+       c:{page:'#F8F9F8',card:'#FFFFFF',ink:'#22262A',muted:'#6E7479',line:'#DFE2E0',accent:'#0072E8',accentSoft:'#D7E9FC',inverse:'#262A2D'},
+       x:{text_secondary:'#464C51',text_disabled:'#9EA4A8',bg_bubble:'#E9ECEA',bg_overlay:'#FFFFFF',divider:'rgba(110,116,121,.18)',scrim:'rgba(34,38,42,.42)',on_brand:'#FFFFFF',danger:'#C8372F',success:'#0B7350'},
+       ramp:['#0072E8','#0050DC','#00A6C9','#4B5FE0']},
+      {key:'midnight-arctic', mi:'#585E62', ai:'#0F5C99', name:'Midnight Arctic', cn:'暗 · 冷（加强）', desc:'中性炭灰底，冰蓝强调色。夜里对比最锐，适合"一天"页和问答。',
+       c:{page:'#16181A',card:'#1D2023',ink:'#E6E8E6',muted:'#8A9095',line:'#383D41',accent:'#4FB2FF',accentSoft:'#122C46',inverse:'#E6E8E6'},
+       x:{text_secondary:'#C2C6C6',text_disabled:'#585E62',bg_bubble:'#232729',bg_overlay:'#272B2E',divider:'rgba(138,144,149,.24)',scrim:'rgba(0,0,0,.58)',on_brand:'#062038',danger:'#F0736A',success:'#43C79A'},
+       ramp:['#4FB2FF','#00CFE0','#5A7CFF','#8A6BFF']}
+    ];
+    this._p3 = P;
+    const v = this.buildPalettes(P, '9');
+    return { palettes3: v.palettes, paletteJson3: v.json };
+  }
+  paletteVals2(){
+    const P = [
+      {key:'daylight-amber', mi:'#9EA4A8', ai:'#F0913F', name:'Daylight Amber', cn:'明 · 暖（加强）', desc:'纸面与 Arctic 完全相同，只有强调色和状态色换成琥珀橙——冷暖一眼可辨。品牌旗帜渐变仍保留给 AI 与记忆入口。',
+       c:{page:'#F8F9F8',card:'#FFFFFF',ink:'#22262A',muted:'#6E7479',line:'#DFE2E0',accent:'#E2701E',accentSoft:'#FCE3CB',inverse:'#262A2D'},
+       x:{text_secondary:'#464C51',text_disabled:'#9EA4A8',bg_bubble:'#E9ECEA',bg_overlay:'#FFFFFF',divider:'rgba(110,116,121,.18)',scrim:'rgba(34,38,42,.42)',on_brand:'#FFFFFF',danger:'#C0392B',success:'#0E7247'},
+       ramp:['#E2701E','#D6A100','#00B27A','#C24A2C']},
+      {key:'midnight-amber', mi:'#585E62', ai:'#8A4A12', name:'Midnight Amber', cn:'暗 · 暖（加强）', desc:'同一套中性炭灰底 + 蜜橙强调，夜里蓝光最少；睡前记录与午睡页的首选。',
+       c:{page:'#16181A',card:'#1D2023',ink:'#E6E8E6',muted:'#8A9095',line:'#383D41',accent:'#FF9A4D',accentSoft:'#3A2513',inverse:'#E6E8E6'},
+       x:{text_secondary:'#C2C6C6',text_disabled:'#585E62',bg_bubble:'#232729',bg_overlay:'#272B2E',divider:'rgba(138,144,149,.24)',scrim:'rgba(0,0,0,.58)',on_brand:'#1A1008',danger:'#E0685C',success:'#4FC58A'},
+       ramp:['#FF9A4D','#E0B53A','#7FD13B','#D2603A']},
+      {key:'quiet-day', mi:'#9EA4A8', ai:'#A9C4D6', name:'Quiet Day', cn:'低饱和 · 明', desc:'所有色相压到 30% 饱和以下，状态色靠明度区分。信息密度高时最不吵。',
+       c:{page:'#F8F9F8',card:'#FFFFFF',ink:'#22262A',muted:'#6E7479',line:'#DFE2E0',accent:'#5B7F9B',accentSoft:'#E5EBEF',inverse:'#262A2D'},
+       x:{text_secondary:'#464C51',text_disabled:'#9EA4A8',bg_bubble:'#E9ECEA',bg_overlay:'#FFFFFF',divider:'rgba(110,116,121,.18)',scrim:'rgba(34,38,42,.42)',on_brand:'#FFFFFF',danger:'#B4564E',success:'#3B6E56'},
+       ramp:['#5B7F9B','#7C9A86','#A8917A','#8E8AA0']},
+      {key:'quiet-night', mi:'#585E62', ai:'#35566E', name:'Quiet Night', cn:'低饱和 · 暗', desc:'灰蓝夜色，强调色是雾蓝而非电蓝；长时间盯屏疲劳最低。',
+       c:{page:'#16181A',card:'#1D2023',ink:'#E6E8E6',muted:'#8A9095',line:'#383D41',accent:'#7FA3BE',accentSoft:'#232C33',inverse:'#E6E8E6'},
+       x:{text_secondary:'#C2C6C6',text_disabled:'#585E62',bg_bubble:'#232729',bg_overlay:'#272B2E',divider:'rgba(138,144,149,.24)',scrim:'rgba(0,0,0,.58)',on_brand:'#10181E',danger:'#D08A83',success:'#82B49A'},
+       ramp:['#7FA3BE','#8FAE98','#B9A288','#9C97AE']}
+    ];
+    this._p2 = P;
+    const v = this.buildPalettes(P, '8');
+    return { palettes2: v.palettes, paletteJson2: v.json };
+  }
+  paletteAll(){
+    const a = this._p2, b = this._p3;
+    const P = [a[0], b[0], a[2], a[1], b[1], a[3]];
+    const SRC = ['8a','9a','8c','8b','9b','8d'];
+    const v = this.buildPalettes(P, '10');
+    return {
+      allPalettes: v.palettes.map((p,i)=>({...p, src:SRC[i], srcHref:'#'+SRC[i],
+        isDark: /night/.test(p.key), group: /night/.test(p.key) ? '暗' : '明'})),
+      allJson: v.json
+    };
+  }
+  renderVals(){
+    const s = this.state, p = this.props;
+    const pv2 = this.paletteVals2(), pv3 = this.paletteVals3(), tv = this.themeVals();
+    const lv = this.langVals(); this._d = lv.d;
+    this._T = tv.T; this._ramp = tv.tRamp;
+    const FOOD = ['牛肉面','青菜','卤蛋','没吃完','偏咸'];
+    const foodTags = FOOD.map(label=>{
+      const on = s.foodTags.includes(label);
+      return {label, bg:on?'var(--theme-a200)':'var(--surface-card)', fg:on?'var(--primary)':'var(--text-secondary)',
+        bd:on?'var(--theme-a300)':'var(--border)',
+        onClick:()=>this.setState(st=>({foodTags: st.foodTags.includes(label)?st.foodTags.filter(t=>t!==label):[...st.foodTags,label]}))};
+    });
+    const quick = ['起床了','早餐','午餐','咖啡','出门','到公司','运动','睡了'].map(label=>({label,onClick:()=>this.quickAdd(label)}));
+    const MODELS = [
+      {id:'llama',name:'Llama 3.2 3B · Instruct',meta:'1.9 GB · 4-bit · ~34 tok/s',tag:'Running'},
+      {id:'qwen',name:'Qwen2.5 7B · Instruct',meta:'4.4 GB · 4-bit · ~11 tok/s',tag:'Ready'},
+      {id:'embed',name:'Add a model',meta:'from a .gguf file on this device',tag:'Import'}
+    ];
+    const models = MODELS.map(m=>{
+      const on = s.model===m.id;
+      return {...m, dot: on?'var(--primary)':'var(--border-secondary)', fill: on?'var(--primary)':'transparent',
+        bd: on?'var(--primary)':'var(--border)',
+        tagFg: on?'var(--primary)':'var(--text-tertiary)', tagBg: on?'var(--theme-a100)':'var(--surface-sunken)',
+        onClick:()=>this.setState({model:m.id})};
+    });
+    const toggles = [
+      {key:'voiceIdx',label:'Index voice transcripts',help:'Audio is transcribed, indexed, then the recording is discarded.',on:s.voiceIdx},
+      {key:'autoDigest',label:'Rebuild digest at 22:00',help:'Runs while charging. Takes about 40 seconds.',on:s.autoDigest},
+      {key:'apiAccess',label:'Local API on port 8722',help:'Lets other apps on this phone query your data.',on:s.apiAccess}
+    ].map(t=>({...t,onChange:v=>this.setState({[t.key]:v})}));
+    const apps = [
+      {initial:'S',name:'Shortcuts',scope:'read · today only',state:'Allowed',fg:'var(--success)',bg:'rgba(0,178,84,.12)'},
+      {initial:'O',name:'Obsidian',scope:'read · all entries',state:'Allowed',fg:'var(--success)',bg:'rgba(0,178,84,.12)'},
+      {initial:'?',name:'Unknown client',scope:'requested 2 days ago',state:'Blocked',fg:'var(--danger)',bg:'rgba(214,72,70,.12)'}
+    ];
+    const SIZES = [['小',14],['标准',16],['大',18],['特大',21]];
+    const sizeOptions = SIZES.map(([label,px])=>{
+      const on = s.textSize===label;
+      return {label, px:px+'px', on,
+        bg:on?'var(--primary)':'var(--surface-card)', fg:on?'#fff':'var(--text-secondary)',
+        bd:on?'var(--primary)':'var(--border)',
+        onClick:()=>this.setState({textSize:label})};
+    });
+    const curSize = (SIZES.find(x=>x[0]===s.textSize)||SIZES[1])[1];
+    const themeRows = (tv.t5Themes||[]).map((t,i)=>({...t,
+      rowBg: t.on?'var(--theme-a100)':'var(--surface-card)',
+      rowBd: t.on?'var(--primary)':'var(--border)',
+      tick: t.on?'var(--primary)':'transparent'}));
+    const langRows = (lv.t5Langs||[]).map(t=>({...t,
+      rowBg: t.bg==='#1a1a1a'?'var(--theme-a100)':'var(--surface-card)',
+      rowBd: t.bg==='#1a1a1a'?'var(--primary)':'var(--border)',
+      tick: t.bg==='#1a1a1a'?'var(--primary)':'transparent'}));
+    const sw = k => ({on:s[k], onChange:v=>this.setState({[k]:v})});
+    const swFollow = sw('followSystem'), swLocalOnly = sw('localOnly'), swWifi = sw('wifiOnly');
+    const remoteOff = s.localOnly;
+    const remotes = [
+      {name:'Claude · Anthropic',state:remoteOff?'已停用':'已连接',key:'sk-ant-··············7f2c',
+        fg:remoteOff?'var(--text-tertiary)':'var(--success)',bg:remoteOff?'var(--surface-sunken)':'rgba(0,178,84,.12)'},
+      {name:'OpenAI',state:remoteOff?'已停用':'未填写',key:'填入 API Key',fg:'var(--text-tertiary)',bg:'var(--surface-sunken)'},
+      {name:'自建 · OpenAI 兼容',state:remoteOff?'已停用':'未填写',key:'https://…/v1',fg:'var(--text-tertiary)',bg:'var(--surface-sunken)'}
+    ];
+    const locals = [
+      {name:'Llama 3.2 3B · Instruct',meta:'1.9 GB · 4-bit · 已下载',pct:'100%',state:'使用中',on:true},
+      {name:'Qwen2.5 7B · Instruct',meta:'4.4 GB · 下载中 62%',pct:'62%',state:'暂停',on:false},
+      {name:'Whisper small · 中英',meta:'466 MB · 语音转写',pct:'100%',state:'已下载',on:false}
+    ].map(m=>({...m,
+      bd:m.on?'var(--primary)':'var(--border)', bg:m.on?'var(--theme-a100)':'var(--surface-card)',
+      fg:m.on?'var(--primary)':'var(--text-tertiary)'}));
+    const suggestions = [
+      {key:'q1',label:'When did I last mention the co-op?'},
+      {key:'q2',label:'What have I promised and not done?'},
+      {key:'q3',label:'How am I sleeping this week?'}
+    ].map(q=>({label:q.label,onClick:()=>this.ask(q.key,q.label)}));
+    return {
+      ...pv2, ...pv3, ...tv, ...lv, ...this.iconVals(), ...this.logoVals(), ...this.stateVals(), ...this.paletteAll(),
+      sizeOptions, curSize:curSize+'px', curSizeSm:(curSize-2)+'px', themeRows, langRows, remotes, locals,
+      swFollow, swLocalOnly, swWifi,
+      remoteOpacity: remoteOff ? .45 : 1,
+      remoteNote: remoteOff ? '「只用本地模型」开着，下面几项已停用。要用远程模型请先关掉上面的开关。'
+        : 'Key 存在系统密钥库，不进备份、不随导出。启用远程模型时，只有你当次提问用到的片段会被发送。',
+      quick, foodTags, log:s.log, logTop:s.log.slice(0,3), toast:s.toast, hasToast:!!s.toast,
+      logCount: s.log.length + ' 条 · 今天',
+      shot:s.shot, notShot:!s.shot, shutter:()=>this.setState(st=>({shot:!st.shot})),
+      fabOpen: s.fabOpen !== false, fabClosed: s.fabOpen === false, toggleFab:()=>this.setState(st=>({fabOpen:!st.fabOpen})),
+      models, toggles, apps, thinking:s.thinking, suggestions,
+      msgs: s.msgs.map(m=>({...m, bubbleProps: m.me ? {} : {style:{maxWidth:'100%',width:'100%'}}})),
+      resetChat:()=>this.setState({msgs:[{me:false,text:'Cleared. Your entries are untouched \u2014 only this conversation is gone.',time:'now',align:'flex-start',hasMem:false}],thinking:false}),
+      techVisible: p.techVisible ?? true,
+      techLine: (p.modelName ?? 'llama-3.2-3b-q4') + ' · 1,284 units indexed · offline'
+    };
+  }
+}
+</script>
+</body>
+</html>

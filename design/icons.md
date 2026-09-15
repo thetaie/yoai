@@ -4,9 +4,14 @@ Source: Claude Design project "Body Clock", round 11.
 
 ## The set
 
-[Lucide](https://lucide.dev) — MIT, open source, drawn on a 24px grid with round
-caps and joins. It is also what the Tanka design system uses, so the two match
-without adjustment.
+**Lucide** — ISC, open source, drawn on a 24px grid with round caps and joins.
+It is also what the Tanka design system uses, so the two match without
+adjustment.
+
+A pinned copy of the icons we use lives in
+[third_party/lucide](../third_party/lucide), and **that copy is the source of
+record**. The canvas loads Lucide from a CDN at `@latest`, which is fine for a
+review canvas and useless as a reference: it moves.
 
 Not an icon font. A font cannot do two-tone, screen readers read the glyphs as
 garbage, and the stroke weight shifts with the font weight instead of staying
@@ -14,7 +19,7 @@ put.
 
 ## Rules
 
-- Draw on a **24px canvas**, stroke **2px**, round cap and round join.
+- Draw on a **24px canvas**, stroke **1.5px**, round cap and round join.
 - **Stroke only** — no filled variants, and never mix filled and stroked in the
   same surface.
 - **`currentColor` always.** An icon takes its color from the text color around
@@ -28,13 +33,16 @@ put.
   tappable button.
 - **RTL mirrors direction only** — back, send. Clock and camera do not mirror.
 
-2px settles what round 11 left as a live control. 1.5 was the proposal, but it
-is not what the design file draws: every icon in `bodyclock-design` is between 1.75
-and 2.6 — plus 2.2, lock 1.9–2, camera 1.75, and the selected-row tick 2.6.
+**1.5px, and no per-icon exceptions.** This file previously said 2px, and gave
+per-icon weights between 1.75 and 2.6 measured off a design file that is not in
+this repo and cannot be checked. Round 11 leaves stroke width as a live control
+on the canvas; its default, its stated rule and what it renders are all 1.5.
 
-The tick keeps the design's own 2.6: it is the one icon that has to read as a
-state at a glance rather than as decoration. Per-icon weights live beside the
-path data in `core/Icons.ets`.
+Two things made 2px look right. Lucide's standalone `.svg` files carry
+`stroke-width="2"` — that is the default for a file opened on its own, and the
+canvas overrides it when drawing. And the canvas's own fallback paths, seen
+when it cannot reach the CDN, are simplified stand-ins drawn to read at a
+heavier weight.
 
 One thing that looks like an icon and is not: the small color bar at the top of
 each state cell on the home screen. It is a state color from the palette's
@@ -42,34 +50,50 @@ each state cell on the home screen. It is a state color from the palette's
 
 ## Inventory
 
-24 icons, with the Lucide component name to import.
+The design's 24, and the three more the app already draws. **Name** is what the
+canvas calls it; **file** is the pinned SVG in
+[third_party/lucide/icons](../third_party/lucide/icons), which is what to
+transcribe from; **Lucide** is the component name, useful only on a platform
+that can import the package. Four of the names differ from the file, so go by
+the file.
 
-| Name | Lucide |
-|---|---|
-| mic | `Mic` |
-| camera | `Camera` |
-| plus | `Plus` |
-| check | `Check` |
-| search | `Search` |
-| brain | `Brain` |
-| send | `Send` |
-| lock | `Lock` |
-| sun | `Sun` |
-| moon | `Moon` |
-| clock | `Clock` |
-| timer | `Timer` |
-| list | `List` |
-| chart | `BarChart3` |
-| image | `Image` |
-| download | `Download` |
-| settings | `Settings` |
-| tag | `Tag` |
-| trash | `Trash2` |
-| chevron | `ChevronRight` |
-| close | `X` |
-| cpu | `Cpu` |
-| globe | `Globe` |
-| type | `Type` |
+**✓** means the path data is already in `core/Icons.ets`.
+
+| | Name | File | Lucide |
+|---|---|---|---|
+| | mic | `mic.svg` | `Mic` |
+| | camera | `camera.svg` | `Camera` |
+| | plus | `plus.svg` | `Plus` |
+| ✓ | check | `check.svg` | `Check` |
+| | search | `search.svg` | `Search` |
+| | brain | `brain.svg` | `Brain` |
+| | send | `send.svg` | `Send` |
+| | lock | `lock.svg` | `Lock` |
+| | sun | `sun.svg` | `Sun` |
+| | moon | `moon.svg` | `Moon` |
+| | clock | `clock.svg` | `Clock` |
+| | timer | `timer.svg` | `Timer` |
+| | list | `list.svg` | `List` |
+| | chart | **`bar-chart-3.svg`** | `BarChart3` |
+| | image | `image.svg` | `Image` |
+| | download | `download.svg` | `Download` |
+| ✓ | settings | `settings.svg` | `Settings` |
+| | tag | `tag.svg` | `Tag` |
+| | trash | **`trash-2.svg`** | `Trash2` |
+| ✓ | chevron | **`chevron-right.svg`** | `ChevronRight` |
+| | close | **`x.svg`** | `X` |
+| | cpu | `cpu.svg` | `Cpu` |
+| | globe | `globe.svg` | `Globe` |
+| | type | `type.svg` | `Type` |
+
+Three the app draws that the design's set does not name — the drawer button and
+the other two chevron directions. Pinned at the same version as the rest:
+
+| | Name | File | Lucide |
+|---|---|---|---|
+| ✓ | menu | `menu.svg` | `Menu` |
+| ✓ | chevron-left | `chevron-left.svg` | `ChevronLeft` |
+| ✓ | chevron-down | `chevron-down.svg` | `ChevronDown` |
 
 HarmonyOS has no Lucide package. The icons ship as path data inlined into an
 ArkUI `Shape` + `Path`.
@@ -81,11 +105,19 @@ Six of the 24 are in that table — `menu`, the three chevrons, `check`,
 the rest when the screen that needs them lands, rather than filling the table
 in from memory.
 
-**Where the design file and Lucide differ, the design file wins.** Its `check`
-is `m5 13 4 4L19 7` at stroke 2.6, which sits lower and heavier than Lucide's
-`M20 6 9 17l-5-5` at 1.5, and the heavier one is what the screens were signed
-off on. Take path data and weight from `bodyclock-design`; fall back to Lucide only
-for icons the design file does not draw.
+**Path data comes from [third_party/lucide](../third_party/lucide).** This file
+used to say the opposite — that where an earlier design file and Lucide
+differed, the design file won, citing a `check` of `m5 13 4 4L19 7` at stroke
+2.6 against Lucide's `M20 6 9 17l-5-5`. That reasoning does not survive
+contact with the canvas: the canvas *is* Lucide. It loads the library live and
+falls back to its own simplified paths only when it cannot reach the CDN,
+announcing that in the corner when it happens. The shapes anyone reviewed were
+Lucide's; the simplified ones were never on screen except offline.
+
+**Take every element from the `.svg`, not just the `d` attributes.** Several
+icons carry a `<circle>` or `<rect>` alongside their paths — `settings` is a
+gear path plus `<circle cx="12" cy="12" r="3">`, and `clock` is a circle plus
+the hands. Reading only `d=` loses those, and loses them quietly.
 
 **A Unicode glyph is not a substitute.** The screens first shipped with
 `Text('‹')`, `Text('›')`, `Text('☰')` and `Text('▾')` standing in for back,
