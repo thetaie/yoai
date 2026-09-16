@@ -17,6 +17,10 @@
 #include "llm/openai_chat.hpp"
 #include "llm/types.hpp"
 #include "platform/log.hpp"
+#include "voice/prosody.hpp"
+#include "voice/sensevoice.hpp"
+
+#include <ctime>
 
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -473,4 +477,237 @@ extern "C" int bodyclock_chat(const char* provider_id,
     const bool ok = client.ainvoke(messages, system, forward);
 
     return ok ? 0 : 1;
+}
+
+//------------------------------------------------------------------------------
+// Voice
+//------------------------------------------------------------------------------
+
+namespace {
+
+// One recognizer for the process, because the weights are 254 MB and reloading
+// them per recording would make voice input unusable -- the same argument the
+// on-device LLM lane makes for caching its clients.
+//
+// The mutex is not an optimization. A SenseVoice instance owns a compute buffer
+// that a pass writes through, so two recordings analysed at once would corrupt
+// each other's graph. Analysis therefore serializes, which is the honest
+// behaviour for something that takes a second and a half.
+std::mutex& voice_mutex() {
+    static std::mutex m;
+    return m;
+}
+
+bodyclock::voice::SenseVoice& recognizer() {
+    static bodyclock::voice::SenseVoice sv;
+    return sv;
+}
+
+bool& voice_loaded() {
+    static bool loaded = false;
+    return loaded;
+}
+
+// Thread-local for the same reason bodyclock_providers()' buffer is: two threads
+// asking at once must not overwrite each other's answer.
+std::string& voice_buffer() {
+    static thread_local std::string buf;
+    return buf;
+}
+
+// The marker SentencePiece puts at the start of a word, and the space it means.
+void append_piece(std::string* text, const std::string& piece) {
+    const char* kWordStart = "\xe2\x96\x81";
+    if (piece.size() >= 3 && piece.compare(0, 3, kWordStart) == 0) {
+        *text += ' ';
+        *text += piece.substr(3);
+    } else {
+        *text += piece;
+    }
+}
+
+}  // namespace
+
+extern "C" int bodyclock_voice_available(void) {
+    return bodyclock::voice::SenseVoice::available() ? 1 : 0;
+}
+
+extern "C" int bodyclock_voice_load(const char* model_path) {
+    if (blank(model_path)) {
+        bodyclock::platform::log_warn("bodyclock_voice_load: model_path is required");
+        return 1;
+    }
+    std::lock_guard<std::mutex> guard(voice_mutex());
+    voice_loaded() = recognizer().load(model_path);
+    return voice_loaded() ? 0 : 1;
+}
+
+extern "C" int bodyclock_voice_loaded(void) {
+    std::lock_guard<std::mutex> guard(voice_mutex());
+    return voice_loaded() ? 1 : 0;
+}
+
+extern "C" void bodyclock_voice_unload(void) {
+    std::lock_guard<std::mutex> guard(voice_mutex());
+    // There is no unload on the recognizer itself: the weights go when the
+    // process does, or when another load replaces them. Forgetting the flag is
+    // what a host can observe, and it is what stops a stale model being used.
+    voice_loaded() = false;
+}
+
+extern "C" int bodyclock_voice_set_itn(int on) {
+    std::lock_guard<std::mutex> guard(voice_mutex());
+    if (!voice_loaded()) {
+        bodyclock::platform::log_warn("bodyclock_voice_set_itn: no model is loaded");
+        return 1;
+    }
+    return recognizer().set_inverse_text_normalization(on != 0) ? 0 : 1;
+}
+
+extern "C" const char* bodyclock_voice_analyze(const short* pcm,
+                                          int n_samples,
+                                          int sample_rate) {
+    if (pcm == nullptr || n_samples <= 0) {
+        bodyclock::platform::log_warn("bodyclock_voice_analyze: pcm and n_samples are required");
+        return nullptr;
+    }
+    if (sample_rate != 16000) {
+        bodyclock::platform::log_error(
+            "bodyclock_voice_analyze: sample_rate is %d, must be 16000 -- the core carries "
+            "no resampler, capture at 16 kHz",
+            sample_rate);
+        return nullptr;
+    }
+
+    std::vector<float> samples(static_cast<size_t>(n_samples));
+    for (int i = 0; i < n_samples; ++i) {
+        samples[i] = pcm[i] / 32768.0f;
+    }
+
+    std::lock_guard<std::mutex> guard(voice_mutex());
+
+    bodyclock::voice::Transcript transcript;
+    bool   have_transcript    = false;
+    double transcribe_seconds = 0.0;
+    if (voice_loaded()) {
+        const clock_t started = clock();
+        have_transcript = recognizer().transcribe(&samples[0], samples.size(), &transcript);
+        transcribe_seconds = static_cast<double>(clock() - started) / CLOCKS_PER_SEC;
+    }
+
+    bodyclock::voice::Recording recording;
+    const clock_t prosody_started = clock();
+    const bool have_prosody = bodyclock::voice::analyze(
+        &samples[0], samples.size(), sample_rate, bodyclock::voice::ProsodyOptions(), &recording);
+    const double prosody_seconds =
+        static_cast<double>(clock() - prosody_started) / CLOCKS_PER_SEC;
+
+    rapidjson::StringBuffer buf;
+    rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+    w.StartObject();
+    w.Key("audioSeconds"); w.Double(static_cast<double>(n_samples) / sample_rate);
+    w.Key("sampleRate");   w.Int(sample_rate);
+
+    if (have_transcript) {
+        w.Key("transcript");
+        w.StartObject();
+        w.Key("text");
+        w.String(transcript.text.data(), static_cast<rapidjson::SizeType>(transcript.text.size()));
+        w.Key("language");
+        w.String(transcript.language.data(),
+                 static_cast<rapidjson::SizeType>(transcript.language.size()));
+        w.Key("emotion");
+        w.String(transcript.emotion.data(),
+                 static_cast<rapidjson::SizeType>(transcript.emotion.size()));
+        w.Key("event");
+        w.String(transcript.event.data(),
+                 static_cast<rapidjson::SizeType>(transcript.event.size()));
+        w.Key("itn");                   w.Bool(transcript.itn);
+        w.Key("filteredStrayCapitals"); w.Bool(transcript.filtered_stray_capitals);
+        w.Key("seconds");               w.Double(transcribe_seconds);
+        w.Key("tokens");
+        w.StartArray();
+        for (size_t i = 0; i < transcript.tokens.size(); ++i) {
+            const bodyclock::voice::Token& t = transcript.tokens[i];
+            w.StartObject();
+            w.Key("at");    w.Double(t.start);
+            w.Key("frame"); w.Int(t.frame);
+            w.Key("piece");
+            w.String(t.piece.data(), static_cast<rapidjson::SizeType>(t.piece.size()));
+            w.Key("dropped"); w.Bool(t.dropped);
+            w.EndObject();
+        }
+        w.EndArray();
+        w.EndObject();
+    }
+
+    if (have_prosody) {
+        w.Key("prosody");
+        w.StartObject();
+        w.Key("seconds"); w.Double(prosody_seconds);
+        // Below this the deviations are noise rather than signal. Reported as a
+        // flag so the decision is the host's and is visible, instead of the core
+        // silently returning numbers that should not be shown.
+        w.Key("enough");  w.Bool(recording.utterances.size() >= 5);
+        w.Key("baseline");
+        w.StartObject();
+        w.Key("f0Mean");     w.Double(recording.baseline.f0_mean);
+        w.Key("f0Sd");       w.Double(recording.baseline.f0_sd);
+        w.Key("rmsMean");    w.Double(recording.baseline.rms_mean);
+        w.Key("rmsSd");      w.Double(recording.baseline.rms_sd);
+        w.Key("speechMean"); w.Double(recording.baseline.speech_mean);
+        w.Key("speechSd");   w.Double(recording.baseline.speech_sd);
+        w.EndObject();
+
+        w.Key("utterances");
+        w.StartArray();
+        for (size_t i = 0; i < recording.utterances.size(); ++i) {
+            const bodyclock::voice::Utterance& u = recording.utterances[i];
+            const bodyclock::voice::Deviation  d = bodyclock::voice::deviation(recording, i);
+            w.StartObject();
+            w.Key("start");        w.Double(u.start);
+            w.Key("duration");     w.Double(u.duration);
+            w.Key("f0Mean");       w.Double(u.f0_mean);
+            w.Key("f0P10");        w.Double(u.f0_p10);
+            w.Key("f0P90");        w.Double(u.f0_p90);
+            w.Key("f0RangeSt");    w.Double(u.f0_range_st);
+            w.Key("rmsMean");      w.Double(u.rms_mean);
+            w.Key("speechRatio");  w.Double(u.speech_ratio);
+            w.Key("voicedFrames"); w.Int(u.voiced_frames);
+            // Derived on the way out, never stored: today's weighting of pitch
+            // against continuity is a guess, and re-deriving it must not need
+            // the audio back.
+            w.Key("zF0");         w.Double(d.f0);
+            w.Key("zLoudness");   w.Double(d.loudness);
+            w.Key("zContinuity"); w.Double(d.continuity);
+            w.Key("arousal");     w.Double(bodyclock::voice::arousal(recording, i));
+
+            // What was being said, when there is a transcript to say it with.
+            // The two halves are independent measurements of the same seconds,
+            // and putting them side by side is the whole point.
+            if (have_transcript) {
+                std::string said;
+                const float end = u.start + u.duration;
+                for (size_t k = 0; k < transcript.tokens.size(); ++k) {
+                    const bodyclock::voice::Token& t = transcript.tokens[k];
+                    if (t.frame < 0 || t.dropped) {
+                        continue;   // a query token, or one the filter removed
+                    }
+                    if (t.start >= u.start && t.start < end) {
+                        append_piece(&said, t.piece);
+                    }
+                }
+                w.Key("text");
+                w.String(said.data(), static_cast<rapidjson::SizeType>(said.size()));
+            }
+            w.EndObject();
+        }
+        w.EndArray();
+        w.EndObject();
+    }
+
+    w.EndObject();
+
+    voice_buffer().assign(buf.GetString(), buf.GetSize());
+    return voice_buffer().c_str();
 }

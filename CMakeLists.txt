@@ -178,6 +178,14 @@ add_library(bodyclock_core STATIC
     src/platform/c_api.cpp
     src/platform/log.cpp
     src/store/timeline.cpp
+
+    # Voice. One subsystem, two halves with different appetites -- the same split
+    # design/voice.md is built on. fbank and prosody are arithmetic over a sample
+    # buffer and build everywhere; sensevoice needs ggml and compiles to a
+    # truthful stub without it, the way llm/local.cpp does for the LLM lane.
+    src/voice/fbank.cpp
+    src/voice/prosody.cpp
+    src/voice/sensevoice.cpp
 )
 
 target_include_directories(bodyclock_core PUBLIC src)
@@ -211,43 +219,80 @@ elseif(OHOS OR CMAKE_SYSTEM_NAME STREQUAL "OHOS")
 endif()
 
 #-------------------------------------------------------------------------------
-# On-device LLM (llama.cpp + GGUF)
+# ggml, shared by the two on-device lanes
 #-------------------------------------------------------------------------------
-
-# OFF by default: the engine is a few hundred MB of static archives that only the
-# mobile hosts want, and src/llm/local.cpp compiles a stub without it, so the
-# desktop build stays a two-minute vcpkg affair.
 #
-# LLAMA_CPP_DIR points at an SDK dir: include/llama.h + lib/. Both layouts work --
-# a shared build (one libllama) and a static build (libllama plus the ggml
-# archives), which is what a HAP needs since there is nowhere to put a companion
-# .so. The ggml libs are therefore optional.
+# Two things here run on ggml and they need different amounts of it:
 #
-# On HarmonyOS nobody sets either variable by hand: `harmony/build.cmd <abi>
-# llama` (or .sh) assembles the SDK at harmony/prebuilt/llama-sdk/<abi> and the
-# app's CMakeLists finds it there. Building the SDK IS turning the lane on.
-option(BODYCLOCK_ONDEVICE_LLM "Build the on-device LLM engine (llama.cpp + GGUF)" OFF)
+#   - The on-device LLM (src/llm/local.cpp) needs libllama on top.
+#   - Speech recognition (src/voice/sensevoice.cpp) does NOT. SenseVoice is an
+#     encoder plus a CTC head with no autoregression, so it links ggml directly
+#     and never touches llama. That is why recognition can be switched on by
+#     itself, and why it costs a fraction of what an audio-capable LLM would --
+#     see design/voice.md. The rest of src/voice/ needs neither: the filterbank
+#     and the prosody measurements are arithmetic over a sample buffer.
+#
+# Both read the SAME SDK directory, because harmony/build.cmd assembles exactly
+# one per ABI and it carries the repo's tuned -march flags. LLAMA_CPP_DIR points
+# at it: include/ plus lib/. Both layouts work -- a shared build (one libllama)
+# and a static build (libllama plus the ggml archives), which is what a HAP
+# needs since there is nowhere to put a companion .so.
+#
+# On HarmonyOS nobody sets the variable by hand: `harmony/build.cmd <abi> llama`
+# (or .sh) assembles the SDK at harmony/prebuilt/llama-sdk/<abi> and the app's
+# CMakeLists finds it there. Building the SDK IS turning the lanes on.
 
-if(BODYCLOCK_ONDEVICE_LLM)
+# Resolves the ggml archives out of LLAMA_CPP_DIR into BODYCLOCK_GGML_LIBS, and
+# fails with the reason rather than with a link error two minutes later.
+# `_why` names the option that asked, so the message says which switch to look at.
+macro(bodyclock_require_ggml _why)
     if(NOT DEFINED LLAMA_CPP_DIR)
         message(FATAL_ERROR
-            "BODYCLOCK_ONDEVICE_LLM=ON requires -DLLAMA_CPP_DIR=<llama.cpp SDK dir (include/, lib/)>")
+            "${_why}=ON requires -DLLAMA_CPP_DIR=<llama.cpp SDK dir (include/, lib/)>")
+    endif()
+    if(NOT EXISTS "${LLAMA_CPP_DIR}/include/ggml.h")
+        message(FATAL_ERROR "ggml.h not found under ${LLAMA_CPP_DIR}/include.")
     endif()
 
     # find_library caches, so without clearing it a changed LLAMA_CPP_DIR
     # (switching target ABI) would silently keep linking the previously found libs.
-    foreach(_v LLAMA_LIB GGML_LIB GGML_CPU_LIB GGML_BASE_LIB)
+    foreach(_v GGML_LIB GGML_CPU_LIB GGML_BASE_LIB)
         unset(${_v} CACHE)
     endforeach()
 
     # NO_CMAKE_FIND_ROOT_PATH is required for the cross build: the OHOS toolchain
     # sets CMAKE_FIND_ROOT_PATH_MODE_LIBRARY to ONLY, which re-roots PATHS under
     # the sysroot and makes an absolute SDK dir unfindable.
-    set(_llama_find PATHS "${LLAMA_CPP_DIR}/lib" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
-    find_library(LLAMA_LIB     NAMES llama     ${_llama_find})
-    find_library(GGML_LIB      NAMES ggml      ${_llama_find})
-    find_library(GGML_CPU_LIB  NAMES ggml-cpu  ${_llama_find})
-    find_library(GGML_BASE_LIB NAMES ggml-base ${_llama_find})
+    set(_ggml_find PATHS "${LLAMA_CPP_DIR}/lib" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+    find_library(GGML_LIB      NAMES ggml      ${_ggml_find})
+    find_library(GGML_CPU_LIB  NAMES ggml-cpu  ${_ggml_find})
+    find_library(GGML_BASE_LIB NAMES ggml-base ${_ggml_find})
+
+    # A shared llama build puts all of ggml inside libllama, so finding none of
+    # these is only an error when nothing else supplies them.
+    set(BODYCLOCK_GGML_LIBS "")
+    foreach(_lib GGML_LIB GGML_CPU_LIB GGML_BASE_LIB)
+        if(${_lib})
+            list(APPEND BODYCLOCK_GGML_LIBS "${${_lib}}")
+        endif()
+    endforeach()
+endmacro()
+
+#-------------------------------------------------------------------------------
+# On-device LLM (llama.cpp + GGUF)
+#-------------------------------------------------------------------------------
+
+# OFF by default: the engine is a few hundred MB of static archives that only the
+# mobile hosts want, and src/llm/local.cpp compiles a stub without it, so the
+# desktop build stays a two-minute vcpkg affair.
+option(BODYCLOCK_ONDEVICE_LLM "Build the on-device LLM engine (llama.cpp + GGUF)" OFF)
+
+if(BODYCLOCK_ONDEVICE_LLM)
+    bodyclock_require_ggml(BODYCLOCK_ONDEVICE_LLM)
+
+    unset(LLAMA_LIB CACHE)
+    find_library(LLAMA_LIB NAMES llama
+        PATHS "${LLAMA_CPP_DIR}/lib" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 
     if(NOT LLAMA_LIB)
         message(FATAL_ERROR
@@ -284,13 +329,38 @@ if(BODYCLOCK_ONDEVICE_LLM)
     # llama first: with static archives the linker resolves left to right, and
     # llama references ggml, not the other way round.
     target_link_libraries(bodyclock_core PUBLIC "${LLAMA_LIB}")
-    foreach(_lib GGML_LIB GGML_CPU_LIB GGML_BASE_LIB)
-        if(${_lib})
-            target_link_libraries(bodyclock_core PUBLIC "${${_lib}}")
-        endif()
-    endforeach()
+    target_link_libraries(bodyclock_core PUBLIC ${BODYCLOCK_GGML_LIBS})
 
     message(STATUS "bodyclock_core: on-device LLM ON -> ${LLAMA_LIB}")
+endif()
+
+#-------------------------------------------------------------------------------
+# On-device speech recognition (SenseVoice + ggml)
+#-------------------------------------------------------------------------------
+
+# OFF by default for the same reason as the LLM lane -- src/voice/sensevoice.cpp
+# compiles to a truthful stub without it -- but it is a much smaller ask: ggml
+# only, no llama, and a 254 MB model at q8 against several GB for an
+# audio-capable LLM.
+option(BODYCLOCK_ASR "Build on-device speech recognition (SenseVoice + ggml)" OFF)
+
+if(BODYCLOCK_ASR)
+    bodyclock_require_ggml(BODYCLOCK_ASR)
+    if(NOT BODYCLOCK_GGML_LIBS AND NOT BODYCLOCK_ONDEVICE_LLM)
+        message(FATAL_ERROR
+            "No ggml archives under ${LLAMA_CPP_DIR}/lib, and the LLM lane that would "
+            "otherwise carry them is off. Recognition links ggml directly and cannot "
+            "run without it.")
+    endif()
+
+    # PRIVATE: only src/voice/sensevoice.cpp changes shape with this. The public
+    # header does not branch on it -- a host asks SenseVoice::available() at
+    # runtime, so the same declarations link either way.
+    target_compile_definitions(bodyclock_core PRIVATE BODYCLOCK_ASR)
+    target_include_directories(bodyclock_core PRIVATE "${LLAMA_CPP_DIR}/include")
+    target_link_libraries(bodyclock_core PUBLIC ${BODYCLOCK_GGML_LIBS})
+
+    message(STATUS "bodyclock_core: speech recognition ON -> ${LLAMA_CPP_DIR}")
 endif()
 
 #-------------------------------------------------------------------------------
@@ -316,4 +386,16 @@ if(BODYCLOCK_BUILD_CLI)
     # silently in the data rather than loudly at runtime, so they get a test.
     add_executable(bodyclock-timeline-test tests/timeline_test.cpp)
     target_link_libraries(bodyclock-timeline-test PRIVATE bodyclock_core)
+
+    # Builds whether or not BODYCLOCK_ASR is on. Without it the front-end checks
+    # still run and still mean something -- the filterbank is the half that has
+    # one right answer -- and the transcription half says it is not compiled in.
+    add_executable(bodyclock-sensevoice-test tests/sensevoice_test.cpp)
+    target_link_libraries(bodyclock-sensevoice-test PRIVATE bodyclock_core)
+
+    # Needs neither a model nor ggml, so it builds in the plain desktop
+    # configuration and its table can be checked against the tool that produced
+    # the result design/voice.md records.
+    add_executable(bodyclock-prosody-test tests/prosody_test.cpp)
+    target_link_libraries(bodyclock-prosody-test PRIVATE bodyclock_core)
 endif()

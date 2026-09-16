@@ -19,10 +19,12 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 #include <thread>
 #include <utility>
 
@@ -338,6 +340,141 @@ napi_value NativeChatCancel(napi_env env, napi_callback_info info) {
     return nullptr;
 }
 
+//------------------------------------------------------------------------------
+// Voice
+//------------------------------------------------------------------------------
+//
+// Same shape as the on-device model load above: the two calls that block run on
+// a detached thread and report through one threadsafe function, because both
+// take long enough to drop frames if they ran where the UI draws. Loading is
+// 254 MB off disk; analysing a minute of speech is a second or two.
+
+// Runs OFF the ArkTS thread.
+void VoiceLoadWorker(std::string path, napi_threadsafe_function tsfn) {
+    const int rc = bodyclock_voice_load(path.c_str());
+    auto* ev = new StreamEvent{rc == 0 ? "ok" : "error",
+                               rc == 0 ? path : std::string("could not load ") + path};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+}
+
+// Runs OFF the ArkTS thread. Takes the samples BY VALUE: the ArrayBuffer they
+// came from belongs to the JS heap, and nothing stops it being collected or
+// detached while this runs.
+void VoiceAnalyzeWorker(std::vector<std::int16_t> pcm, int sample_rate,
+                        napi_threadsafe_function tsfn) {
+    const char* json = bodyclock_voice_analyze(
+        pcm.empty() ? nullptr : reinterpret_cast<const short*>(&pcm[0]),
+        static_cast<int>(pcm.size()), sample_rate);
+    auto* ev = json ? new StreamEvent{"result", std::string(json)}
+                    : new StreamEvent{"error", "analysis failed -- see the core log"};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+}
+
+// nativeVoiceAvailable(): boolean
+napi_value NativeVoiceAvailable(napi_env env, napi_callback_info) {
+    napi_value out = nullptr;
+    napi_get_boolean(env, bodyclock_voice_available() != 0, &out);
+    return out;
+}
+
+// nativeVoiceLoaded(): boolean
+napi_value NativeVoiceLoaded(napi_env env, napi_callback_info) {
+    napi_value out = nullptr;
+    napi_get_boolean(env, bodyclock_voice_loaded() != 0, &out);
+    return out;
+}
+
+// nativeVoiceUnload(): void
+napi_value NativeVoiceUnload(napi_env env, napi_callback_info) {
+    bodyclock_voice_unload();
+    return Int32(env, 0);
+}
+
+// nativeVoiceSetItn(on: number): number
+napi_value NativeVoiceSetItn(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    std::int32_t on = 1;
+    if (argc >= 1) napi_get_value_int32(env, argv[0], &on);
+    return Int32(env, bodyclock_voice_set_itn(on));
+}
+
+// nativeVoiceLoad(path, onDone: (type, content) => void): void
+napi_value NativeVoiceLoad(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 2) {
+        napi_throw_error(env, nullptr, "nativeVoiceLoad(path, onDone) needs two arguments");
+        return nullptr;
+    }
+
+    std::string path = ToUtf8(env, argv[0]);
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "bodyclock_voice_load", NAPI_AUTO_LENGTH, &work_name);
+
+    napi_threadsafe_function tsfn = nullptr;
+    if (napi_create_threadsafe_function(env, argv[1], nullptr, work_name,
+                                        0 /*unbounded*/, 1 /*one worker*/,
+                                        nullptr, nullptr, nullptr, CallJs, &tsfn) != napi_ok) {
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+
+    std::thread(VoiceLoadWorker, std::move(path), tsfn).detach();
+    return nullptr;
+}
+
+// nativeVoiceAnalyze(pcm: ArrayBuffer, sampleRate: number,
+//                    onDone: (type, content) => void): void
+//
+// `pcm` is 16-bit signed mono, which is what an AudioCapturer hands over, so the
+// app never converts and never copies it twice. It must be at `sampleRate`, and
+// the core insists on 16000 -- there is no resampler in there on purpose.
+napi_value NativeVoiceAnalyze(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value argv[3] = {nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 3) {
+        napi_throw_error(env, nullptr,
+                         "nativeVoiceAnalyze(pcm, sampleRate, onDone) needs three arguments");
+        return nullptr;
+    }
+
+    void*  data = nullptr;
+    size_t bytes = 0;
+    if (napi_get_arraybuffer_info(env, argv[0], &data, &bytes) != napi_ok || data == nullptr) {
+        napi_throw_error(env, nullptr, "nativeVoiceAnalyze: pcm must be an ArrayBuffer");
+        return nullptr;
+    }
+
+    std::int32_t sample_rate = 16000;
+    napi_get_value_int32(env, argv[1], &sample_rate);
+
+    // Copied here, on the ArkTS thread, while the buffer is certainly alive.
+    const size_t count = bytes / sizeof(std::int16_t);
+    std::vector<std::int16_t> pcm(count);
+    if (count) std::memcpy(&pcm[0], data, count * sizeof(std::int16_t));
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "bodyclock_voice_analyze", NAPI_AUTO_LENGTH, &work_name);
+
+    napi_threadsafe_function tsfn = nullptr;
+    if (napi_create_threadsafe_function(env, argv[2], nullptr, work_name,
+                                        0 /*unbounded*/, 1 /*one worker*/,
+                                        nullptr, nullptr, nullptr, CallJs, &tsfn) != napi_ok) {
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+
+    std::thread(VoiceAnalyzeWorker, std::move(pcm), sample_rate, tsfn).detach();
+    return nullptr;
+}
+
 }   // namespace
 
 //------------------------------------------------------------------------------
@@ -358,6 +495,12 @@ napi_value Init(napi_env env, napi_value exports) {
         {"nativeLocalLoad",      nullptr, NativeLocalLoad,      nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChat",           nullptr, NativeChat,           nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChatCancel",     nullptr, NativeChatCancel,     nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeVoiceAvailable", nullptr, NativeVoiceAvailable, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeVoiceLoad",      nullptr, NativeVoiceLoad,      nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeVoiceLoaded",    nullptr, NativeVoiceLoaded,    nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeVoiceUnload",    nullptr, NativeVoiceUnload,    nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeVoiceSetItn",    nullptr, NativeVoiceSetItn,    nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeVoiceAnalyze",   nullptr, NativeVoiceAnalyze,   nullptr, nullptr, nullptr, napi_default, nullptr},
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;

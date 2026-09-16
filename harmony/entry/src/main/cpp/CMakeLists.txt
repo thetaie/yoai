@@ -78,13 +78,20 @@ if(NOT DEFINED LLAMA_CPP_DIR)
 endif()
 if(DEFINED LLAMA_CPP_DIR)
     set(BODYCLOCK_ONDEVICE_LLM ON CACHE BOOL "" FORCE)
-    message(STATUS "bodyclock_napi: on-device LLM from ${LLAMA_CPP_DIR}")
+    # Speech recognition rides on the SAME SDK and costs much less: it links the
+    # ggml archives and never touches libllama, so anything that can build the
+    # on-device LLM can build this for free. There is no separate switch on the
+    # app side for the same reason there is none for the LLM -- the SDK's
+    # presence is the switch.
+    set(BODYCLOCK_ASR ON CACHE BOOL "" FORCE)
+    message(STATUS "bodyclock_napi: on-device LLM and recognition from ${LLAMA_CPP_DIR}")
 else()
     # FORCEd OFF, not merely left alone: now that the SDK's presence is the
     # switch, deleting it must actually turn the lane off. Without this a cached
     # ON from an earlier configure survives and the root CMakeLists fails
     # demanding LLAMA_CPP_DIR.
     set(BODYCLOCK_ONDEVICE_LLM OFF CACHE BOOL "" FORCE)
+    set(BODYCLOCK_ASR OFF CACHE BOOL "" FORCE)
 endif()
 
 add_subdirectory("${BODYCLOCK_REPO_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/bodyclock-core")

@@ -36,6 +36,20 @@ export interface PickedModel {
   sizeBytes: number;
 }
 
+/**
+ * One picked .gguf, before anything decides what it is for.
+ *
+ * Split out because a chat model and a recognition model are picked the same
+ * way and granted the same way, and the grant is the part worth having exactly
+ * one copy of.
+ */
+export interface PickedFile {
+  uri: string;
+  path: string;
+  name: string;
+  sizeBytes: number;
+}
+
 function log(msg: string): void {
   hilog.info(0x0000, 'bodyclock', '%{public}s', msg);
 }
@@ -52,7 +66,10 @@ export class LocalModelStore {
     if (LocalModelStore.availability === null) {
       LocalModelStore.availability = bodyclock.nativeLocalAvailable();
     }
-    return LocalModelStore.availability;
+    // `=== true` rather than returning the field: ArkTS does not narrow a static
+    // member from `boolean | null` across the assignment above, so the plain
+    // return is a type error even though the value cannot be null by then.
+    return LocalModelStore.availability === true;
   }
 
   //----------------------------------------------------------------------------
@@ -68,7 +85,15 @@ export class LocalModelStore {
    * out at load time would surface as a confusing "could not load model" long
    * after the choice was made.
    */
-  static async importModel(ctx: common.UIAbilityContext): Promise<PickedModel | undefined> {
+  /**
+   * Pick one .gguf, persist the grant, and confirm the path actually resolves.
+   *
+   * Used for both kinds of model. The statSync is not belt-and-braces: a URI the
+   * picker returns is not a promise that the path behind it resolves, and
+   * finding that out at load time would surface as a confusing "could not load
+   * model" long after the choice was made.
+   */
+  static async pickGguf(ctx: common.UIAbilityContext): Promise<PickedFile | undefined> {
     const opts: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
     opts.maxSelectNumber = 1;
     opts.fileSuffixFilters = ['.gguf'];
@@ -100,6 +125,18 @@ export class LocalModelStore {
       log('picked file not reachable at ' + path + ' code=' + e.code);
       return undefined;
     }
+    return { uri: uri, path: path, name: name, sizeBytes: size };
+  }
+
+  static async importModel(ctx: common.UIAbilityContext): Promise<PickedModel | undefined> {
+    const picked: PickedFile | undefined = await LocalModelStore.pickGguf(ctx);
+    if (picked === undefined) {
+      return undefined;
+    }
+    const uri: string = picked.uri;
+    const path: string = picked.path;
+    const name: string = picked.name;
+    const size: number = picked.sizeBytes;
 
     const cfg: ModelConfig = {
       id: modelId(LOCAL_VENDOR_ID, name),

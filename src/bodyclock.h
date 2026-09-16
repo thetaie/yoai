@@ -2,9 +2,15 @@
 //
 // The core is a library, not a server: there is no port to bind, no account,
 // and no configuration file. A host app (the HarmonyOS entry module today, an
-// Android one next) owns persistence and settings, tells the core which models
-// the user has keys for, and asks it to run a turn. That keeps every secret in
-// the platform's own secure store and out of any file the core writes.
+// Android one next) owns SETTINGS and credentials, tells the core which models
+// the user has keys for, and asks it to run a turn. Keys in particular are held
+// in process memory only, so they stay in the platform's own secure store and
+// out of any file the core writes.
+//
+// The core does own the day log -- see src/store/timeline.hpp -- because the
+// rules about what a day is are the same on every platform and were not going
+// to survive being reimplemented per host. Settings belong to the host; the
+// record does not.
 //
 // Deliberately a plain `extern "C"` surface, so any language with a C FFI can
 // embed the core -- ArkTS through a NAPI module, Kotlin through JNI, Swift
@@ -224,6 +230,76 @@ int bodyclock_chat(const char* provider_id,
               const char* system_prompt,
               bodyclock_chat_handler on_event,
               void* user_data);
+
+//------------------------------------------------------------------------------
+// Voice
+//------------------------------------------------------------------------------
+//
+// One recording in, everything the core can say about it out. Two independent
+// halves, and it is worth knowing which is which:
+//
+//   - Recognition (SenseVoice) needs a model file and the engine compiled in.
+//   - The prosody measurements need neither. They are signal processing, they
+//     run on any build, and they are what "how did this person sound" is read
+//     from -- not from the model's own emotion label, which has no word for
+//     tired, depleted or calm. See design/voice.md.
+//
+// So a host that never loads a model still gets the half that matters most.
+
+// Whether this build has the recognition engine compiled in: 1 if yes, 0 if it
+// was built without it. When 0, bodyclock_voice_load fails and says so, and
+// analysis still returns its prosody half. Ask before offering to add a model.
+int bodyclock_voice_available(void);
+
+// Read a SenseVoice GGUF. BLOCKS for the length of the load (254 MB at q8), so
+// call it off the drawing thread. Returns 0 when the model is resident.
+//
+// As with the on-device LLM, `model_path` must be a real filesystem path this
+// process can open -- on HarmonyOS, a file the user granted through the document
+// picker. A second load replaces the first.
+int bodyclock_voice_load(const char* model_path);
+
+// Whether a model is resident right now.
+int bodyclock_voice_loaded(void);
+
+// Drop the weights. Analysis afterwards returns prosody only.
+void bodyclock_voice_unload(void);
+
+// Inverse text normalization: with it on, a spoken "five hundred and sixty-seven"
+// is transcribed "567". The model ships with it on. Pass 0 to turn it off, which
+// is what anything counting syllables wants -- and be aware that the same switch
+// also removes ALL punctuation, so it is not free. Returns 0 on success.
+//
+// Requires a loaded model; it changes what the model is asked, not how the
+// answer is read.
+int bodyclock_voice_set_itn(int on);
+
+// Analyse one recording. Returns a JSON object, or NULL on a bad argument.
+//
+//   pcm           16-bit signed mono samples.
+//   n_samples     how many. A clip under one analysis window returns an object
+//                 whose halves are both absent rather than an error.
+//   sample_rate   must be 16000. The core carries no resampler on purpose: a
+//                 resampler that differs from the one a measurement was taken
+//                 with changes the answer quietly, which this project has
+//                 already been bitten by. Capture at 16 kHz.
+//
+// The object always carries `audioSeconds`. `transcript` is present only when a
+// model is loaded, `prosody` only when the clip was long enough to frame, and
+// `prosody.enough` is false when there were too few utterances to normalize
+// against -- fewer than about five makes the deviations noise, and a host should
+// show nothing rather than a weak number.
+//
+// Each utterance carries the transcript tokens whose timestamps fall inside it,
+// so the profile can be read against what was being said. That alignment is
+// 60 ms granular and lands on the frame where the token was EMITTED, which lags
+// slightly -- good enough to read a table by, not a subtitle track.
+//
+// The buffer is owned by the core and stays valid until this thread's next
+// bodyclock_voice_analyze() call. Copy it to keep it.
+const char* bodyclock_voice_analyze(const short* pcm,
+                               int n_samples,
+                               int sample_rate);
 
 #ifdef __cplusplus
 }

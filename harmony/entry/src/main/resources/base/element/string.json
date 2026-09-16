@@ -21,6 +21,10 @@
       "value": "读取你选择的本地模型文件，重启后仍可继续使用"
     },
     {
+      "name": "perm_microphone_reason",
+      "value": "录制语音并在本机分析，录音不会离开设备"
+    },
+    {
       "name": "chat_input_hint",
       "value": "给 Body Clock 发消息…"
     },

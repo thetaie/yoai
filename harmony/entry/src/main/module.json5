@@ -44,6 +44,19 @@
           ],
           "when": "inuse"
         }
+      },
+      {
+        // Voice input. The recording never leaves the device: it is analysed by
+        // the core in this process and the samples are dropped when the page
+        // does. Nothing is written to disk.
+        "name": "ohos.permission.MICROPHONE",
+        "reason": "$string:perm_microphone_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
       }
     ],
     "abilities": [

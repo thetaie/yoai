@@ -126,11 +126,36 @@ struct Index {
   // Sending
   //----------------------------------------------------------------------------
 
+  /**
+   * Handle a slash command, and report whether one was handled.
+   *
+   * Only an exact match counts. A message that merely starts with a slash is a
+   * message -- "/etc is where it lives" is a sentence, and swallowing it would
+   * be worse than having no commands at all.
+   */
+  private runCommand(text: string): boolean {
+    if (text === '/asr' || text === '/voice') {
+      router.pushUrl({ url: 'pages/VoiceDebug' });
+      return true;
+    }
+    return false;
+  }
+
   private async send(): Promise<void> {
     const text: string = this.input.trim();
     if (text.length === 0 || this.streaming) {
       return;
     }
+
+    // Slash commands: typed, not discoverable, and deliberately so. These open
+    // developer pages that have no business in the navigation of a shipping app
+    // -- someone who needs one knows its name. The check runs BEFORE the
+    // no-model guard below, because none of them need a model.
+    if (this.runCommand(text)) {
+      this.input = '';
+      return;
+    }
+
     if (this.activeId.length === 0) {
       this.note($r('app.string.chat_need_model'));
       return;

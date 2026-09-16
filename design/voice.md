@@ -12,10 +12,10 @@ from documented architecture.
 **Recognition and synthesis sit outside the language model, and what is read
 from the voice is read by signal processing, not by a model.**
 
-- **In:** SenseVoice-Small, bundled, `q8` — through FunASR's own llama.cpp
-  runtime, which is pure ggml and builds against the ggml this repo already
-  ships. Transcription, language ID and audio events for Chinese, Cantonese,
-  English, Japanese and Korean.
+- **In:** SenseVoice-Small, bundled, `q8` — ported into this core in `src/voice/`,
+  linking the ggml this repo already ships and not libllama. Transcription,
+  language ID and audio events for Chinese, Cantonese, English, Japanese and
+  Korean.
 - **Out:** the platform's own text-to-speech.
 - **The model in the middle:** anything. It is a text model now.
 - **What the voice says about the speaker:** computed from the audio, per
@@ -201,12 +201,14 @@ Each number is doing a job:
   convenient.
 - **Prosodic segmentation** is there for **analysis**, and its boundaries become
   the units compared against one another and possibly described to a person.
-- **The transcript** could supply boundaries too. CTC decoding produces a
-  frame-to-token alignment as a by-product, so token times exist in principle in
-  the same forward pass; whether the FunASR ggml build exposes them has not been
-  checked. If it does, punctuation beats pauses — people pause where sentences
-  do not end, and end sentences without pausing — and pause boundaries confirmed
-  by punctuation beat either alone.
+- **The transcript supplies boundaries too, and they are now free.** Greedy CTC
+  knows which encoder frame emitted each token, and an encoder frame is 60 ms,
+  so every token carries a timestamp out of the same forward pass at no extra
+  cost. `src/voice/sensevoice.hpp` returns them. This was an open question until
+  the port was written; it is answered, and it means punctuation is available as
+  a boundary. Punctuation beats pauses — people pause where sentences do not
+  end, and end sentences without pausing — and a pause confirmed by punctuation
+  beats either alone.
 
 They can share an energy envelope. **They must not share parameters.** Reusing
 the VAD's chunks because they are already computed would mean adopting
@@ -246,8 +248,7 @@ Microphone distance, recording gain and the speaker's own pitch range are all
 constant within a take, so they cancel. No personal history is needed. It works
 on the first recording anyone ever makes.
 
-**Measured** on a 37-second monologue, eleven utterances, in 5.4 s of pure
-Python — already 7× real time before anyone writes it in C++:
+**Measured** on a 37.4-second monologue, eleven utterances:
 
 | # | at | arousal | what he is saying |
 |---|---|---|---|
@@ -265,6 +266,30 @@ Pitch carries most of it. Loudness is the least trustworthy feature and is
 weighted down: across a recording it tracks microphone distance as much as
 effort, and on a coarser cut of this same clip it ranked the segments in the
 *opposite* order to everything else.
+
+### It is in the core now
+
+`src/voice/prosody.cpp`, needing neither a model nor ggml — which is the whole
+point of taking arousal from the signal. `bodyclock-prosody-test` prints the
+table above from a WAV.
+
+**Measured**: against the tool that produced the original result, on the same
+16 kHz samples, it agrees on **every column of all eleven rows** — the same
+utterance boundaries, F0 to a tenth of a hertz, all three deviations and the
+arousal to two decimals, the same baseline of 123.5 Hz and sd 11.1. The columns
+that matter are scale-invariant, so the two agree exactly or they do not.
+
+It runs in **0.07 s**, against 5.4 s for the Python: 535× real time, and 77×
+what the prototype did. The earlier note here that 5.4 s was "already 7× real
+time" undersold the headroom by two orders of magnitude.
+
+Two things are deliberately *not* in it. **Voice quality** — jitter, shimmer,
+HNR — is not ported, because it does not work yet (see below). And the
+autocorrelation normalizes by the whole frame's energy rather than by the
+overlapping part, which leans slightly toward reporting a pitch an octave high;
+that is a known flaw, kept on purpose, because it is what the validated result
+was produced with and changing it would leave the numbers with nothing to be
+checked against.
 
 ### The cross-day version is much harder, and is not being built yet
 
@@ -405,10 +430,23 @@ and the measured thing will not.** Today's weighting of pitch against continuity
 is a guess; re-deriving it must not require keeping the audio, because keeping
 the audio is a privacy cost and a storage cost that features are not.
 
-`rate_syl` is close to free and worth naming: the transcript gives the character
-count and the energy envelope gives the speaking duration, so speaking rate is a
-division rather than an estimate. That is a small dividend of putting
-recognition outside the model.
+`rate_syl` looked close to free — the transcript gives the character count, the
+energy envelope gives the duration, so speaking rate is a division rather than an
+estimate. **It is free only with inverse text normalization turned off.** With it
+on, which is what the GGUF asks for, the same clip comes back as `约567，大卡`
+instead of `约五百六十七大卡`: three characters where four syllables were spoken.
+Rate is then wrong at every number, and wrong in one direction, so an utterance
+that happens to contain a figure reads as slower than its neighbours for a reason
+that has nothing to do with the speaker. Within-recording comparison is exactly
+where that does damage.
+
+`SenseVoice::set_inverse_text_normalization(false)` turns it off. The catch is
+measured and awkward: **the same switch also removes all punctuation**, and the
+segmentation section wants punctuation as a boundary source. So the two uses pull
+opposite ways — analysis wants it off, boundaries and display want it on — and
+the choice is either two passes at 20x real time each or a syllable count that
+expands digits back out per language. Not yet decided; what is decided is that
+counting characters off an ITN transcript is not an option.
 
 ## What else the voice carries
 
@@ -462,6 +500,50 @@ returns `NEUTRAL` on all four too, so it is not a quantization artifact.
 Its transcription is what we want it for. Arousal comes from the signal
 processing above.
 
+### The four tags, and what each one is actually worth
+
+The model answers four queries alongside the transcript. They are not equally
+useful, and treating them as one feature would be a mistake in both directions —
+ignoring the one that matters and trusting the one that does not.
+
+| tag | verdict |
+|---|---|
+| **language** | **Use it.** `nospeech` is a gate, and the language decides the reply language and the TTS voice |
+| **itn** | **Use it**, and control it — see the note on `rate_syl` above |
+| **emotion** | Store it. Never show it. Worth one thing: disagreement |
+| **event** | A hint that may only lower confidence, never gate |
+
+**`language` is the one being wasted today.** `nospeech` means the pipeline
+should decline rather than hand an empty or invented transcript to the language
+model — and this file has already recorded that a wrong transcription does not
+look like silence, it looks like text. The rest of the label decides which voice
+speaks the answer back, and, in an app with eleven interface languages, what
+language the answer should be in when someone speaks one the interface is not
+set to.
+
+**`itn` is an input as much as an output.** *Inverse text normalization*: a
+speech synthesizer needs the written form turned into the spoken one, `567` into
+"five hundred and sixty-seven", and that is text normalization; recognition needs
+the opposite, hence *inverse*. `withitn` and `woitn` are with it and without it.
+
+The four query tokens are prepended to the features, and the fourth selects
+which; the answer just reports what was asked. **Measured**: the GGUF ships
+`[0 1 2 14]` — automatic language detection, and normalization on.
+
+**`emotion` stays out of sight, and has exactly one job.** Its label space has no
+word for tired, depleted or calm, so a `NEUTRAL` carries almost nothing. But a
+*non*-neutral label is a positive claim about a high-arousal state, and that can
+be compared against the arousal computed from the signal. Agreement means
+nothing; **disagreement is a cheap, per-recording version of the offline check
+this file elsewhere proposes running an omni model for**. Log the disagreement
+rate; never put the label on a screen.
+
+**`event` is the weakest.** `BGM` would genuinely matter — background music
+corrupts the F0 tracking and the energy envelope that arousal rests on — but this
+file already records a clip where the tag read `Speech` throughout and was wrong.
+So it can lower confidence in a measurement and must never be the thing that
+decides whether one is taken.
+
 **The replacement path, if transcription turns out not to be good enough:** move
 recognition to Qwen3-ASR, which llama.cpp supports natively
 (`PROJECTOR_TYPE_QWEN3A`) with no second runtime. Pay for it when the need is
@@ -471,21 +553,29 @@ demonstrated.
 
 Three builds are published: `f32` at 936 MB (the reference), `f16` at 470 MB,
 `q8` at 254 MB. **Measured** here against `f32` on five clips — two Windows TTS
-lines, a 48-second nutrition explainer, a 68-second monologue and a synthetic
-narration:
+lines, a nutrition explainer, a monologue and a synthetic narration:
 
 | | result |
 |---|---|
 | `f32` | punctuation, correct tags |
-| **`f16`** | **inverse text normalization flips**: returns `woitn` instead of `withitn`, output arrives with no punctuation or capitalization; on two clips the emotion and event tags vanish entirely |
+| **`f16`** | **the text-normalization head flips**: it answers `woitn` where `f32` answers `withitn`; on two clips the emotion and event tags vanish as well |
 | `q8` | reproduces `f32` on every clip |
+
+The missing punctuation and capitalization first recorded here as a second
+symptom are **not** a second symptom. `woitn` is what removes them: the same
+switch that writes `五百六十七` instead of `567` also drops the punctuation, as
+the note on `rate_syl` above measures directly. One head flips, and everything
+that looked like a second fault follows from that one.
 
 `q8` is both the smaller file and the accurate one — likely because `q8_0` is
 block-quantized with per-block scales, which suits this model's numeric range
 better than a flat 16-bit mantissa.
 
 What `f16` breaks is narrow and worth naming precisely: the transcribed **words
-stay correct**. One head fails, reproducibly, in one direction. **Anyone
+stay correct**. One of the four query heads answers wrongly, reproducibly, in one
+direction — and it is the head, not the question. The build is still fed query
+token 14; it answers as though it had been given 15, so
+`set_inverse_text_normalization(true)` cannot straighten it out. **Anyone
 verifying "is the transcription correct" would pass this build.** Upstream marks
 `f16` and `q8` both recommended and reports `q8` at CER 7.99 against `f16`'s
 identical figure — measuring transcription only, which is exactly the
@@ -533,7 +623,15 @@ than that name suggests. **Measured** by building it here:
   decodes files from disk. On a device the microphone hands over PCM already, so
   it does not travel. (It also cannot open non-ASCII paths on Windows, which
   costs a desktop test nothing and would have cost a user everything.)
-- Apache-2.0, and by the same people as the weights.
+- **MIT for the code, a separate agreement for the weights.** The runtime and
+  the rest of that repository are MIT. The official SenseVoiceSmall weights are
+  not: they carry FunASR's model open-source agreement v1.1, which does permit
+  commercial use but attaches attribution and model-name requirements, and which
+  covers the official weights only — a third-party GGUF conversion has to be
+  checked on its own terms. Bundling the model in the app is therefore a
+  licensing step as well as a build step: the attribution has to land somewhere
+  the user can reach, and Settings is where the other model information already
+  is.
 
 There is no second ggml, no engine to adopt, and nothing to keep in sync
 upstream — recognition becomes a few source files inside this core, linked
@@ -541,11 +639,93 @@ against the ggml already built with this project's tuned `-march` flags. SAN-M
 is attention plus depthwise convolution, which is what `i8mm` and `dotprod` are
 for.
 
-**Measured on the desktop CPU, at `q8`:** 0.36 s for a 19-second synthesized
-clip, 1.5 s for a 48-second recording, 1.8 s for 68 seconds — 32× to 53× real
-time. A separate VAD model (`fsmn-vad`, also GGUF) chunks long recordings, same
-shape, one source file against the same ggml — **for recognition only**. Its
-boundaries are not the analysis boundaries; see the segmentation section.
+A separate VAD model (`fsmn-vad`, also GGUF) chunks long recordings, same shape,
+one source file against the same ggml — **for recognition only**. Its boundaries
+are not the analysis boundaries; see the segmentation section.
+
+### It is built, and it matches the reference
+
+`src/voice/` now carries the port: `fbank.*` for the front end and `sensevoice.*`
+for the encoder, behind `-DBODYCLOCK_ASR=ON`, linking the ggml archives and not
+libllama. `build.cmd asr` (or `./build.sh asr`) assembles a desktop ggml SDK and
+turns the lane on; `bodyclock-sensevoice-test` exercises it.
+
+The front end is a separate file for a reason: it is arithmetic with one right
+answer, it needs no model, and getting it subtly wrong is the worst failure
+available here — the encoder does not degrade gracefully on features that are
+merely close, it produces confident text that is wrong. So it is checked exactly
+and without a model: the filter a 1 kHz tone must land in, the frame count for
+one second of audio, and byte comparisons that pin the low-frame-rate padding
+and hop.
+
+**Measured**, against the reference binary on three clips resampled to 16 kHz
+beforehand so that both read the same file: the transcripts are
+**character-for-character identical**, including punctuation and all four tags.
+An earlier run differed by one character, which turned out to be the test
+harness's own linear resampler rather than anything in the port — the kind of
+difference that would have been easy to read as a porting error.
+
+Two things fall out of writing it rather than calling it:
+
+- **Timestamps.** Each token keeps the encoder frame that emitted it, so the
+  transcript carries 60 ms alignment. See the segmentation section.
+- **The stray-capital filter works.** On the clip where the model interleaves
+  isolated capitals, the reference emits `SESE`, `NCT`, `SNB` and `ST`; the port
+  removes exactly those and leaves the rest of the text identical. It runs on
+  tokens, not on the finished string, so it cannot take "OK" or an initial with
+  it.
+
+**Measured on the desktop CPU, at `q8`:** 0.41 s for an 8.8-second clip, 1.79 s
+for 32 seconds, 2.02 s for 38 — about **20× real time** on four threads, with
+the reference at 1.50 s for the same 32 seconds on eight.
+
+An earlier note here claimed 32× to 53×. That was wrong, and the reason is worth
+keeping: the clips are 24 kHz, their durations had been computed as though they
+were 16 kHz, and every one came out 1.5× too long. The times were real; the
+speed-ups derived from them were not.
+
+### On the device: one call, and a page to read it with
+
+The C ABI is `bodyclock_voice_*`, and `bodyclock_voice_analyze` returns **one JSON
+object carrying both halves** — transcript, the four tags, per-token times, and
+the prosody profile with each utterance's measurements and its deviations.
+
+The halves are independent in the ABI the way they are in the argument.
+`prosody` comes back on a build with no recognition engine at all, and on a
+device where the user has never picked a model. `transcript` is the optional
+one. That ordering is not a detail: the half that needs no model is the half the
+emotional reading comes from.
+
+Each utterance also carries the words spoken inside it, matched by the token
+timestamps. That is the table from the top of this file, produced by one call —
+two independent measurements of the same seconds, side by side, with nothing
+having read the content to place them.
+
+**The bridge, and the two things in it that are not obvious.** `nativeVoiceLoad`
+and `nativeVoiceAnalyze` run off the ArkTS thread, because 254 MB off disk and a
+second of encoder are both long enough to drop frames. And the samples are
+**copied on the ArkTS thread before the worker starts**: the `ArrayBuffer` they
+arrive in belongs to the JS heap, and nothing stops it being collected or
+detached while a worker reads it.
+
+**Capture is opened at 16 kHz mono**, which is what the analysis wants, so
+nothing resamples. The core refuses any other rate rather than converting. That
+is deliberate and this file has already paid for the lesson: a resampler that
+differs from the one a measurement was taken with changes the answer quietly.
+
+**`/asr` in the composer opens the debug page.** Typed, not discoverable — it is
+a developer page, and someone who needs it knows its name. It shows the prosody
+profile first, the transcript second, and the model's own emotion tag last,
+labelled as not trusted with the reason. Below five utterances it shows the
+reason it is showing nothing.
+
+**Status: it compiles, and it has not run on a device.** The ArkTS builds clean
+and the recognition lane is in the built `libbodyclock.so` for `arm64-v8a`. The
+HAP is not signed on this machine: the debug signing profile predates
+`8dcabe5 rename: YoAI becomes Body Clock` and was issued for the old bundle
+name, so DevEco has to reissue it for `ai.bodyclock.app` before anything can be
+installed. Every number this page is meant to settle — microphone gain, room
+noise, load time, encoder speed on a Kirin — is still unmeasured.
 
 ## The platforms do not offer the same thing
 

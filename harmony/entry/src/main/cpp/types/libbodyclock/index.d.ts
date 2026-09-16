@@ -128,3 +128,66 @@ export const nativeChat: (
  * interrupted sooner. Unknown or finished ids are a no-op.
  */
 export const nativeChatCancel: (turnId: number) => void;
+
+//------------------------------------------------------------------------------
+// Voice
+//------------------------------------------------------------------------------
+
+/**
+ * Whether this build has the recognition engine compiled in.
+ *
+ * The prosody half does NOT depend on it: nativeVoiceAnalyze still returns its
+ * `prosody` section on a build without the engine, and that is the half the
+ * emotional reading comes from. Ask this only before offering to add a model.
+ */
+export const nativeVoiceAvailable: () => boolean;
+
+/**
+ * Read a SenseVoice GGUF. Runs off the ArkTS thread -- it is 254 MB at q8 -- and
+ * calls back once with ('ok', path) or ('error', reason).
+ *
+ * The path must be a real filesystem path this process can open, so it comes
+ * from the document picker via LocalModelStore, the same as a chat model.
+ */
+export const nativeVoiceLoad: (
+  path: string,
+  onDone: (type: string, content: string) => void
+) => void;
+
+/** Whether a recognition model is resident right now. */
+export const nativeVoiceLoaded: () => boolean;
+
+/** Forget the model. Analysis afterwards returns prosody only. */
+export const nativeVoiceUnload: () => number;
+
+/**
+ * Inverse text normalization: 1 transcribes a spoken "five hundred and
+ * sixty-seven" as '567', 0 as words. Returns 0 on success; needs a loaded model.
+ *
+ * Not cosmetic. With it on, character counts no longer match syllables, so
+ * speaking rate is wrong at every number. With it off the model also returns NO
+ * PUNCTUATION at all, which costs the sentence boundaries. Pick per use.
+ */
+export const nativeVoiceSetItn: (on: number) => number;
+
+/**
+ * Analyse one recording: transcript, the model's four tags, per-token
+ * timestamps, and the within-recording prosody profile.
+ *
+ * Runs off the ArkTS thread and calls back once with ('result', json) or
+ * ('error', reason). The JSON always carries `audioSeconds`; `transcript` is
+ * present only when a model is loaded, and `prosody.enough` is false when there
+ * were too few utterances to normalise against -- show nothing then, not a weak
+ * number.
+ *
+ * @param pcm        16-bit signed mono samples, exactly what an AudioCapturer
+ *                   hands over. Copied synchronously before the worker starts,
+ *                   so the caller may reuse the buffer immediately.
+ * @param sampleRate must be 16000. The core has no resampler by design; open the
+ *                   capturer at 16 kHz.
+ */
+export const nativeVoiceAnalyze: (
+  pcm: ArrayBuffer,
+  sampleRate: number,
+  onDone: (type: string, content: string) => void
+) => void;

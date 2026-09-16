@@ -3,6 +3,7 @@
     "pages/Index",
     "pages/Settings",
     "pages/SettingsModels",
-    "pages/SettingsInterface"
+    "pages/SettingsInterface",
+    "pages/VoiceDebug"
   ]
 }

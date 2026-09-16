@@ -21,6 +21,10 @@
       "value": "Read the on-device model file you picked, and keep reading it after a restart"
     },
     {
+      "name": "perm_microphone_reason",
+      "value": "Record your voice and analyse it on this device; the recording never leaves it"
+    },
+    {
       "name": "chat_input_hint",
       "value": "Message Body Clock…"
     },
