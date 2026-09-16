@@ -1,0 +1,713 @@
+# Voice
+
+How speech gets into the app and back out, what is read from it, and why none
+of it is one model doing everything.
+
+Numbers here are labeled: **measured** on this project's hardware, **measured
+elsewhere** and reproduced with the method that produced them, or **derived**
+from documented architecture.
+
+## The decision
+
+**Recognition and synthesis sit outside the language model, and what is read
+from the voice is read by signal processing, not by a model.**
+
+- **In:** SenseVoice-Small, bundled, `q8` — through FunASR's own llama.cpp
+  runtime, which is pure ggml and builds against the ggml this repo already
+  ships. Transcription, language ID and audio events for Chinese, Cantonese,
+  English, Japanese and Korean.
+- **Out:** the platform's own text-to-speech.
+- **The model in the middle:** anything. It is a text model now.
+- **What the voice says about the speaker:** computed from the audio, per
+  utterance, against that same recording — no model, no history, no baseline.
+
+The third line is the largest consequence and the easiest to skim past. With an
+omni model in the loop, voice would work only on the local lane — you cannot
+post audio to an arbitrary OpenAI-compatible endpoint. With recognition outside,
+**voice works with every provider the user has configured**. And the C++ core's
+ABI already takes `messages_json`; transcription produces text.
+
+## Where each axis gets its numbers
+
+The rest of this file is the argument. This is the answer:
+
+| axis | what it reads | from | status |
+|---|---|---|---|
+| **valence** | what is said | **text** | free — the model reads the transcript anyway |
+| **arousal** | how it is said: pitch, continuity, loudness | **audio** | **validated** — the table further down |
+| **dominance** | who is the subject of the verbs | **text** | free, unproven |
+| **intensity** | distance from neutral, in any direction | **audio**, second pass | planned; no new measurement |
+| **unpredictability** | how much the arousal series jumps | **audio**, second pass | planned; no new measurement |
+| **approach–avoidance** | going-toward against putting-off wording | **text**, checked against the log | not built — weakest signal here |
+| **potency** | — | — | not a separate axis; it is dominance |
+
+"Second pass" means a function of numbers the arousal pass already produced —
+no extra feature, no extra column in the database.
+
+All of it is computed **per utterance**, and the split that produces those
+utterances decides what every number means. That has its own section below.
+
+## Three axes, not a list of emotions
+
+Emotion in speech is better described by a few independent axes than by a list
+of labels. This is the PAD model — pleasure, arousal, dominance — and it is not
+academic decoration. It is what stops three different questions from being
+collapsed into one.
+
+- **Valence** — pleasant to unpleasant. Is this good or bad?
+- **Arousal** — activated to deactivated. How much energy is behind it?
+- **Dominance** — in control or controlled. Is this person acting, or being
+  acted on?
+
+They are independent, and the states that agree on two axes but differ on the
+third are exactly the ones a smaller model cannot tell apart:
+
+|  | valence | arousal | dominance |
+|---|---|---|---|
+| anger | negative | **high** | **high** |
+| fear | negative | **high** | **low** |
+| sadness | negative | low | low |
+| fatigue | **negative** | low | low |
+| calm | **positive** | low | high |
+
+Rows three to five are why valence and arousal are both needed: *depleted* and
+*rested* are both "low energy" and mean opposite things, and a one-dimensional
+tiredness scale scores them the same.
+
+**What the third axis adds** is the first two rows, which are identical without
+it. Anger and fear on their own would not pay for it — neither is a common daily
+state. What pays for it is the everyday form of the same split: **"busy and on
+top of it" against "busy and drowning."** Same high arousal, similar valence,
+and opposite meaning for someone looking back over their own week. Likewise "I
+decided to stop" against "I gave up," which V and A score alike.
+
+**The three axes come from different channels**, and this is the part that
+decides what has to be built:
+
+- **Valence is semantic** — "today was awful" states it outright.
+- **Arousal is acoustic** — activation shows in rate, pitch range and continuity
+  before it shows in word choice.
+- **Dominance is grammatical** — not which words are chosen but who is the
+  subject of the verbs. "It got away from me," "I had to," "I couldn't," 「只能」
+  「没办法」 put the speaker on the receiving end; "I stopped at four," "I decided
+  to" put them at the wheel. The words can be identical in sentiment while the
+  agency is reversed.
+
+There is also an asymmetry worth knowing: **valence is easy to mask in words,
+arousal is hard to mask in voice.** Someone saying "I'm fine" controls the
+valence; the flat slow delivery leaks the arousal. Dominance sits with valence
+here — it is said, so it can be dressed up.
+
+**Measured**, on four ten-second segments of one real recording — the same model
+asked the same question, once with audio and once with the transcript only:
+
+| segment | words are about | from text | from audio |
+|---|---|---|---|
+| 1 | a birthday, thanking his daughter | happy | **slightly tired** |
+| 2 | "glad and sad at once" | sad | slightly tired |
+| 3 | "I lost control of my emotions" | sad | **sadness** |
+| 4 | "let us live happily, stay safe" | happy | **calm** |
+
+The two columns are not disagreeing. They are answering different questions.
+Segment 1 is cheerful words in a tired voice, and only having both channels
+shows that.
+
+### Dominance is the weakest of the three, and that changes how it is used
+
+Three things about it, none of them measured on this project's material:
+
+**Annotators agree on it least.** Across the emotion-corpus literature, valence
+and arousal ratings are reliable enough to train on and dominance is
+consistently behind them; several well-known corpora publish V and A only. So
+the axis is real but noisy, and it should never be the thing an answer turns on.
+
+**Its best acoustic cue is already spent.** The cue most often reported for
+dominance is pitch lowered against the speaker's own baseline — which is the
+feature carrying arousal here. Inside one recording a drop in F0 cannot be
+evidence for both at once, and arousal has the better claim on it — that is the
+reading with a table behind it. So the main read on dominance comes from the
+transcript, where it competes with nothing.
+
+**Two cheap acoustic features are still open**, because arousal does not use
+them: the **terminal contour** over the last fifth of an utterance — falling
+reads as assertion, rising as asking for agreement — and the **disfluency rate**,
+filled pauses and restarts, which is already listed below under fluency. Both
+fall out of what is computed anyway.
+
+The birthday monologue has a plain case of why the axis is worth having:
+segment 3 is "I lost control of my emotions." Valence and arousal score that the
+same as anger. It is the opposite of anger, and the difference is entirely
+dominance — stated in the words, invisible in the sound.
+
+**Nothing here has its own version of the arousal table yet.** That result rests
+on measurements; this rests on reading. Compute it, store what it is computed
+from, and keep it out of anything shown to a person until it has been checked
+the same way.
+
+## Segmentation is the unit, not a preprocessing step
+
+Every number in this file is per utterance. Cutting the recording is not
+something that happens before the analysis — it is the analysis's coordinate
+system, and the same features give opposite answers under different cuts.
+
+**That is measured, and it is the strongest single result here.** The prosody
+features were first asked about ten-second fixed windows, found nothing, and the
+conclusion written down at the time was that the path was closed. Re-cut at
+pause boundaries, the same features on the same recording put the arousal
+minimum exactly on the sentence where the speaker turns to his mother. Nothing
+about the features changed. It is the third of the three withdrawn conclusions
+below, and the only one where the fix was a change of unit.
+
+Why a fixed window loses it: emotion in speech moves on the scale of a sentence,
+and a ten-second window spanning the cheerful opening and the turn that follows
+averages the two into nothing. Averaging is all a window does.
+
+Windows are also not comparable to one another, which matters more than it
+sounds. The whole method is a z-score against the recording's own distribution,
+and a distribution needs units that mean the same thing. One window half full of
+silence and one window of continuous speech are not two samples of one
+population.
+
+And an utterance is something a person can find again. "You slowed down thirty
+percent after the two-minute mark" is a claim about a stretch nobody remembers.
+"You slowed down on the sentence about your mother" can be checked. The rule at
+the end of this file — never a label, always a deviation the speaker can verify
+— needs the unit to be something the speaker recognizes.
+
+### How the cut is made now
+
+**Measured**, the working version, no model: frame the audio at 40 ms with a
+20 ms hop, take RMS per frame, and treat anything under **8% of that recording's
+own peak** as silence. A **pause is 0.30 s or more** of it. Runs of speech
+shorter than **0.8 s** are dropped. On the 37-second monologue that gives eleven
+utterances.
+
+Each number is doing a job:
+
+- **8% of the clip's own peak, not a fixed dBFS.** Level varies with microphone
+  distance and gain, and a fixed threshold drifts between takes without saying
+  so.
+- **0.30 s.** Under about 0.15 s a gap is a stop closure inside a word, not a
+  boundary between phrases. Too short and phrases fragment; too long and two
+  sentences become one unit and average each other out, which is the fixed
+  window problem again in miniature.
+- **0.8 s.** Below that there are too few voiced frames for an F0 distribution
+  to mean anything. A one-word segment has a pitch, not a range.
+
+### Three different things want to cut the audio, and only one of them is this
+
+- **The VAD** (`fsmn-vad`) is there for **recognition** — keeping silence out of
+  the encoder and chunking long audio to fit. It may put a boundary anywhere
+  convenient.
+- **Prosodic segmentation** is there for **analysis**, and its boundaries become
+  the units compared against one another and possibly described to a person.
+- **The transcript** could supply boundaries too. CTC decoding produces a
+  frame-to-token alignment as a by-product, so token times exist in principle in
+  the same forward pass; whether the FunASR ggml build exposes them has not been
+  checked. If it does, punctuation beats pauses — people pause where sentences
+  do not end, and end sentences without pausing — and pause boundaries confirmed
+  by punctuation beat either alone.
+
+They can share an energy envelope. **They must not share parameters.** Reusing
+the VAD's chunks because they are already computed would mean adopting
+boundaries chosen for a different objective, which is the failure this file
+keeps recording in other forms.
+
+### Where it stops working
+
+- **A recording too short to have a distribution.** Under about five utterances
+  the z-scores are noise, and at the rate measured here that is roughly fifteen
+  to twenty seconds of speech. "Going to bed" is two seconds and one utterance.
+  The right output there is **nothing**, not a weak number.
+- **Speech with no pauses** — fast, continuous, or read aloud from a page —
+  gives one long segment and nothing to compare it against.
+- **A noisy room** lifts the floor until nothing falls under the threshold and
+  no boundary is found at all.
+
+All three are detectable before any analysis runs, which is what makes them
+tolerable: the pipeline can decline instead of guessing.
+
+### The cut has to be versioned
+
+Change the pause threshold and every stored number changes, because every stored
+number is per segment. Rows cut by two different segmenters are not comparable,
+and the cross-day work described below — if it is ever built — would compare
+them without noticing. The segmenter's parameters belong stored beside the
+features, so a later version can re-cut from the audio where it still exists and
+leave the old rows out where it does not.
+
+## Within the recording, against itself
+
+**This is the part that is validated, and it is deliberately the smallest
+claim.** Score each utterance, cut as above, as a deviation from *that
+recording's own* distribution of pitch, continuity and loudness.
+
+Microphone distance, recording gain and the speaker's own pitch range are all
+constant within a take, so they cancel. No personal history is needed. It works
+on the first recording anyone ever makes.
+
+**Measured** on a 37-second monologue, eleven utterances, in 5.4 s of pure
+Python — already 7× real time before anyone writes it in C++:
+
+| # | at | arousal | what he is saying |
+|---|---|---|---|
+| 0 | 0.1 s | **+1.40** highest | "Today is my sixty-third birthday." |
+| 5 | 15.9 s | **−0.85** lowest | "What hurts is, I thought of my mother — the mother who bore me and raised me." |
+| 6 | 21.7 s | −0.34, lowest F0 of the whole take | "They say a birthday is the day your mother suffered." |
+| 9 | 32.0 s | +0.80 | "From now on let us live happily." |
+
+**The arousal minimum lands exactly on the sentence where he turns to his
+mother**, and the maximum on the opening announcement. That is not a statistical
+wobble; it is an acoustic turn at a content turn, found without reading a word
+of the content.
+
+Pitch carries most of it. Loudness is the least trustworthy feature and is
+weighted down: across a recording it tracks microphone distance as much as
+effort, and on a coarser cut of this same clip it ranked the segments in the
+*opposite* order to everything else.
+
+### The cross-day version is much harder, and is not being built yet
+
+Normalizing within a recording means every recording averages to zero by
+construction. It can say "this sentence was the low point of this note"; it
+cannot say "today was lower than last week".
+
+That second question needs a baseline accumulated over days, and the obvious
+baselines do not survive contact with reality:
+
+- **A single personal average is meaningless.** A voice on waking — swollen
+  folds, low, creaky — and a voice after an afternoon outdoors are not
+  comparable, and lumping them produces a number that mostly reports which of
+  those happened.
+- **Conditioning on the declared state is worse than not conditioning.** It is
+  tempting: `voice_features` hangs off `entry_id`, so the state comes free from
+  a join. But the state log is **user-declared data with known decay** — this
+  repo has `end_at` precisely because people stop working at 17:00 and notice at
+  23:00, and the day view has gaps because people forget. Comparing an
+  after-nap voice against a "working" baseline because the label was stale
+  produces a confident, systematic error — the same shape as every other
+  failure recorded here: a wrong answer that looks right.
+
+If it is built later, **condition on time of day, not on state**. Time of day is
+observed rather than declared, is always correct, and captures the circadian
+part of voice variation, which is the largest confound. Require a minimum sample
+count per bucket and say so in the interface — "three more notes before this
+means anything" — rather than computing a confident number from four samples.
+
+**The state log is weak evidence, and that applies beyond voice.** The design's
+own insight lines — "on days when your nap ran past 25 minutes, your working
+time averaged 47 minutes more" — rest on nap durations being accurate. They are
+self-reported. Anything built on them should say so.
+
+## The dimensions past the three
+
+The literature carries more axes than three, and they are not all the same kind
+of thing. One is an axis already here under an older name, one has no path from
+a microphone, and two fall out of the numbers above for almost nothing. Sorting
+them is worth doing once, because the failure mode is adding an axis because it
+exists rather than because it changes an answer.
+
+Where each of them would read from is in the table at the top of this file. The
+question here is the other one — whether it is a separate axis at all:
+
+| | a distinct axis? |
+|---|---|
+| **potency** | no — dominance in an older vocabulary |
+| **unpredictability** | yes, though from appraisal theory rather than PAD |
+| **intensity** | yes — magnitude rather than direction |
+| **approach–avoidance** | yes — anger is unpleasant *and* approach |
+
+**Potency is dominance renamed.** Osgood's semantic differential factored
+judgments into evaluation, potency and activity; PAD is those three under other
+names — pleasure for evaluation, arousal for activity, dominance for potency.
+There is a shade between them, potency reading as the strength of the thing
+being judged and dominance as the speaker's own felt control, but no feature set
+or corpus separates them. It is written down here only so that someone arriving
+from the other tradition does not add a fourth axis that is the third.
+
+**Unpredictability is one pass away from being computed.** Its home is
+appraisal theory rather than PAD — the study that argued explicitly that the
+emotion space is not two-dimensional landed on four, adding unpredictability to
+pleasantness, potency-control and activation. What makes it cheap here is
+mechanical: the arousal profile produces a per-utterance z-score series, and
+unpredictability is the **second-order** statistic of that series — how much it
+jumps, not where it sits. A note that walks steadily and a note that lurches can
+have the same mean arousal. It is one pass over numbers already in memory.
+
+One trap, and it is the same one this document keeps recording: two different
+things share the word. Whether the *day* was surprising is semantic; whether the
+*delivery* lurches is acoustic. Measuring the second and reporting the first is
+how this becomes the fourth withdrawn conclusion.
+
+**Intensity is the magnitude, not the level.** Arousal asks which direction;
+intensity asks how far from neutral in any direction. They come apart on exactly
+the states this app exists for: grief is low arousal and high intensity, and so
+is genuine exhaustion, which is why one "how activated" scale reads both as
+nothing much happening. Mechanically it is the norm of the same z-vector that
+arousal takes a weighted sum of — identical inputs, magnitude instead of sign.
+
+Its limit is one already recorded above: within-recording normalization sets
+every take's average to zero, so this can say which utterance in a note was the
+most marked and never that the whole note was heavy. Global intensity needs the
+cross-day baseline that is not being built. That constraint belongs to the
+pipeline, not to the axis, and it applies the same way to all of them.
+
+Its acoustic side also sits close to the **vocal effort** row below — how hard
+the voice is working, independent of activation. If effort is implemented, check
+the two against each other before treating them as separate signals.
+
+**Approach–avoidance has the only outside check, and the weakest signal.** It is
+genuinely not valence: anger is unpleasant and approach-motivated, which is the
+observation that established the axis in the first place. But it is measured in
+the literature with frontal EEG asymmetry and behavioral tasks, not with
+microphones, and its acoustic correlates are weak and tangled with arousal and
+dominance. From the transcript it is partly readable — "I'm going to," "let's"
+against "I've been putting it off," "I didn't want to deal with it."
+
+What keeps it in view is that it is the only dimension here that predicts
+something outside the audio: avoidance predicts an **absence** in the log.
+Someone who says three times in a week that they should go running, with no
+exercise entry all week, is saying something the sound cannot. But see the
+section above — the absence might be a forgotten tap. That is evidence across
+many days, never on one.
+
+A word this document now uses twice: **agency**. Above it means who is the
+subject of the verbs, which is dominance. In the motivation literature it is
+often paired with approach–avoidance instead. Where this file says agency, it
+means the first.
+
+**Neither of the two worth building adds a stored column.** Both are functions
+of the per-utterance measurements in the next section, which is the same rule
+the axes already follow.
+
+**And the rule for adding any of them:** each axis multiplies the ways to be
+confidently wrong, and this file already records three conclusions withdrawn for
+being read past what they could support. An axis earns its place by changing an
+answer the app would otherwise give — not by appearing in a paper. Like
+dominance, the two being built stay out of anything shown to a person until they
+have their own version of the arousal table.
+
+## Store measurements, not conclusions
+
+Per utterance: `f0_mean`, `f0_p10`, `f0_p90`, `f0_end_slope`, `rate_syl`,
+`pause_ratio`, `pause_count`, `rms_rel`, and the voice-quality measures once they
+are correct. Hung off `entry_id`, with the utterance's offsets into the
+recording and the `seg_version` that cut it.
+
+`f0_end_slope` is the terminal contour, and it is in the list for dominance
+rather than arousal — one extra regression over frames already computed.
+Disfluencies are not a separate measurement at all: they are counted off the
+transcript against those same offsets.
+
+The axes are computed from these at read time, not stored. The reason is the
+one the timeline schema already uses for dates: **the derived thing will change
+and the measured thing will not.** Today's weighting of pitch against continuity
+is a guess; re-deriving it must not require keeping the audio, because keeping
+the audio is a privacy cost and a storage cost that features are not.
+
+`rate_syl` is close to free and worth naming: the transcript gives the character
+count and the energy envelope gives the speaking duration, so speaking rate is a
+division rather than an estimate. That is a small dividend of putting
+recognition outside the model.
+
+## What else the voice carries
+
+Past the three emotional axes are the dimensions that are not emotion at all,
+and for an app about the body they are the more interesting half:
+
+| | what it is | cost |
+|---|---|---|
+| **vocal effort / strain** | how hard speaking is — independent of arousal; one can be low-energy and high-effort | needs spectral work |
+| **voice quality** | breathy, creaky, tense — jitter, shimmer, HNR | needs proper glottal pulse marking |
+| **fluency** | filled pauses, restarts, prolongations — cognitive load and disturbance both raise it; also the acoustic half of dominance | shares the features already computed |
+
+These are **falsifiable in a way emotion is not**. "Your voice is hoarser than
+usual" is something the speaker can check against their own throat. "You sound
+sad" is something they can only accept or resent.
+
+A caution on the literature: voice as a health biomarker is an active field with
+mixed results. The near signals — respiratory illness, vocal fatigue — hold up
+much better than the distant ones. Build the near ones; leave the screening
+claims alone.
+
+**Voice quality is implemented and wrong.** A first pass produced jitter around
+6.5% and HNR around 4 dB, where healthy voices sit under 1% and above 20 dB.
+The per-cycle peak picking is not stable enough on real recordings. It needs the
+proper pulse-marking approach before any of those numbers are used.
+
+## Choosing the recognition model
+
+### SenseVoice-Small, and why an old model is still the answer
+
+SenseVoice-Small has not been updated in about two years, and its transcription
+has been overtaken: **Qwen3-ASR** (0.6B and 1.7B) covers thirty languages, holds
+up better in difficult acoustics, and unifies streaming with offline inference.
+On transcription alone it wins.
+
+But nothing has replaced the combination — transcription, language ID, emotion
+and audio events in one small model. The two quiet years mean the niche is
+uncontested, not that the model was surpassed in it.
+
+**Its emotion labels are not what this app needs, and that is a label-space
+problem rather than a perception one.** The vocabulary is `HAPPY SAD ANGRY
+NEUTRAL FEARFUL DISGUSTED SURPRISED` — categories, and all of them high-arousal
+except `SAD`. There is no word in it for tired, depleted, calm or content. The
+whole low-arousal band collapses into `NEUTRAL`.
+
+So when it returned `NEUTRAL` for all four segments of the birthday monologue —
+including the one where a listener clearly heard grief — that is what the model
+is able to say, not necessarily what it heard. **Measured**: the `f32` reference
+returns `NEUTRAL` on all four too, so it is not a quantization artifact.
+
+Its transcription is what we want it for. Arousal comes from the signal
+processing above.
+
+**The replacement path, if transcription turns out not to be good enough:** move
+recognition to Qwen3-ASR, which llama.cpp supports natively
+(`PROJECTOR_TYPE_QWEN3A`) with no second runtime. Pay for it when the need is
+demonstrated.
+
+### `q8`, and not `f16` — the opposite of the obvious guess
+
+Three builds are published: `f32` at 936 MB (the reference), `f16` at 470 MB,
+`q8` at 254 MB. **Measured** here against `f32` on five clips — two Windows TTS
+lines, a 48-second nutrition explainer, a 68-second monologue and a synthetic
+narration:
+
+| | result |
+|---|---|
+| `f32` | punctuation, correct tags |
+| **`f16`** | **inverse text normalization flips**: returns `woitn` instead of `withitn`, output arrives with no punctuation or capitalization; on two clips the emotion and event tags vanish entirely |
+| `q8` | reproduces `f32` on every clip |
+
+`q8` is both the smaller file and the accurate one — likely because `q8_0` is
+block-quantized with per-block scales, which suits this model's numeric range
+better than a flat 16-bit mantissa.
+
+What `f16` breaks is narrow and worth naming precisely: the transcribed **words
+stay correct**. One head fails, reproducibly, in one direction. **Anyone
+verifying "is the transcription correct" would pass this build.** Upstream marks
+`f16` and `q8` both recommended and reports `q8` at CER 7.99 against `f16`'s
+identical figure — measuring transcription only, which is exactly the
+measurement that cannot see this.
+
+**Not a user-facing setting.** "Which quantization would you like" is not a
+question anyone can answer about themselves, and choosing wrong is invisible —
+demonstrably so. Per-*language* downloads are a different matter: the user knows
+what language they speak, and the design already calls for exactly that, with
+sizes shown in settings.
+
+### A known failure: invented letters on some audio
+
+On one 38-second synthetic narration, the CTC output interleaved isolated
+capital letters — `S` eleven times, `E` and `N` six each — assembling into
+`SESE`, `SNB`, `NCT` at sentence boundaries. **Measured**: all three precisions
+do it, including `f32`, so it is the model and not the quantization. Adding the
+VAD does not help; the energy envelope shows continuous speech with no silence
+to cut. The cause is not established — two plausible explanations were checked
+and both were wrong.
+
+The three genuine human recordings were clean. But it means **the transcript
+cannot go straight into the language model** — a wrong transcription here does
+not look like silence, it looks like text. A filter for runs of isolated capital
+letters is a few lines and belongs on the C++ side, shared by both platforms.
+
+Also: the event tag was `<|Speech|>` throughout that clip, so the event field is
+not dependable on anything unusual.
+
+## How recognition gets built
+
+FunASR ships its own llama.cpp runtime for SenseVoice, and it is far smaller
+than that name suggests. **Measured** by building it here:
+
+- It is **not a fork of llama.cpp** and does not patch it. Each binary links
+  `ggml` only — not `llama` — and the CMake takes
+  `-DFETCHCONTENT_SOURCE_DIR_LLAMA=<path>` to build against a checkout already
+  present. It built against this repo's llama.cpp **unmodified**.
+- The whole implementation is **401 lines**: `funasr-sensevoice.cpp` (191),
+  `funasr_vad.h` (161), `funasr_audio.h` (49). The 191 carry the mel filterbank
+  with its own FFT, the SAN-M attention and layer graphs, positional encoding,
+  CTC decode and tag parsing. ggml graph code loops, so seventy encoder blocks
+  are written once.
+- The only heavy dependency, `miniaudio.h`, belongs to `funasr_audio.h` and
+  decodes files from disk. On a device the microphone hands over PCM already, so
+  it does not travel. (It also cannot open non-ASCII paths on Windows, which
+  costs a desktop test nothing and would have cost a user everything.)
+- Apache-2.0, and by the same people as the weights.
+
+There is no second ggml, no engine to adopt, and nothing to keep in sync
+upstream — recognition becomes a few source files inside this core, linked
+against the ggml already built with this project's tuned `-march` flags. SAN-M
+is attention plus depthwise convolution, which is what `i8mm` and `dotprod` are
+for.
+
+**Measured on the desktop CPU, at `q8`:** 0.36 s for a 19-second synthesized
+clip, 1.5 s for a 48-second recording, 1.8 s for 68 seconds — 32× to 53× real
+time. A separate VAD model (`fsmn-vad`, also GGUF) chunks long recordings, same
+shape, one source file against the same ggml — **for recognition only**. Its
+boundaries are not the analysis boundaries; see the segmentation section.
+
+## The platforms do not offer the same thing
+
+| | Recognition | Reliable? |
+|---|---|---|
+| **iOS** | `SFSpeechRecognizer` | Yes. On-device since iOS 13, broad language coverage, stable API |
+| **HarmonyOS** | HMS Core Speech Kit | Likely. `@hms.ai.speechRecognizer` exposes an online/offline flag; every HarmonyOS device is Huawei hardware |
+| **Android** | `SpeechRecognizer` | **No** |
+
+Android is a façade over whatever recognition service is installed, normally
+Google's — so it is **absent without Google Play Services**, which is most
+phones in China. `createOnDeviceSpeechRecognizer()` arrived only in API 31 and
+whether an on-device model exists is up to the vendor. Behaviour varies by OEM,
+which is the kind of dependency that works on a developer's desk and fails on a
+user's. Verify on target hardware; the specifics move.
+
+**Hence bundled recognition as the baseline**, identical on all three platforms.
+System recognition stays an optional fast path where it is genuinely better —
+iOS especially, where it is free and covers more languages.
+
+**Synthesis is the easier half.** All three platforms have usable offline
+text-to-speech, and a wrong reading costs far less than a wrong transcription.
+Use the system's.
+
+## Why not an omni model
+
+The obvious alternative was one model taking audio in and producing text with
+tone included. It was tested at length. Two things rule it out; only the first
+is settled.
+
+### Throughput, which is the settled part
+
+Measured elsewhere on the real target: a Kirin 9020 at 16 GB running Qwen3.5-2B
+`Q4_K_M` (1.28 GB) gets **~43 tok/s prefill and 11.2 tok/s decode** against a
+read bandwidth of **19.5 GB/s that a single core already saturates**.
+
+That figure is worth being able to re-derive: decode reads every weight for
+every token, so a model of size S cannot exceed bandwidth/S tokens per second —
+15.2 for a 1.28 GB model, against 11.2 observed. No other compute unit moves
+that wall; measured the same way, the Vulkan GPU came out **3.5× slower** than
+CPU and the NPU's ceiling sat below it. Prefill is the exception, being
+compute-bound.
+
+Audio is expensive to feed in: `mtmd` encodes roughly **25 audio tokens per
+second** of clip (derived from Whisper's 50 Hz frames, pooled by two), so a
+minute of speech is ~1500 tokens of prefill. Scaling to Qwen2.5-Omni-3B —
+derived — gives ~26 tok/s prefill, so **60 seconds of audio costs about 58
+seconds** before the answer starts. It scales linearly, so short clips do not
+rescue it.
+
+Recognition first changes that by an order of magnitude, because what reaches
+the model is smaller: a minute of speech is ~200 text tokens, about 5 s of
+prefill. Memory goes the same way — thinker `Q4_K_M` plus its mmproj is 4.7 GB
+and the mmproj is not optional, against 1.53 GB for SenseVoice `q8` plus a 2B
+text model, of which the recognition half is loaded only while transcribing.
+
+**Measured** here for comparison: Qwen2.5-Omni took 36 s on the 48-second clip
+that SenseVoice handled in 1.5 s. Twenty-four times.
+
+### Whether it hears tone at all — and three conclusions withdrawn
+
+The original test was a two-way control. **Control 1** held the voice fixed and
+changed the words: two clips from one Windows TTS voice, same flat delivery.
+The verdict flipped from "a sense of exhaustion" to "not tired… calm and
+collected". **Control 2** held the words fixed and changed the sound, by
+re-rendering one real recording at three tape speeds. A 1.9× tempo ratio and a
+large pitch shift left no trace.
+
+That was reproduced here independently, and extended to seven clips across seven
+speakers, where the model's verdict matched the emotional lean of the *words*
+every time.
+
+**And then it failed to hold, on better material.** Cutting one real recording
+into four segments — same speaker, same take, so the only variable is what is
+being said — the model called the *cheerful* opening "slightly tired", crossing
+the content's lean. Asked the same question about the transcript with the audio
+replaced by silence, it answered "happy" for that segment. **Same model, same
+prompt, audio is the only difference, and the answer changes.** Qwen2.5-Omni
+does use the audio.
+
+Three things written here earlier are therefore withdrawn:
+
+- **"The model reads the words, not the voice."** Overstated. The seven-clip
+  table that supported it drew on seven different speakers, so acoustic and
+  semantic differences were confounded; that table cannot separate the two
+  explanations, and it was read as though it could.
+- **"SenseVoice's emotion head is systematically broken."** It has no label for
+  the low-arousal band at all. Missing vocabulary, not missing perception.
+- **"Prosody features cannot find it, so that path is closed."** They were being
+  asked to find *sadness* — a valence judgment — and at ten-second granularity.
+  Asked for arousal at utterance granularity, they locate the emotional turn
+  precisely, as the table above shows.
+
+The pattern across all three: a measurement that could not distinguish two
+explanations, read as though it had.
+
+**None of this revives the omni path on-device.** The throughput wall is
+independent of whether the model hears. It could matter for a server lane, and
+if one is ever wanted the seven-clip set plus the segment cut is ready to run
+against a larger model. Note that **llama.cpp cannot run Qwen3-Omni** — the
+projector list stops at `qwen2.5o` — so testing means Transformers, vLLM, or a
+hosted endpoint. Test the Captioner variant rather than the base instruct model;
+the base one is a chat model that happens to accept audio, which is the same
+shape as the 3B.
+
+There is also a use for Qwen2.5-Omni that does not need it to be fast: an
+**offline check on the signal processing**. It runs on one clip occasionally in
+the background; a long-run divergence between the two says the feature weights
+have drifted. **Measured**: 17 s for a ten-second clip asked for a single word,
+of which 5.6 s is audio encoding and most of the rest is model load, which a
+resident model removes.
+
+## What llama.cpp can do now
+
+An earlier note here said llama.cpp implements only the Thinker and audio output
+is an open question. **Out of date.** `tools/mtmd/` carries a three-stage
+generation pipeline — backbone to hidden state, hidden state to audio codes,
+codes to PCM — exposed as `mtmd_gen_audio_process()`, with
+`MTMD_GEN_AUDIO_TYPE_QWEN3TTS` and `MTMD_GEN_AUDIO_TYPE_POCKETTTS` registered.
+
+**It is still not the omni Talker.** For Qwen3-TTS the stage-1 backbone is
+`talker.model`, the TTS model's own — hidden states flow inside the TTS stack,
+not from a chat model that just understood something. Excellent text-to-speech,
+not end-to-end speech. There is also **no Talker checkpoint in GGUF**: published
+conversions are thinker plus mmproj only, so implementing it would mean writing
+the conversion as well as the inference.
+
+Audio **input** for Qwen2.5-Omni is fully supported (`PROJECTOR_TYPE_QWEN25O`),
+and the registered audio encoders now go well beyond it — Qwen2A, Qwen3A,
+Parakeet, Granite Speech, Whisper, Conformer.
+
+## The port exists; multimodal is not in it
+
+This repo already cross-compiles llama.cpp for HarmonyOS —
+[harmony/build.cmd](../harmony/build.cmd) `llama`, assembling
+`harmony/prebuilt/llama-sdk/<abi>/`. It defaults to
+`-march=armv8.6-a+i8mm+bf16+dotprod+fp16`, which is not a guess: a cross build
+with no `-march` lands on baseline `armv8-a`, because CMake's feature probes
+compile **and run** a test binary and cannot run one for the phone. That costs
+2.9× prefill and 2.2× decode, measured.
+
+**Audio is not in that build.** It sets `-DLLAMA_BUILD_TOOLS=OFF`, and `libmtmd`
+lives under `tools/mtmd/`. The assembled SDK has `libllama.a` and the three ggml
+libraries and nothing else.
+
+**The decision at the top means none of that has to change.** Recognition links
+ggml directly; the signal processing needs nothing at all.
+
+## What this must not become
+
+**Never show a person a flat claim about their own emotional state.** The omni
+result is why. The model did not say it could not tell — it produced a
+confident, specific, plausible reading, and in an app about health that failure
+is invisible: it looks right every time.
+
+Everything here surfaces as **deviation from a baseline**, never as a label.
+"You spoke thirty percent slower than earlier in this recording" is something
+the speaker can check. "You sound tired" is something they can only accept or
+resent. The same rule is why the falsifiable dimensions — hoarseness, effort,
+fluency — are worth more here than the emotional ones, even though they sound
+less impressive.
+
+Use the signal where being wrong is survivable: within one recording, or
+aggregated across many, or as an input to how the model phrases its own replies.
+Never as a displayed fact.

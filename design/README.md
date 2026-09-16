@@ -3,15 +3,27 @@
 Design source of record, kept outside `harmony/` so it serves the Android app
 too when that arrives.
 
+Two kinds of file live here, and they are read for different reasons. **What
+the design is** — settled, and the app should match it:
+
 | File | What |
 |---|---|
 | [palettes.json](palettes.json) | The six themes, exact values |
 | [icons.md](icons.md) | Lucide, the rules, and the 24-icon inventory |
 | [logo.md](logo.md) | The segmented-ring mark, its geometry, and the wordmark |
 | [i18n-status.md](i18n-status.md) | Which of the eleven languages are written, and what is left |
-| [embedding.md](embedding.md) | Which embedding model, at what quantization, and how the vectors are stored |
-| [omni.md](omni.md) | Voice in as one pass — why a 3B hears the words and not the voice, and the two-way control that shows it |
 | [ui/](ui/) | The upstream review canvas itself — see below |
+
+**What was decided and why** — the record of an argument, including what was
+tried and rejected, so it is not argued twice:
+
+| File | What |
+|---|---|
+| [embedding.md](embedding.md) | Which embedding model, at what quantization, and how the vectors are stored |
+| [voice.md](voice.md) | Recognition outside the model, what is read from the voice and by what, and why not one omni pass |
+
+They are not numbered because they are not a sequence — `logo.md` does not come
+before `icons.md`. This table is the index; git is the history.
 
 Three scripts here write into the app, and are the only thing that should:
 `make-arkts-palettes.py` generates the palette table, `make-harmony-icons.py`
@@ -85,6 +97,26 @@ The rules behind the timeline — one open entry, switching leaves no gap, a gap
 is the absence of a row — are implemented and documented in
 [src/store/timeline.hpp](../src/store/timeline.hpp), with the schema in
 [sql/sqlite/](../sql/sqlite/).
+
+### The state log is weak evidence, and every reading of it must allow for that
+
+The log says what the person *declared*, not what they were doing. It decays in
+a known direction: people stop at 17:00 and notice at 23:00, which is the whole
+reason `end_at` takes a past time. Nobody taps nine cells a day cleanly.
+
+So nothing should be built that is only correct when the log is. The insight
+line used as an example below — "on days when you napped longer than 25
+minutes" — inherits every nap that was mistimed or never tapped at all. Worse, a
+comparison that *conditions* on the declared state can come out behind one that
+ignores it: instead of being noisy it is confidently, systematically wrong,
+which is the one failure shape a user cannot catch by looking at it.
+
+Two consequences that hold everywhere in this app:
+
+- Prefer what is measured over what is declared. Timestamps are evidence; the
+  state attached to them is a claim.
+- Say the claim out loud where it is used. "On the 6 days you logged a nap" is
+  honest in a way that "when you nap longer" is not.
 
 ### Recent is a window; a day is a day
 
