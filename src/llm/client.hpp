@@ -40,10 +40,14 @@ public:
     //
     // `user` carries the caller's identity for the turn; a client that runs
     // tools locally forwards it to its tool executor (others ignore it).
+    //
+    // `req` carries per-turn options (currently a GBNF grammar). Defaulted, so
+    // every existing call site is an ordinary unconstrained turn.
     virtual bool ainvoke(const std::vector<ChatMessage>& messages,
                          const std::string&              system_prompt,
                          const EventHandler&             on_event,
-                         const UserContext&              user = UserContext()) = 0;
+                         const UserContext&              user = UserContext(),
+                         const RequestOptions&           req  = RequestOptions()) = 0;
 };
 
 //------------------------------------------------------------------------------
@@ -62,8 +66,9 @@ public:
     bool ainvoke(const std::vector<ChatMessage>& messages,
                  const std::string&              system_prompt,
                  const EventHandler&             on_event,
-                 const UserContext&              user = UserContext()) override {
-        return impl_.ainvoke(messages, system_prompt, on_event, user);
+                 const UserContext&              user = UserContext(),
+                 const RequestOptions&           req  = RequestOptions()) override {
+        return impl_.ainvoke(messages, system_prompt, on_event, user, req);
     }
 
     T&       inner()       { return impl_; }

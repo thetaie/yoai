@@ -33,16 +33,50 @@ The rest of this file is the argument. This is the answer:
 
 | axis | what it reads | from | status |
 |---|---|---|---|
-| **valence** | what is said | **text** | free — the model reads the transcript anyway |
+| **valence** | what is said | **text** | **built** — chat model, constrained reply |
 | **arousal** | how it is said: pitch, continuity, loudness | **audio** | **validated** — the table further down |
-| **dominance** | who is the subject of the verbs | **text** | free, unproven |
-| **intensity** | distance from neutral, in any direction | **audio**, second pass | planned; no new measurement |
-| **unpredictability** | how much the arousal series jumps | **audio**, second pass | planned; no new measurement |
+| **dominance** | who is the subject of the verbs | **text** | **built**, unproven — same call as valence |
+| **intensity** | distance from neutral, in any direction | **audio**, second pass | **built** — norm of the z-vector |
+| **unpredictability** | how much the arousal series jumps | **audio**, second pass | **built** — mean \|Δ arousal\| |
 | **approach–avoidance** | going-toward against putting-off wording | **text**, checked against the log | not built — weakest signal here |
 | **potency** | — | — | not a separate axis; it is dominance |
 
 "Second pass" means a function of numbers the arousal pass already produced —
 no extra feature, no extra column in the database.
+
+### The text pair costs a sampler setting, and getting it wrong is silent
+
+Valence and dominance come from one turn against whichever chat model is
+configured, with a GBNF constraining the reply to
+`{"valence":<level>,"dominance":<level>}` over five enumerated levels. The
+grammar is not decoration: it makes every reply in range and parseable by
+construction, and five levels is already finer than a small model resolves.
+
+**A constrained turn must also be decoded greedily**, and this was learned the
+expensive way. Asked to score one plainly cheerful sentence about lunch, a 2B at
+the conversational defaults this project ships for chat — temperature 0.7,
+top-k 20, top-p 0.8 — answered:
+
+    -1  -1  -1   0  -1   0
+
+six seeds, never twice the same, never right. Greedy, it answered 0 every time;
+a 4B answered +0.5. **The sampling was the entire difference**, and on screen it
+looked exactly like a model that could not read Chinese.
+
+The repetition penalty has to go too, for a reason specific to scoring: it
+demotes tokens seen in the last `repeat_last_n`, and a scoring prompt
+necessarily shows the model its own scale — "-1 very unpleasant, 0 neutral" — so
+the penalty lands on the handful of tokens the grammar allows as the answer.
+
+Both are now automatic: a non-empty grammar makes the turn deterministic in
+`llm/local.cpp`, documented at `bodyclock_chat`. The generalisation is worth
+keeping — **a reply that is a value, not prose, must not be sampled like
+prose.**
+
+Model size matters here as well, though far less than for arousal: the 2B says
+0 for that sentence even greedily, and the 4B says +0.5. Valence from text is a
+task small models are good at, which is exactly why the axes are split by
+channel — but 2B is below the floor.
 
 All of it is computed **per utterance**, and the split that produces those
 utterances decides what every number means. That has its own section below.
@@ -228,6 +262,43 @@ keeps recording in other forms.
 
 All three are detectable before any analysis runs, which is what makes them
 tolerable: the pipeline can decline instead of guessing.
+
+#### The second one is not an edge case — measured on the device
+
+A 16-second note, recorded on the phone, ordinary conversational Mandarin, cut
+into **two** utterances: a 0.9 s fragment and then one run of **1.3 s to
+15.8 s**. Its transcript has five commas and a full stop in it, so there were
+six clause boundaries in that audio and the energy floor found none of them.
+
+The giant segment reports `range 28.7 st, p10 76 Hz, p90 400 Hz` — both ends
+pinned to the F0 search bounds. That is not a wide pitch range, it is the
+absence of a measurement: fifteen seconds of speech averaged into one "unit"
+whose pitch distribution spans everything the estimator can represent.
+
+Two corrections follow.
+
+**"Fast, continuous, or read aloud" understates it.** This was none of those. It
+was someone describing their lunch. Fluent speech simply does not stop for
+0.30 s between clauses as often as the threshold assumes, and Mandarin — where
+the comma does most of the work an English full stop does — gives it even fewer
+chances.
+
+**The five-utterance floor is therefore not mainly about duration.** Earlier
+text here estimated "roughly fifteen to twenty seconds of speech" to reach five
+utterances, and a separate 14-second clip did reach seven. The variable is not
+length, it is **how the speaker phrases**. Two recordings of the same duration
+can yield two segments or seven, so no recording-length rule can predict
+whether the analysis will run.
+
+That makes the transcript boundaries in the section above stop being an
+optimization. **They are what makes the floor reachable at the lengths people
+actually record** — notes here run 5 to 15 seconds, not 37. The cost is real
+and is recorded with the design of the new cut: `speech_ratio` measures pause
+structure *inside* a unit, so a unit cut at a clause boundary has nothing left
+to measure and continuity — 0.35 of the arousal weight — degenerates. A cut
+that keeps continuity meaningful has to either confirm punctuation against a
+pause, as the section above suggests, or compute continuity over a window
+rather than over the unit.
 
 ### The cut has to be versioned
 
@@ -823,13 +894,53 @@ The pattern across all three: a measurement that could not distinguish two
 explanations, read as though it had.
 
 **None of this revives the omni path on-device.** The throughput wall is
-independent of whether the model hears. It could matter for a server lane, and
-if one is ever wanted the seven-clip set plus the segment cut is ready to run
-against a larger model. Note that **llama.cpp cannot run Qwen3-Omni** — the
-projector list stops at `qwen2.5o` — so testing means Transformers, vLLM, or a
-hosted endpoint. Test the Captioner variant rather than the base instruct model;
-the base one is a chat model that happens to accept audio, which is the same
-shape as the 3B.
+independent of whether the model hears.
+
+### The larger model was run, and it hears clearly
+
+Two things written above are out of date. **llama.cpp does run Qwen3-Omni** —
+`ggml-org/Qwen3-Omni-30B-A3B-Instruct-GGUF` ships `Q4_K_M` plus an mmproj, and
+it loads and answers through `llama-mtmd-cli`. And the **base Instruct model was
+enough**; the Captioner variant was not needed to get a clear result.
+
+**Measured**, `Q4_K_M` plus a bf16 mmproj on an RTX 3090, 19.3 GB of 24, one
+6.5-second clip of real Mandarin put through control 2 — the same words at three
+tape speeds:
+
+| | sound | what the model said |
+|---|---|---|
+| slow, 9.0 s | pitch down | "**mid-to-low pitched**… **moderate, conversational pace**… **His** delivery" |
+| original, 6.5 s | — | "**fast-paced**… pitch consistently **high**… **Her** pitch" |
+| fast, 4.8 s | pitch up | "**fast-paced**… **high-pitched**, animated" |
+
+Pitch and pace both track the manipulation, and **the perceived speaker's sex
+flips with the pitch shift** — which is what a pitch shift does to a listener,
+and is not available from the words, because the words are identical in all
+three. The semantic read stayed put across all three ("exasperated",
+"animated"), which is the correct behaviour: the content-driven part should not
+move when only the sound does.
+
+The 3B, given the same treatment, said "moderate pace, low pitch, calm" for all
+three.
+
+So the question the two controls were built to answer has an answer. **It is a
+capacity problem, not an impossibility.** A model of this class hears tone; the
+one small enough to put on a phone does not.
+
+This does not change the on-device plan — 19.3 GB is a server — but it changes
+what the on-device plan *is*. Signal processing is not a fallback chosen because
+the model idea failed. It is the only thing that works at the size that fits,
+and it is the part that is validated.
+
+Caveats: one speaker, one clip, one sample per condition. A tape-speed change is
+not real emotional prosody; this shows the model is sensitive to acoustics, not
+that it judges tiredness correctly. That needs one person recording one sentence
+in several real states.
+
+**Practical note for any batch use**: a run is about 40 s, of which roughly 38 s
+is loading 17 GB from disk — audio encoding is **198 ms** and inference is
+seconds. Anything comparing more than a handful of clips wants `llama-server`
+with the model resident, not `llama-mtmd-cli` per clip.
 
 There is also a use for Qwen2.5-Omni that does not need it to be fast: an
 **offline check on the signal processing**. It runs on one clip occasionally in

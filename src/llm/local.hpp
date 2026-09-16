@@ -206,7 +206,8 @@ public:
     bool ainvoke(const std::vector<ChatMessage>& messages,
                  const std::string&              system_prompt,
                  const EventHandler&             on_event,
-                 const UserContext&              user = UserContext());
+                 const UserContext&              user = UserContext(),
+                 const RequestOptions&           req  = RequestOptions());
 
     /// Threads for subsequent turns; <= 0 means hardware_concurrency(). Takes
     /// effect on the next turn without reloading the model, because the count is

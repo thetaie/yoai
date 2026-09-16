@@ -207,6 +207,7 @@ bool run_turn(const Options& opt, std::vector<Message>* history) {
     const std::string json = to_messages_json(*history);
     const int rc = bodyclock_chat(kProviderId, json.c_str(),
                              opt.system_prompt.empty() ? nullptr : opt.system_prompt.c_str(),
+                             /*grammar=*/nullptr,
                              on_event, &st);
     std::cout << "\n";
 

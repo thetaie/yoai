@@ -28,6 +28,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 using bodyclock::voice::ArousalWeights;
@@ -90,14 +91,64 @@ void print_recording(const Recording& r, double elapsed) {
 
 }  // namespace
 
+// How many utterances survive at one setting, and how long the longest is.
+//
+// The second number is the one that matters. A cut that yields five units by
+// splitting off four fragments and leaving one fifteen-second block has not
+// segmented anything -- the block still averages a whole note into one "unit"
+// whose pitch distribution spans the estimator's entire range.
+void sweep(const std::vector<float>& pcm) {
+    static const float pauses[]  = {0.40f, 0.30f, 0.25f, 0.20f, 0.15f, 0.12f, 0.10f};
+    static const float silences[] = {0.04f, 0.08f, 0.12f, 0.16f};
+
+    std::printf("      utterances (and longest, seconds) by min_pause x silence_fraction\n");
+    std::printf("      %-8s", "pause\\sil");
+    for (size_t s = 0; s < sizeof(silences) / sizeof(silences[0]); ++s) {
+        std::printf("%14.2f", silences[s]);
+    }
+    std::printf("\n");
+
+    for (size_t p = 0; p < sizeof(pauses) / sizeof(pauses[0]); ++p) {
+        std::printf("      %-8.2f", pauses[p]);
+        for (size_t s = 0; s < sizeof(silences) / sizeof(silences[0]); ++s) {
+            ProsodyOptions o;
+            o.min_pause       = pauses[p];
+            o.silence_fraction = silences[s];
+            Recording r;
+            if (!bodyclock::voice::analyze(&pcm[0], pcm.size(), 16000, o, &r)) {
+                std::printf("%14s", "-");
+                continue;
+            }
+            float longest = 0.0f;
+            for (size_t k = 0; k < r.utterances.size(); ++k) {
+                if (r.utterances[k].duration > longest) {
+                    longest = r.utterances[k].duration;
+                }
+            }
+            char cell[32];
+            std::snprintf(cell, sizeof(cell), "%zu (%.1f)", r.utterances.size(), longest);
+            std::printf("%14s", cell);
+        }
+        std::printf("\n");
+    }
+    std::printf("\n");
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::printf("usage: %s <audio.wav> [more.wav ...]\n", argv[0]);
+        std::printf("usage: %s [--sweep] <audio.wav> [more.wav ...]\n", argv[0]);
         return 2;
     }
 
+    bool do_sweep = false;
+    int  first    = 1;
+    if (std::strcmp(argv[1], "--sweep") == 0) {
+        do_sweep = true;
+        first    = 2;
+    }
+
     int failures = 0;
-    for (int i = 1; i < argc; ++i) {
+    for (int i = first; i < argc; ++i) {
         std::printf("%s\n", argv[i]);
 
         std::vector<float> pcm;
@@ -109,6 +160,11 @@ int main(int argc, char** argv) {
         if (rate != 16000) {
             std::printf("      (resampled from %d Hz by the harness -- the numbers below\n"
                         "       will not match a tool that resampled differently)\n", rate);
+        }
+
+        if (do_sweep) {
+            sweep(pcm);
+            continue;
         }
 
         Recording r;

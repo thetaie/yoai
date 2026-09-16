@@ -107,7 +107,8 @@ public:
     bool ainvoke(const std::vector<ChatMessage>& messages,
                  const std::string& system_prompt,
                  const EventHandler& on_event,
-                 const UserContext& user = UserContext());
+                 const UserContext& user = UserContext(),
+                 const RequestOptions& req = RequestOptions());
 
     const OpenAIChatOptions& options() const { return opt_; }
 

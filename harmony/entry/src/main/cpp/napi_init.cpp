@@ -125,12 +125,14 @@ void ChatWorker(std::int32_t turn_id,
                 std::string provider,
                 std::string messages_json,
                 std::string system_prompt,
+                std::string grammar,
                 napi_threadsafe_function tsfn,
                 std::shared_ptr<Turn> turn) {
     HandlerContext ctx{tsfn, turn};
 
     const int rc = bodyclock_chat(provider.c_str(), messages_json.c_str(),
                              system_prompt.empty() ? nullptr : system_prompt.c_str(),
+                             grammar.empty() ? nullptr : grammar.c_str(),
                              &OnChatEvent, &ctx);
     OH_LOG_INFO(LOG_APP, "chat turn %{public}d finished rc=%{public}d", turn_id, rc);
 
@@ -284,24 +286,26 @@ napi_value NativeLocalLoad(napi_env env, napi_callback_info info) {
 // nativeChat(provider, messagesJson, systemPrompt,
 //            onEvent: (type, content) => void): number   (turn id)
 napi_value NativeChat(napi_env env, napi_callback_info info) {
-    size_t argc = 4;
-    napi_value argv[4] = {nullptr, nullptr, nullptr, nullptr};
+    size_t argc = 5;
+    napi_value argv[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
-    if (argc < 4) {
+    if (argc < 5) {
         napi_throw_error(env, nullptr,
-                         "nativeChat(provider, messagesJson, systemPrompt, onEvent) needs four arguments");
+                         "nativeChat(provider, messagesJson, systemPrompt, grammar, onEvent) "
+                         "needs five arguments");
         return nullptr;
     }
 
     std::string provider = ToUtf8(env, argv[0]);
     std::string messages = ToUtf8(env, argv[1]);
     std::string system   = ToUtf8(env, argv[2]);
+    std::string grammar  = ToUtf8(env, argv[3]);
 
     napi_value work_name = nullptr;
     napi_create_string_utf8(env, "bodyclock_chat", NAPI_AUTO_LENGTH, &work_name);
 
     napi_threadsafe_function tsfn = nullptr;
-    if (napi_create_threadsafe_function(env, argv[3], nullptr, work_name,
+    if (napi_create_threadsafe_function(env, argv[4], nullptr, work_name,
                                         0 /*unbounded*/, 1 /*one worker*/,
                                         nullptr, nullptr, nullptr, CallJs, &tsfn) != napi_ok) {
         napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
@@ -317,7 +321,7 @@ napi_value NativeChat(napi_env env, napi_callback_info info) {
     }
 
     std::thread(ChatWorker, id, std::move(provider), std::move(messages),
-                std::move(system), tsfn, turn).detach();
+                std::move(system), std::move(grammar), tsfn, turn).detach();
 
     return Int32(env, id);
 }

@@ -494,7 +494,17 @@ OpenAIChatClient::OpenAIChatClient(OpenAIChatOptions opt) : opt_(std::move(opt))
 bool OpenAIChatClient::ainvoke(const std::vector<ChatMessage>& messages,
                                const std::string& system_prompt,
                                const EventHandler& on_event,
-                               const UserContext& user) {
+                               const UserContext& user,
+                               const RequestOptions& req) {
+    if (!req.grammar.empty()) {
+        // Said out loud rather than dropped. A caller that asked for a grammar
+        // is about to parse the reply, and free text arriving where constrained
+        // text was requested fails later and further away. GBNF is a llama.cpp
+        // concept with no OpenAI-protocol equivalent; a provider-specific
+        // `response_format` would go through OpenAIChatOptions::extra_json.
+        bodyclock::platform::log_warn(
+            "remote provider ignores the requested grammar; reply is unconstrained");
+    }
     auto emit_error = [&](std::string msg) {
         Event e; e.type = EventType::Error; e.content = std::move(msg);
         on_event(e);

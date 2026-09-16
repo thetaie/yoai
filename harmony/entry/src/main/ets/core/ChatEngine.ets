@@ -59,7 +59,8 @@ export class ChatEngine {
 
     let turnId: number = 0;
     try {
-      turnId = bodyclock.nativeChat(providerId, JSON.stringify(wire), systemPrompt,
+      // No grammar: a conversation is free text by definition.
+      turnId = bodyclock.nativeChat(providerId, JSON.stringify(wire), systemPrompt, '',
         (type: string, content: string) => {
           if (type === 'reply') {
             cb.onDelta(content);

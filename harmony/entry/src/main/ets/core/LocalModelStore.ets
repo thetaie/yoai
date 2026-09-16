@@ -191,6 +191,41 @@ export class LocalModelStore {
   }
 
   /**
+   * Re-arm ONE stored grant and confirm the file is still there.
+   *
+   * The recognition model is not in the chat model list and must not be: it is a
+   * different kind of model picked for a different lane. But it needs the same
+   * re-activation, because a persisted grant is dormant until activated and
+   * without this the path opens only in the session that picked it.
+   *
+   * Returns false when the grant or the file is gone, which the caller should
+   * treat as "forget this reference" rather than "retry" -- a stale reference
+   * that fails silently on every launch is worse than no reference at all.
+   */
+  static async activateOne(uri: string, path: string): Promise<boolean> {
+    if (uri.length === 0 || path.length === 0) {
+      return false;
+    }
+    try {
+      await fileShare.activatePermission([{
+        uri: uri, operationMode: fileShare.OperationMode.READ_MODE
+      }]);
+    } catch (err) {
+      // Not decisive on its own -- the stat below is what settles it.
+      const e = err as BusinessError;
+      log('activatePermission (voice) code=' + e.code + ' ' + e.message);
+    }
+    try {
+      fs.statSync(path);
+    } catch (err) {
+      const e = err as BusinessError;
+      log('recognition model unreachable at ' + path + ' code=' + e.code);
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * Re-arm every stored grant, and report which models no longer resolve.
    *
    * MUST run before the first model load of a session: a persisted grant is

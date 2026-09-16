@@ -217,6 +217,29 @@ typedef int (*bodyclock_chat_handler)(const char* event_type,
 //                   state, which is what lets the host own history (and decide
 //                   what to trim) without two policies disagreeing.
 //   system_prompt   may be NULL or empty for none.
+//   grammar         optional GBNF constraining the reply, with `root` as the
+//                   start rule. NULL or empty for an ordinary free-text turn,
+//                   which is every conversational one.
+//
+//                   ON-DEVICE ONLY. A remote provider cannot be given a GBNF --
+//                   it is a llama.cpp concept with no equivalent in the OpenAI
+//                   protocol -- so the grammar is logged and ignored there, and
+//                   the reply comes back unconstrained. A caller that must have
+//                   structured output from a remote model wants that provider's
+//                   own `response_format`, through bodyclock_provider_set's
+//                   `extra_json`.
+//
+//                   A grammar the parser rejects is logged and the turn runs
+//                   unconstrained, rather than failing: a visibly wrong answer
+//                   with a reason in the log beats a turn that never ran.
+//
+//                   PASSING A GRAMMAR ALSO MAKES THE TURN DETERMINISTIC on the
+//                   on-device lane -- greedy, no repetition penalty, whatever
+//                   the model's chat settings are. A grammar means the reply is
+//                   a value rather than prose, and a value that changes between
+//                   runs on one input is not a value. Measured: the same 2B
+//                   scoring one sentence answered -1, -1, -1, 0, -1, 0 at the
+//                   conversational defaults, and 0 every time greedily.
 //   on_event        streaming callback (see above). Required.
 //   user_data       opaque pointer forwarded to every on_event call, may be NULL.
 //
@@ -228,6 +251,7 @@ typedef int (*bodyclock_chat_handler)(const char* event_type,
 int bodyclock_chat(const char* provider_id,
               const char* messages_json,
               const char* system_prompt,
+              const char* grammar,
               bodyclock_chat_handler on_event,
               void* user_data);
 

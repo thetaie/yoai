@@ -397,6 +397,7 @@ extern "C" int bodyclock_local_load(const char* id) {
 extern "C" int bodyclock_chat(const char* provider_id,
                          const char* messages_json,
                          const char* system_prompt,
+                         const char* grammar,
                          bodyclock_chat_handler on_event,
                          void* user_data) {
     if (on_event == nullptr) return 1;
@@ -427,6 +428,11 @@ extern "C" int bodyclock_chat(const char* provider_id,
     const std::string system = blank(system_prompt) ? std::string()
                                                     : std::string(system_prompt);
 
+    bodyclock::llm::RequestOptions req;
+    if (!blank(grammar)) {
+        req.grammar = grammar;
+    }
+
     // One handler for both lanes: the clients speak the same Event vocabulary, so
     // the only per-lane work is which client runs the turn.
     const bodyclock::llm::EventHandler forward = [&](const Event& e) -> bool {
@@ -444,7 +450,8 @@ extern "C" int bodyclock_chat(const char* provider_id,
             return fail(std::string("no on-device engine for: ") + provider_id);
         }
 
-        const bool ok = client->ainvoke(messages, system, forward);
+        const bool ok = client->ainvoke(messages, system, forward,
+                                        bodyclock::llm::UserContext(), req);
 
         // The engine reports token counts through stats() rather than as an event,
         // because it has no wire protocol to carry one. Turning them into the same
@@ -474,7 +481,8 @@ extern "C" int bodyclock_chat(const char* provider_id,
     ensure_curl();
 
     bodyclock::llm::OpenAIChatClient client(entry.remote);
-    const bool ok = client.ainvoke(messages, system, forward);
+    const bool ok = client.ainvoke(messages, system, forward,
+                                   bodyclock::llm::UserContext(), req);
 
     return ok ? 0 : 1;
 }

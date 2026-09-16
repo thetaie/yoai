@@ -1,5 +1,7 @@
 #include "llm/local.hpp"
 
+#include "platform/log.hpp"
+
 #include <algorithm>
 #include <mutex>
 
@@ -267,7 +269,8 @@ const LocalOptions& LocalClient::options() const { return impl_->opt; }
 bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
                           const std::string&              system_prompt,
                           const EventHandler&             on_event,
-                          const UserContext&              /*user*/) {
+                          const UserContext&              /*user*/,
+                          const RequestOptions&           req) {
     std::lock_guard<std::mutex> lock(impl_->turn);
 
     // Zeroed every turn, so load_ms is non-zero only on the turn that paid for it.
@@ -439,14 +442,56 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
      * header for it and says so plainly.
      */
     llama_sampler* smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
-    if (impl_->opt.repeat_penalty > 1.0f && impl_->opt.repeat_last_n != 0) {
+
+    /*
+     * A grammar, when one was asked for, goes at the HEAD of the chain -- before
+     * the penalties and before any truncation.
+     *
+     * Order is not a style choice here. The grammar works by masking every token
+     * the syntax cannot accept to -INF; top-k and top-p work by keeping only the
+     * best n candidates. Run top-k first and it can hand the grammar a shortlist
+     * containing no legal token at all, at which point sampling has nothing to
+     * choose and the reply breaks at exactly the moments the grammar was added to
+     * prevent. Masking first, truncating second, always leaves a legal candidate.
+     *
+     * A malformed grammar returns NULL rather than aborting. That is reported and
+     * the turn goes on unconstrained: the caller gets a reply it can see is wrong
+     * plus a log line saying why, which beats a turn that silently never runs.
+     */
+    const bool structured = !req.grammar.empty();
+    if (structured) {
+        llama_sampler* gr =
+            llama_sampler_init_grammar(vocab, req.grammar.c_str(), "root");
+        if (gr != nullptr) {
+            llama_sampler_chain_add(smpl, gr);
+        } else {
+            bodyclock::platform::log_warn(
+                "on-device: grammar rejected by the parser, continuing unconstrained");
+        }
+    }
+
+    /*
+     * A structured turn is decoded GREEDILY and without a repetition penalty,
+     * whatever the client's chat settings say. See RequestOptions::grammar for
+     * the measurement behind this; the short version is that sampling a
+     * classification at temperature 0.7 returns a different answer every run and
+     * the wrong one most runs.
+     *
+     * The penalty has to go for a second reason. It demotes tokens seen in the
+     * last repeat_last_n, and a scoring prompt necessarily SHOWS the model its
+     * own scale -- "-1 very unpleasant, 0 neutral" -- so the penalty lands
+     * squarely on the handful of tokens the grammar permits as the answer.
+     */
+    if (!structured &&
+        impl_->opt.repeat_penalty > 1.0f && impl_->opt.repeat_last_n != 0) {
         llama_sampler_chain_add(smpl, llama_sampler_init_penalties(
             llama_vocab_n_tokens(vocab),
             impl_->opt.repeat_last_n, impl_->opt.repeat_penalty,
             /*penalty_freq=*/0.0f, /*penalty_present=*/0.0f));
     }
-    if (impl_->opt.temperature <= 0.0f) {
-        // Deterministic on request -- useful for benchmarking, unsafe as a default.
+    if (structured || impl_->opt.temperature <= 0.0f) {
+        // Deterministic on request -- useful for benchmarking, unsafe as a
+        // default for prose, and mandatory for a grammar.
         llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
     } else {
         if (impl_->opt.top_k > 0) {
@@ -559,7 +604,8 @@ const LocalOptions& LocalClient::options() const { return impl_->opt; }
 bool LocalClient::ainvoke(const std::vector<ChatMessage>&,
                           const std::string&,
                           const EventHandler& on_event,
-                          const UserContext&) {
+                          const UserContext&,
+                          const RequestOptions&) {
     emit_event(on_event, EventType::Error,
                "this build has no on-device engine "
                "(configure with -DBODYCLOCK_ONDEVICE_LLM=ON -DLLAMA_CPP_DIR=...)");

@@ -115,10 +115,19 @@ export const nativeLocalLoad: (
  * @param systemPrompt system prompt, or '' for none.
  * @returns a turn id for nativeChatCancel, or throws on bad arguments.
  */
+/**
+ * @param grammar GBNF constraining the reply, with `root` as the start rule, or
+ *                '' for an ordinary free-text turn. ON-DEVICE MODELS ONLY -- a
+ *                remote provider has no equivalent, so the grammar is logged and
+ *                ignored there and the reply comes back unconstrained. A grammar
+ *                the parser rejects is also logged and ignored rather than
+ *                failing the turn.
+ */
 export const nativeChat: (
   provider: string,
   messagesJson: string,
   systemPrompt: string,
+  grammar: string,
   onEvent: (type: string, content: string) => void
 ) => number;
 
