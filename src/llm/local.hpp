@@ -54,10 +54,31 @@ struct LocalOptions {
     /**
      * Worker threads. NOT hardware_concurrency(): on a three-cluster phone SoC the
      * all-cores default is routinely the WORST count, because the batch waits on the
-     * little cores. 6 also leaves cores for the UI. <= 0 falls back to
-     * hardware_concurrency().
+     * little cores. <= 0 falls back to hardware_concurrency().
+     *
+     * **Measured** on the target device (Kirin 9020, Qwen3.5-2B Q4_K_M, two runs
+     * per setting through the /asr bench), decode in tokens per second:
+     *
+     *     threads   1     2     4     6     8
+     *     decode    5.8   9.0   12.6  12.7  12.9
+     *     prefill   22.7  29.0  48.4  46.3  50.1
+     *
+     * **Both phases stop improving at four.** That is the core count, not a
+     * coincidence: this SoC is one big plus three mid plus four little, so four
+     * threads is exactly its performance cores and the little ones contribute
+     * nothing to either phase.
+     *
+     * 4 rather than 6, then — the same throughput while leaving two more cores
+     * to the UI and the battery.
+     *
+     * The decode row is also the disproof of a claim this project carried for a
+     * while, that one core already saturates the memory controller. One core
+     * reaches 7.4 GB/s of weight reads against about 16.5 at saturation. What
+     * survives is the conclusion drawn from it: four cores do reach ~85% of the
+     * chip's read bandwidth, so there is little left for another compute unit
+     * to find.
      */
-    int n_threads = 6;
+    int n_threads = 4;
 
     /**
      * Layers to offload to a GPU backend. 0 because this repo builds llama.cpp
@@ -127,6 +148,10 @@ struct LocalStats {
     int    prompt_tokens  = 0;
     int    decoded_tokens = 0;
     int    n_threads      = 0;   // what the turn actually ran with
+    /// Prompt tokens the KV already held, so prefill skipped them. High on a
+    /// second turn with the same system prompt; zero after anything that
+    /// invalidated the cache.
+    int    reused_tokens  = 0;
     int    n_ctx          = 0;   // context this turn got (see n_ctx_max)
     /// Oldest messages shed to make the prompt fit; > 0 means the window slid.
     int    dropped_msgs   = 0;

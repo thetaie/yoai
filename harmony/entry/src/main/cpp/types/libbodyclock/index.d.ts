@@ -101,6 +101,16 @@ export const nativeLocalLoad: (
 ) => void;
 
 /**
+ * Change an on-device model's worker-thread count without unloading it.
+ * <= 0 means all cores. Takes effect on the next turn. Returns 0 on success.
+ *
+ * For measurement: the core logs `on-device threads: <id> -> <n>` here and
+ * `on-device turn: ... prefill Nms decode Nms` after each turn, so a sweep is
+ * read off the log as pairs of lines.
+ */
+export const nativeLocalSetThreads: (id: string, threads: number) => number;
+
+/**
  * Run one chat turn on a worker thread, streaming events back on the ArkTS
  * thread in arrival order.
  *

@@ -257,6 +257,25 @@ void LoadWorker(std::string id, napi_threadsafe_function tsfn) {
 // Not a turn, so it takes no turn id and cannot be cancelled: a load either
 // finishes or fails, and abandoning one halfway leaves the file partly read for
 // no benefit. The callback fires exactly once.
+// nativeLocalSetThreads(id: string, threads: number): number
+//
+// Synchronous and cheap -- it sets a field the next turn reads, and does not
+// touch the weights.
+napi_value NativeLocalSetThreads(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 2) {
+        napi_throw_error(env, nullptr,
+                         "nativeLocalSetThreads(id, threads) needs two arguments");
+        return nullptr;
+    }
+    std::string id = ToUtf8(env, argv[0]);
+    std::int32_t n = 0;
+    napi_get_value_int32(env, argv[1], &n);
+    return Int32(env, bodyclock_local_set_threads(id.c_str(), n));
+}
+
 napi_value NativeLocalLoad(napi_env env, napi_callback_info info) {
     size_t argc = 2;
     napi_value argv[2] = {nullptr, nullptr};
@@ -749,6 +768,7 @@ napi_value Init(napi_env env, napi_value exports) {
         {"nativeLocalAvailable", nullptr, NativeLocalAvailable, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeLocalSet",       nullptr, NativeLocalSet,       nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeLocalLoad",      nullptr, NativeLocalLoad,      nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeLocalSetThreads", nullptr, NativeLocalSetThreads, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChat",           nullptr, NativeChat,           nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChatCancel",     nullptr, NativeChatCancel,     nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeVoiceAvailable", nullptr, NativeVoiceAvailable, nullptr, nullptr, nullptr, napi_default, nullptr},

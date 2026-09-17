@@ -404,6 +404,23 @@ extern "C" int bodyclock_local_load(const char* id) {
     return 0;
 }
 
+extern "C" int bodyclock_local_set_threads(const char* id, int threads) {
+    if (blank(id)) return 1;
+
+    std::shared_ptr<LocalClient> client = local_client_for(id);
+    if (!client) {
+        bodyclock::platform::log_warn(
+            "bodyclock_local_set_threads: %s is not an on-device model", id);
+        return 1;
+    }
+    client->setThreads(threads);
+    // Logged rather than returned, because the number that matters is the one
+    // the NEXT "on-device turn:" line was produced with, and the two lines are
+    // read together.
+    bodyclock::platform::log_info("on-device threads: %s -> %d", id, threads);
+    return 0;
+}
+
 //------------------------------------------------------------------------------
 // Chat
 //------------------------------------------------------------------------------
@@ -483,11 +500,22 @@ extern "C" int bodyclock_chat(const char* provider_id,
             const std::string payload = usage_json(cost);
             on_event("usage", payload.c_str(), user_data);
 
+            // threads and the two rates are on this line rather than derived by
+            // whoever reads the log: a sweep is compared across many of these,
+            // and pairing each one with a separate "threads ->" line breaks the
+            // moment another turn interleaves. st.n_threads is what the turn
+            // ACTUALLY ran with, after <= 0 has been resolved to a core count.
             bodyclock::platform::log_info(
-                "on-device turn: %d prompt + %d decoded tokens, ctx %d, "
-                "load %.0fms prefill %.0fms decode %.0fms, %d msgs dropped",
-                st.prompt_tokens, st.decoded_tokens, st.n_ctx,
-                st.load_ms, st.prefill_ms, st.decode_ms, st.dropped_msgs);
+                "on-device turn: %d prompt (%d reused) + %d decoded tokens, ctx %d, "
+                "threads %d, load %.0fms prefill %.0fms (%.1f tok/s) "
+                "decode %.0fms (%.1f tok/s), %d msgs dropped",
+                st.prompt_tokens, st.reused_tokens, st.decoded_tokens, st.n_ctx,
+                st.n_threads, st.load_ms,
+                st.prefill_ms,
+                st.prefill_ms > 0
+                    ? (st.prompt_tokens - st.reused_tokens) * 1000.0 / st.prefill_ms : 0.0,
+                st.decode_ms,  st.decode_ms  > 0 ? st.decoded_tokens * 1000.0 / st.decode_ms : 0.0,
+                st.dropped_msgs);
         }
         return ok ? 0 : 1;
     }

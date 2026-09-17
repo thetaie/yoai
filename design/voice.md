@@ -1298,13 +1298,51 @@ is 2.5× slower on the device, decode only 1.2×. The split is the expected shap
 — prefill is compute-bound and decode is memory-bound — and it says which half
 to attack.
 
-**One number here does not fit**, and it is left standing rather than smoothed
-over. The thinker decodes at 15.9 tok/s against a 1.74 GB weight file, which is
-**27.6 GB/s** of reads — half again the 19.5 GB/s the section above calls a wall
-that a single core already saturates, and that both llama.cpp measurements
-respect. Either that bandwidth figure is a floor rather than a ceiling, or MNN
-does not read the whole file per token. Unexplained, so: do not lean on the
-19.5 as an upper bound without re-deriving it.
+**One number here did not fit**, and chasing it found a wrong sentence
+elsewhere. The thinker decodes at 15.9 tok/s against a 1.74 GB weight file,
+which is **27.6 GB/s** of reads — half again the 19.5 GB/s the section above
+calls a wall that a single core already saturates.
+
+#### The thread sweep, and what it disproves
+
+**Measured** on the device through the `/asr` bench, Qwen3.5-2B `Q4_K_M`
+(1.28 GB) in llama.cpp, two runs per setting, the model resident throughout —
+`bodyclock_local_set_threads` changes the count without dropping the weights,
+so no run pays for a cold page cache:
+
+| threads | 1 | 2 | 4 | 6 | 8 |
+|---|---|---|---|---|---|
+| decode, tok/s | 5.8 | 9.0 | **12.6** | 12.7 | 12.9 |
+| implied reads, GB/s | 7.4 | 11.5 | **16.1** | 16.2 | 16.5 |
+| prefill, tok/s | 22.7 | 29.0 | **48.4** | 46.3 | 50.1 |
+
+**"A single core already saturates it" is false.** One core reaches 7.4 GB/s,
+45% of what the chip gives up at saturation and 38% of the 19.5. It takes four.
+
+**Both phases stop at four**, which is this SoC's performance-core count — one
+big, three mid, four little — so the little cores contribute nothing to either.
+The project's default of six threads was one cluster too many and is now four,
+for the same throughput and two more cores left to the UI.
+
+What survives is the *conclusion* the wrong sentence supported. Four cores do
+reach about 85% of the 19.5, and llama.cpp's own ceiling of 15.2 tok/s for a
+1.28 GB model holds — 12.9 measured is 85% of it. So "another compute unit does
+not move that wall" still stands, for a different reason: not that one core
+fills the bus, but that four already take most of what there is.
+
+#### Which makes 27.6 GB/s a wrong denominator, not a fast engine
+
+llama.cpp cannot exceed ~16.5 GB/s on this chip however it is threaded, so a
+second engine reading 27.6 is not plausible. The likely error is the divisor:
+1.74 GB is the whole **bundle**, and the twenty-four files in it include the
+audio encoder, the Talker, the DiT and the vocoder, none of which are read per
+token of thinker decode. If the thinker's own weights are about 1.05 GB, then
+15.9 tok/s is **16.7 GB/s** — the ceiling measured above, arrived at
+independently.
+
+Not verified: it needs the per-file sizes from the MNN bundle. But the 27.6
+should not be quoted again without that check, and it is no longer evidence
+that the bandwidth figure is wrong.
 
 **The desktop extrapolation was right in direction**, and how far is not
 settled. "On a phone it can only be worse" is how the paragraph above ends, and

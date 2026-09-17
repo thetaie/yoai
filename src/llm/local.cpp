@@ -1,4 +1,4 @@
-#include "llm/local.hpp"
+﻿#include "llm/local.hpp"
 
 #include "platform/log.hpp"
 
@@ -217,11 +217,44 @@ struct LocalClient::Impl {
     // serialize turns so a second caller cannot decode against a half-built context.
     std::mutex turn;
 
+    /**
+     * The context outlives the turn, and `cached` is what its KV holds.
+     *
+     * Turns used to build a context each time, on the reasoning that history is
+     * replayed from `messages` so there is no state worth keeping. That is true
+     * of the CONVERSATION and false of the arithmetic: a prompt's leading tokens
+     * are identical from one turn to the next -- always the system prompt, and
+     * in a conversation the whole of the history before the new message -- and
+     * prefilling them again costs time strictly proportional to how many there
+     * are. Measured on the target device at 47 tok/s of prefill, so a 300-token
+     * system prompt is six seconds per turn, every turn, for a string that did
+     * not change.
+     *
+     * `cached` is the exact token sequence sitting at positions [0, size). A
+     * turn keeps their common prefix, drops the KV from there on, and prefills
+     * only what is new. It must be cleared whenever the KV is disturbed by
+     * anything else, because a `cached` that disagrees with the memory produces
+     * a reply conditioned on text nobody wrote -- fluent, plausible, and wrong.
+     */
+    llama_context*           ctx = nullptr;
+    std::vector<llama_token> cached;
+
     explicit Impl(LocalOptions o) : opt(std::move(o)) { ensure_backend(); }
 
     ~Impl() {
+        if (ctx != nullptr) {
+            llama_free(ctx);
+        }
         if (model != nullptr) {
             llama_model_free(model);
+        }
+    }
+
+    /** Forget the prefix. Cheap, and the correct response to any doubt. */
+    void drop_cache() {
+        cached.clear();
+        if (ctx != nullptr) {
+            llama_memory_seq_rm(llama_get_memory(ctx), 0, 0, -1);
         }
     }
 
@@ -312,9 +345,6 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
         want = trained;                  // never ask for more than it was trained on
     }
 
-    // Fresh context per turn: history is replayed from `messages`, so there is no KV
-    // state worth carrying, and a stale one would silently grow unbounded.
-    //
     // n_batch tracks n_ctx because the prefill below hands the WHOLE prompt to one
     // llama_decode, and the prompt is fitted to `n_ctx - n_reply_reserve`. n_batch is
     // the logical batch -- the most tokens a single decode may take -- and llama.cpp
@@ -323,19 +353,31 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
     // prompt passes 512 tokens takes the app down on a real device. The physical
     // batch (n_ubatch, above) is what actually costs memory; llama.cpp splits the
     // logical batch into n_ubatch chunks itself, so this stays free.
-    llama_context* ctx = nullptr;
-    for (int c = want; c >= 1024; c /= 2) {
-        cp.n_ctx   = static_cast<uint32_t>(c);
-        cp.n_batch = static_cast<uint32_t>(c);
-        ctx = llama_init_from_model(model, cp);
-        if (ctx != nullptr) {
-            break;
-        }
-    }
+    //
+    // Built once and kept. The ladder therefore runs once too, so its failed
+    // allocations are a startup cost rather than a per-turn one, and n_ctx stops
+    // varying between turns -- which it could before, if memory pressure changed,
+    // silently moving the point at which history gets shed.
+    llama_context* ctx = impl_->ctx;
     if (ctx == nullptr) {
-        emit_event(on_event, EventType::Error, "could not create a context for this model");
-        return false;
+        for (int c = want; c >= 1024; c /= 2) {
+            cp.n_ctx   = static_cast<uint32_t>(c);
+            cp.n_batch = static_cast<uint32_t>(c);
+            ctx = llama_init_from_model(model, cp);
+            if (ctx != nullptr) {
+                break;
+            }
+        }
+        if (ctx == nullptr) {
+            emit_event(on_event, EventType::Error, "could not create a context for this model");
+            return false;
+        }
+        impl_->ctx = ctx;
     }
+    // Applied per turn rather than at creation, because setThreads() may have
+    // changed the count since, and a kept context would otherwise ignore it.
+    llama_set_n_threads(ctx, n_threads, n_threads);
+
     const int n_ctx = static_cast<int>(llama_n_ctx(ctx));
     impl_->stats.n_ctx = n_ctx;
 
@@ -367,7 +409,7 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
             messages.begin() + static_cast<std::ptrdiff_t>(drop), messages.end());
         text = build_prompt(model, window, system_prompt, impl_->opt.thinking);
         if (text.empty()) {
-            llama_free(ctx);
+            impl_->drop_cache();
             emit_event(on_event, EventType::Error, "no user message to answer");
             return false;
         }
@@ -375,14 +417,14 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
         n_prompt = -llama_tokenize(vocab, text.c_str(), static_cast<int>(text.size()),
                                    nullptr, 0, /*add_special=*/true, /*parse_special=*/true);
         if (n_prompt <= 0) {
-            llama_free(ctx);
+            impl_->drop_cache();
             emit_event(on_event, EventType::Error, "could not tokenize the prompt");
             return false;
         }
         tokens.resize(static_cast<std::size_t>(n_prompt));
         if (llama_tokenize(vocab, text.c_str(), static_cast<int>(text.size()),
                            tokens.data(), n_prompt, true, true) < 0) {
-            llama_free(ctx);
+            impl_->drop_cache();
             emit_event(on_event, EventType::Error, "could not tokenize the prompt");
             return false;
         }
@@ -393,7 +435,7 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
         if (drop + 1 >= messages.size()) {
             // Nothing left to shed: the current question alone is too long. Trimming
             // it would answer a different question, so refuse instead.
-            llama_free(ctx);
+            impl_->drop_cache();
             emit_event(on_event, EventType::Error,
                        "this message is too long for the model's context window");
             return false;
@@ -419,7 +461,7 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
         ? impl_->opt.n_predict
         : room;
     if (budget <= 0) {
-        llama_free(ctx);
+        impl_->drop_cache();
         emit_event(on_event, EventType::Error,
                    "no room left in the context window for a reply");
         return false;
@@ -505,15 +547,47 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
         llama_sampler_chain_add(smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
     }
 
+    /*
+     * Prefill only what the KV does not already hold.
+     *
+     * `cached` is the token sequence at positions [0, cached.size()). Whatever
+     * the new prompt shares with it from the front is already computed and its
+     * positions are unchanged, so the work is to drop the KV past the point
+     * where they diverge and decode the remainder.
+     *
+     * One token is always left to decode. A decode produces logits for the
+     * tokens it is given, so handing it an empty batch yields nothing to sample
+     * and the turn stalls -- which is the case when a prompt is re-sent
+     * verbatim, exactly the case caching is most likely to hit.
+     *
+     * Positions are not passed: llama_batch_get_one tracks them from the
+     * sequence's current end, which after the removal below is precisely
+     * `reuse`.
+     */
+    std::size_t reuse = 0;
+    const std::size_t max_reuse =
+        std::min(impl_->cached.size(), tokens.size() - 1);
+    while (reuse < max_reuse && impl_->cached[reuse] == tokens[reuse]) {
+        ++reuse;
+    }
+    llama_memory_seq_rm(llama_get_memory(ctx), 0,
+                        static_cast<llama_pos>(reuse), -1);
+
     clk::time_point t0 = clk::now();
-    llama_batch batch = llama_batch_get_one(tokens.data(), static_cast<int>(tokens.size()));
+    llama_batch batch = llama_batch_get_one(tokens.data() + reuse,
+                                            static_cast<int>(tokens.size() - reuse));
     if (llama_decode(ctx, batch) != 0) {
         llama_sampler_free(smpl);
-        llama_free(ctx);
+        impl_->drop_cache();
         emit_event(on_event, EventType::Error, "prefill failed");
         return false;
     }
     impl_->stats.prefill_ms = ms_since(t0);
+    impl_->stats.reused_tokens = static_cast<int>(reuse);
+
+    // The KV now holds the whole prompt. Generated tokens are appended below as
+    // they are decoded, so this stays true for the next turn.
+    impl_->cached = tokens;
 
     // Reasoning markers arrive inline in the raw text and must not reach the host as
     // a literal "<think>" -- route them to Thinking, which the app already renders as
@@ -555,10 +629,14 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
         if (llama_decode(ctx, batch) != 0) {
             impl_->stats.decode_ms = ms_since(t0);
             llama_sampler_free(smpl);
-            llama_free(ctx);
+            impl_->drop_cache();
             emit_event(on_event, EventType::Error, "decode failed mid-stream");
             return false;
         }
+        // It is in the KV now, so it is part of what the next turn can reuse --
+        // and in a conversation it will be, because the host replays the reply
+        // as an assistant message and the template renders it identically.
+        impl_->cached.push_back(tok);
     }
     impl_->stats.decode_ms = ms_since(t0);
 
@@ -572,7 +650,9 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
     }
 
     llama_sampler_free(smpl);
-    llama_free(ctx);
+    // The cache is KEPT here. This is the normal end of a turn, not an error
+    // path -- the KV holds the prompt and the reply, both of which the next
+    // turn may share. Only the sampler was per-turn.
     return !aborted;
 }
 

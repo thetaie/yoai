@@ -131,10 +131,14 @@ int bodyclock_local_available(void);
 //                 ignored, and a value that is not a parseable object is logged
 //                 and ignored rather than failing. Members, all optional:
 //                   "threads"        int   worker threads; <= 0 means all cores.
-//                                          Default 6 -- on a big.LITTLE phone
+//                                          Default 4 -- on a big.LITTLE phone
 //                                          the all-cores default is routinely
 //                                          the slowest, because the batch waits
-//                                          on the little cores.
+//                                          on the little cores. Measured on a
+//                                          Kirin 9020 (1+3+4), both prefill and
+//                                          decode stop improving at four, which
+//                                          is its performance-core count; see
+//                                          llm/local.hpp for the table.
 //                   "contextMax"     int   ceiling for the context window; the
 //                                          turn takes the largest size that both
 //                                          the model supports and the device can
@@ -167,6 +171,24 @@ int bodyclock_local_set(const char* id,
 // is a remote provider, a build without the engine, or a file that will not
 // load. Idempotent: a second call on a loaded model returns 0 immediately.
 int bodyclock_local_load(const char* id);
+
+// Change the worker-thread count of an already-registered on-device model,
+// WITHOUT dropping the loaded weights. <= 0 means all cores.
+//
+// bodyclock_local_set would do this too, but it replaces the registry entry and
+// therefore discards the cached engine -- re-reading a gigabyte or two off
+// storage between one setting and the next, which makes a sweep both slow and
+// unreliable: what is being compared then includes a cold page cache.
+//
+// Takes effect on the NEXT turn. Returns 0, or non-zero if `id` is unknown or
+// is not an on-device model.
+//
+// This exists for a specific measurement. The claim it is there to settle is
+// that decode is bandwidth-bound and one core already saturates the memory
+// controller; if that is right, decode throughput is flat in this number, and
+// if it rises through four or six cores then the wall is per-core rather than
+// per-chip and several conclusions that lean on it have to be re-derived.
+int bodyclock_local_set_threads(const char* id, int threads);
 
 //------------------------------------------------------------------------------
 // Chat
