@@ -138,6 +138,10 @@ struct Index {
       router.pushUrl({ url: 'pages/VoiceDebug' });
       return true;
     }
+    if (text === '/omni') {
+      router.pushUrl({ url: 'pages/OmniDebug' });
+      return true;
+    }
     return false;
   }
 

@@ -44,6 +44,11 @@ The rest of this file is the argument. This is the answer:
 "Second pass" means a function of numbers the arousal pass already produced —
 no extra feature, no extra column in the database.
 
+The two text axes carry a cost this table cannot show: **they are only as good
+as the transcript, and the transcript has been measured getting a sentence's
+polarity backwards.** See "Its transcription is the weak link" below before
+treating either as settled.
+
 ### The text pair costs a sampler setting, and getting it wrong is silent
 
 Valence and dominance come from one turn against whichever chat model is
@@ -568,6 +573,46 @@ including the one where a listener clearly heard grief — that is what the mode
 is able to say, not necessarily what it heard. **Measured**: the `f32` reference
 returns `NEUTRAL` on all four too, so it is not a quantization artifact.
 
+### Its transcription is the weak link, and the text axes eat the errors
+
+**Measured** on the 37.4 s monologue, same 16 kHz file through all three, asked
+for a verbatim transcript:
+
+| | SenseVoice `q8` | Qwen2.5-Omni-3B | Qwen3-Omni-30B |
+|---|---|---|---|
+| 又是易拉宝又是… | 横**福** | 横**幅** | 横**幅** |
+| 我是…高兴又难受 | **极**高兴 | **既**高兴 | **既**高兴 |
+| 生活还算… | **忧郁** | **优越** | **优越** |
+| 我多想告诉… | 告诉**他** | 告诉**她** | 告诉**她** |
+
+Both omni models get all four right. **The third row is not a typo, it is a sign
+flip**: the speaker said his life is *comfortable* (优越) in a sentence listing
+what he is happy about, and the transcript says *melancholy* (忧郁). The sentence
+now argues the opposite of what was said — and that sentence is what the valence
+axis reads.
+
+So the table at the top of this file is too generous. Valence is marked *free,
+the model reads the transcript anyway*. **The transcript is free; its errors are
+not.** A wrong word here does not look like a gap, it looks like a sentiment, and
+it is fed to an axis that has no way to doubt it. This is the same failure shape
+recorded throughout this file, arriving through a component that had been treated
+as settled.
+
+Worth being precise about what this does and does not say:
+
+- **It is one clip.** Four errors is a case, not a rate. Whether this is
+  occasional and tolerable or frequent enough to need a check is unmeasured.
+- **Size is not the explanation.** The 3B gets it right too, and it is a dozen
+  times SenseVoice, not a hundred. "It lost to a much bigger model" is not
+  available as an excuse.
+- **It separates two jobs cleanly, and that supports the design.**
+  Transcription is easy for both omni sizes — 3B and 30B agree here. What
+  separates them is *hearing tone*: on the three tape speeds below, the 30B
+  tracks pitch and pace while the 3B says "moderate pace, low pitch, calm" to
+  all three. Transcription does not need a large model; hearing tone does; and
+  the one that hears tone does not fit on a phone. Which is why tone comes from
+  signal processing — the same conclusion, reached from the transcript side.
+
 Its transcription is what we want it for. Arousal comes from the signal
 processing above.
 
@@ -840,6 +885,22 @@ that wall; measured the same way, the Vulkan GPU came out **3.5× slower** than
 CPU and the NPU's ceiling sat below it. Prefill is the exception, being
 compute-bound.
 
+**Confirmed at two sizes, through this app's own lane**, on the same prompt
+(「您好，请问几点钟了？」, 19 tokens):
+
+| | Size | Decode | Weights read | Of 19.5 GB/s | Load |
+| --- | --- | --- | --- | --- | --- |
+| Qwen3.5-2B `Q4_K_M` | 1.19 GB | 14.0 tok/s | 16.7 GB/s | 85% | 5.9 s |
+| Qwen3.5-4B `Q4_K_M` | 2.55 GB | 6.70 tok/s | 17.1 GB/s | 88% | 14.5 s |
+
+Two points, both landing at 85–88% of the ceiling, and the 4B's rate was
+predicted as ~6.5 before it was run. That is what makes this the settled part:
+doubling the model halves the tokens per second, and no amount of tuning moves
+it, because the wall is how fast the memory can be read.
+
+Prefill came out 41.3 and 16.9 tok/s, but on a 19-token prompt that is mostly
+fixed overhead and should not be quoted.
+
 Audio is expensive to feed in: `mtmd` encodes roughly **25 audio tokens per
 second** of clip (derived from Whisper's 50 Hz frames, pooled by two), so a
 minute of speech is ~1500 tokens of prefill. Scaling to Qwen2.5-Omni-3B —
@@ -855,6 +916,13 @@ text model, of which the recognition half is loaded only while transcribing.
 
 **Measured** here for comparison: Qwen2.5-Omni took 36 s on the 48-second clip
 that SenseVoice handled in 1.5 s. Twenty-four times.
+
+The derived figure now has a real anchor beside it, though not a clean one. On
+the phone, through MNN, 4.8 s of recorded audio came to **194 prompt tokens**,
+and the thinker spent **17.2 s** on them plus sixteen decoded tokens — the log
+does not separate prefill from decode, so this neither confirms nor refutes
+~26 tok/s. What it does settle is the direction: feeding audio to a 3B on this
+hardware is tens of seconds, not seconds.
 
 ### Whether it hears tone at all — and three conclusions withdrawn
 
@@ -937,6 +1005,40 @@ not real emotional prosody; this shows the model is sensitive to acoustics, not
 that it judges tiredness correctly. That needs one person recording one sentence
 in several real states.
 
+**Half the mmproj is the vision tower, and it is dead weight here.** "mmproj" is
+the *multimodal* projector: for an omni model it carries an audio encoder and a
+vision encoder side by side, and `clip_init` loads **every** tower the file
+declares. There is no runtime switch for audio-only — the single skip in that
+function is a hardcoded Gemma-3N special case — so a process that will never be
+handed an image pays for the vision weights anyway.
+
+[strip-mmproj-vision.py](strip-mmproj-vision.py) drops them: the `v.*` tensors
+and the `mm.0.*` / `mm.2.*` projector MLP go, the `a.*` encoder and `mm.a.*` head
+stay, every `clip.vision.*` key goes and `clip.has_vision_encoder` is set false —
+that last flag being the one `clip.cpp` actually reads. It is a metadata rewrite,
+not a requantization: each kept tensor is copied byte for byte at its original
+type, for the reason the `q8`/`f16` section gives at length.
+
+**Measured**, both models, and verified by loading rather than by parsing:
+
+| | before | after | dropped |
+|---|---|---|---|
+| Qwen2.5-Omni-3B `f16` | 2.44 GiB | 1.20 GiB | 1.25 GiB |
+| Qwen3-Omni-30B `bf16` | 2.06 GiB | 1.22 GiB | 0.84 GiB |
+
+On the same clip with greedy decoding, stripped and unstripped give the **same
+answer word for word** — on both models. (Qwen3-Omni names its projectors per
+modality, `clip.audio.projector_type = qwen3a` beside
+`clip.vision.projector_type = qwen3vl_merger`, where 2.5 had one combined
+`qwen2.5o`. The script needs no change for either.)
+
+**It does not make generation faster, and cannot.** The mmproj runs once at
+prefill; every token after that reads the language model's weights. Measured on
+the 3B, alternating runs: 27/31 s unstripped against 30/30 s stripped — inside
+the run-to-run noise. What it buys is load time and resident memory, which turns
+into tok/s only where VRAM was the binding constraint and layers were being left
+on the CPU.
+
 **Practical note for any batch use**: a run is about 40 s, of which roughly 38 s
 is loading 17 GB from disk — audio encoding is **198 ms** and inference is
 seconds. Anything comparing more than a handful of clips wants `llama-server`
@@ -948,6 +1050,392 @@ the background; a long-run divergence between the two says the feature weights
 have drifted. **Measured**: 17 s for a ten-second clip asked for a single word,
 of which 5.6 s is audio encoding and most of the rest is model load, which a
 resident model removes.
+
+Its cost advantage over the 30B is smaller than the sizes suggest, and the
+smaller model is the slower one where it counts. **Measured** on one CPU
+machine, same 8.8 s clip, so the two numbers are comparable in a way the figures
+above are not: audio encoding takes **4465 ms on Qwen2.5-Omni-3B** and **477 ms
+on Qwen3-Omni-30B**. The 3B is cheaper to keep resident, which is the whole
+argument for it here; it is not cheaper per clip.
+
+## The engine question, and why it stopped being one
+
+The first version of this problem was posed as a choice between two engines:
+**modify llama.cpp to support omni speech output, or move to Alibaba's MNN**.
+MNN is a reasonable thing to have asked about — it is Alibaba's own on-device
+runtime, so the Qwen family is first-party there in a way it is not upstream,
+and the gap it would have closed is real. The section below documents that gap
+precisely: there is no Talker checkpoint in GGUF, and llama.cpp's audio
+generation is a TTS stack driven by its own backbone rather than by a chat
+model's hidden states. On end-to-end omni speech out, llama.cpp cannot do it.
+
+**The choice was never made, because the requirement went away.** Once
+recognition and synthesis moved outside the language model — platform TTS for
+output, SenseVoice on ggml for input — nothing was left that llama.cpp lacks.
+There was no capability to switch engines *for*. That is a better outcome than
+picking the right engine, and it is the reason this file spends its length on
+where the axes get their numbers rather than on runtimes.
+
+**If it does come back, this is the shape it takes.** Worked out rather than
+left to be re-derived:
+
+- **Prosody runs on every recording, on every lane.** It is what goes in the
+  store, and the store is longitudinal. A field computed one way on Tuesday and
+  another way on Wednesday is worse than one not computed at all, so the
+  measurement path cannot depend on which engine answered.
+- **SenseVoice runs too**, even with an omni model present. The text axes read a
+  transcript, and a transcript from an omni model is generated rather than
+  decoded: no frame alignment, where CTC hands over 60 ms timestamps that the C
+  ABI already uses to attach words to utterances. And it costs a full audio
+  prefill against one encoder pass.
+- **So the omni lane's genuine addition is exactly one thing: the voice on the
+  way out.** Not a parallel pipeline — an optional output stage.
+
+That makes the engineering small and the product rule obvious: **its absence is
+the normal case, so the interface must never promise it.** It is tied to
+whichever model the engine supports, and it disappears the day the user moves to
+a better thinker.
+
+**What would put it back on the table**, so this is not re-argued from memory:
+
+- Wanting the model's own voice out — a real omni Talker, the speaker's
+  characteristics carried through into the reply — rather than the platform
+  reading text aloud. That is the original motivation, and it is still
+  unavailable upstream.
+- Finding that ggml is a poor fit for some encoder worth having. So far the
+  opposite: SenseVoice took 400 lines against the ggml this repo already ships.
+
+### MNN was built and measured
+
+**The capability is real, and it works.** MNN carries what llama.cpp does not: a
+`Talker` with `setWavformCallback` streaming float PCM, behind a
+`predit → dit → bigvgan` chain. `taobao-mnn/Qwen2.5-Omni-3B-MNN` ships all of it
+— thinker, audio encoder, talker, DiT, vocoder, speaker dictionary — 3.8 GB.
+Built with `MNN_BUILD_LLM_OMNI=ON`, clean.
+
+**Measured**: an 8.8 s clip in, a one-sentence answer about how the speaker
+sounds, and **4.0 s of genuine speech out**, in one call. That is the thing this
+whole engine question was ever about.
+
+**Install the waveform callback AFTER `load()`, or it produces silence.** One
+line, and the whole shape of the call hangs off it:
+
+```cpp
+llm->load();                                 // this is what CREATES the Talker
+llm->setWavformCallback(sink);               // so this has to come after it
+llm->response(prompt, &os, "", 512);         // then one ordinary call
+llm->generateWavform();
+```
+
+`Omni::setWavformCallback` forwards to the Talker and guards with
+`if (mTalker)`. Called first, it is a **silent no-op**: no error, no warning,
+and the Talker's own `doGenerate()` is `mWavformCallback != nullptr`, so it then
+skips collecting hidden states and skips generating. The result is a clean run
+that produces no audio.
+
+The `""` is `end_with`, a terminator MNN appends to the output stream when
+generation stops. It is not a token the model emits. Passing `"<eop>"` puts that
+text at the end of every reply; passing `NULL` gets a newline, because MNN reads
+NULL as "use the default".
+
+**An earlier version of this section prescribed something else**, and it was
+wrong:
+
+```cpp
+llm->response(prompt, &os, "<eop>", 0);   // prefill ONLY
+while (...) { llm->generate(1); }         // step the decode by hand
+```
+
+That was reverse-engineered from MNN's Android app while the callback bug was
+still in place, on the theory that a completed `response()` marks the session
+finished before the Talker can read it. It does not — the Talker collects an
+embed on every forward pass of an ordinary call. The hand-stepping only put MNN
+into a state its own code never produces, and on the device that crashed: the
+Talker's prefill concatenates `mTalkerEmbeds[0]` and `[1]` with no bounds check,
+so one embed short is an out-of-bounds read on a vector of one. MNN's own
+interleaved path guards the same spot with `hasEmbeds()`.
+
+**So: the thinker must produce at least two tokens before the Talker is asked to
+speak**, and the graph must publish `talker_embeds` at all —
+`getOutputIndex("talker_embeds")` says so at load, which is much better than
+finding out after a recording.
+
+**One nice thing** found on the way: where the GGUF mmproj needed a tensor-level
+rewrite to drop the vision tower, MNN reads `is_visual`, `is_audio` and
+`has_talker` as plain booleans out of `llm_config.json`. Skipping the 353 MB
+vision encoder is one edited word.
+
+#### The real defects, and one that is not
+
+**`use_mmap` breaks the thinker on ARM.** **Measured on the device**: with
+`use_mmap: true` the thinker's prefill dies in shape computation, before a token
+exists —
+
+```
+MNNJNI: Compute Shape Error for /Unsqueeze_output_0
+MNNJNI: onForward returned no outputs. seqLen=182, inDecode=0
+```
+
+— and the same build, the same model and the same call sequence answer
+correctly with the flag off. The desktop cannot see it: MNN's mmap path fails
+outright on Windows (`MNNMmapFile failed ... size=1073741824`, repeatedly) and
+falls back, so x86 runs the non-mmap path either way.
+
+Worse than the failure is its **stickiness**: MNN sets `INTERNAL_ERROR` and
+every entry point checks the status first, so every later call returns in
+milliseconds having done nothing. Without a status check of its own the caller
+sees an empty answer rather than a broken engine, forever, until the model is
+loaded again.
+
+**The control** was a desktop program driving the engine exactly as
+`src/voice/omni.cpp` does — an in-memory waveform through `MultimodalPrompt`,
+one `response()` call — rather than MNN's own demo. It answered correctly,
+**263 prompt tokens to 35 generated**, which is what narrowed the difference
+between the two machines down to the overrides this file had added.
+
+**The mechanism is not understood**, and the pairing is odd enough to say so:
+shape computation runs before a kernel is chosen and should not care how weights
+were loaded. What is established is the correlation, from a controlled
+comparison with one variable.
+
+**What the flag was buying, measured**: load took 2.3–3.1 s with it and
+7.9–8.3 s without — so roughly five seconds, once per session. Resident memory
+was not measured, which is the half that mattered for adding it: with mmap on
+the process held 3.5 GB, and nothing says what it holds now.
+
+**Not a defect, and worth having before the next knob is turned: the two config
+knobs are measured.** `precision` and `memory`, all five combinations that load,
+on the desktop at 209 prompt tokens:
+
+| precision | memory | prefill | decode |
+| --- | --- | --- | --- |
+| low | low | 80.7 | **19.8 tok/s** ← the model's `config.json` |
+| normal | low | 81.7 | 20.2 |
+| high | low | 80.8 | 20.6 |
+| low | normal | 58.0 | 5.6 |
+| high | normal | 56.0 | 5.0 ← `config_high.json` |
+
+**`memory` is the whole cost and `precision` is free.** Low memory keeps the
+weights 4-bit and uses the quantized GEMM; normal dequantizes and loses it, for
+a 4× decode penalty and nothing in return. The precision column measures nothing
+on x86, which reports `fp16:0` — all three compute in fp32 there. On the phone
+it would be a real choice, and `precision: high` was tried on the device against
+the shape error above and changed nothing.
+
+**Intermittent segfault in text-in/speech-out.** One crash in two runs on the
+desktop. The audio is written first and the crash comes during teardown, so the
+product is delivered — but a crash is a crash. Not re-tested since the callback
+ordering was fixed.
+
+**Audio over ~30 s segfaults.** **Measured**: 8.8 s and 28 s fine, 31 s, 32 s,
+37 s and 38 s all segfault, within ten seconds — during the audio front end,
+before a token is generated. The *limit* is not the defect: 30 s is the window
+every Whisper-family audio encoder has, llama.cpp included, which is why this
+file already plans `fsmn-vad` chunking. **Segfaulting instead of saying so is
+the defect.**
+
+**Not a defect: the cost.** **Measured**: about 43 s of compute for 14.4 s of
+speech — roughly **3× slower than real time** on a desktop CPU.
+
+**That desktop ratio has not been re-derived with a wall clock**, and it is
+written as "seconds of compute" — which is what `clock()` returns, summed across
+threads. The phone's first figure was inflated five times for exactly that
+reason. If this one carries the same defect it reads **high**, the desktop is
+faster than 3×, and the phone is not "barely worse" but several times worse.
+Every comparison below that leans on 3.0 against 3.7 rests on this.
+
+#### On the phone: 3.7× real time
+
+This is the number the file had been missing, and the one the decision below was
+explicitly waiting on. **Measured** on the target device, Qwen2.5-Omni-3B in
+MNN, four threads, the model's own `config.json`:
+
+| | |
+| --- | --- |
+| Load, from app storage | 7.9 s |
+| Thinker, 194 prompt tokens → 16 generated | 17.2 s |
+| Talker, 10.1 s of speech | 37.5 s — **3.70× real time** |
+| Whole exchange, for 4.8 s of recorded audio | 46.2 s |
+
+**The ratio covers the Talker alone**, which is the half that was ever in
+question — `generateWavform()`, from codec tokens through DiT to the vocoder.
+The thinker is the rest of the exchange and is billed separately above.
+
+A third run, with the thinker broken down and nine blocks of audio instead of
+two — MNN's own counters, read off the public `LlmContext`:
+
+| | |
+| --- | --- |
+| Thinker, 182 prompt tokens → 32 generated | 9.3 s |
+| — audio encoder | 1.57 s |
+| — prefill, 182 tokens | 5.68 s (**32.0 tok/s**) |
+| — decode, 32 tokens | 2.01 s (**15.9 tok/s**) |
+| Talker, 10.34 s of speech | 38.5 s — **3.7×** |
+| First block of PCM, from the start | 14.7 s |
+| Blocks | 9 |
+| Whole exchange | 47.7 s |
+
+**Prefill is 61% of the thinker**, which is the structural claim two sections up
+arriving as a measurement: audio reaches the model as ~25 tokens per second of
+clip, and every one is prefilled. Recognition first is cheaper because it hands
+over a tenth as many tokens, not because the model is smaller.
+
+Thinker time varies more than the token counts explain — 194 tokens took 17.2 s
+against 182 in 9.3 s. The slow one was the first call after a load, so some of
+that gap is cold cache rather than the model.
+
+**The Talker ratio is stable across every run and the block count is not.** Four
+exchanges gave 3.5× to 3.7× with no attempt to control for anything, which is
+what makes it worth deciding on. Blocks were logged on two of them: 2 and 9, for
+replies of 2.26 s and 10.34 s — so MNN's chunking tracks the reply's length
+rather than being a fixed cadence, and the short run's two blocks made streaming
+look more useless than it is. It is the nine-block run that says what streaming
+actually does.
+
+**Against the desktop**, on the same engine and model: `llm_demo` there gets
+80.7 tok/s prefill and 19.8 decode, against 32.0 and 15.9 on the phone. Prefill
+is 2.5× slower on the device, decode only 1.2×. The split is the expected shape
+— prefill is compute-bound and decode is memory-bound — and it says which half
+to attack.
+
+**One number here does not fit**, and it is left standing rather than smoothed
+over. The thinker decodes at 15.9 tok/s against a 1.74 GB weight file, which is
+**27.6 GB/s** of reads — half again the 19.5 GB/s the section above calls a wall
+that a single core already saturates, and that both llama.cpp measurements
+respect. Either that bandwidth figure is a floor rather than a ceiling, or MNN
+does not read the whole file per token. Unexplained, so: do not lean on the
+19.5 as an upper bound without re-deriving it.
+
+**The desktop extrapolation was right in direction**, and how far is not
+settled. "On a phone it can only be worse" is how the paragraph above ends, and
+3.0× became 3.7× — but the 3.0 may be a `clock()` figure, in which case the gap
+is wider than it looks. What the thinker measurements do say cleanly, both taken
+with a wall clock: prefill is 2.5× slower on the device and decode only 1.2×.
+
+If the phone really is close to a desktop CPU, the reason is that it is not
+running the same arithmetic — the device reports `fp16:1` and `i8mm:1`, ARM
+kernels x86 has no equivalent of, and the model's `config.json` asks for the
+precision that uses them.
+
+Either way the decision below is unaffected, because it never turned on the
+desktop comparison. **Ten seconds of spoken reply costs thirty-seven seconds of
+the phone's whole attention**, measured on the phone, and the blocks say the
+person waits through nearly all of it — see the streaming paragraph in the
+decision.
+
+**A caution about how this number is obtained.** The first phone run reported
+**17.0×**, and that figure was wrong by a factor of five. The timings used
+`clock()`, which on POSIX is processor time summed across threads; the engine
+runs four. The error was caught by comparing the printed durations against the
+log's own timestamps — 87.9 s printed, 18.2 s elapsed. Anything multithreaded
+measured with `clock()` reports several seconds per second, and a ratio built on
+it decides the wrong way. The same mistake was in the recognition timings on the
+`/asr` path.
+
+#### What this correction replaced, and why it is kept
+
+An earlier version of this section listed five defects and concluded "not
+adopted". **Four of the five were not defects.** They were one API misuse — a
+callback installed one line too early — plus a config file this project had
+broken itself, plus a standard window limit read as a capability gap. The
+conclusion built on them had no support.
+
+**The correction was itself half wrong, and that is part of the lesson.** It
+named the misuse as driving generation the wrong way, and prescribed the
+hand-stepped decode above. Reading the shipping app did find *a* working call
+shape; it did not find *why* ours was silent, and the difference went unnoticed
+because the recipe appeared to work. The real cause surfaced only later, from
+MNN's source: `setWavformCallback` guards on a Talker that `load()` has not
+created yet.
+
+The mistake is worth more than the measurements. Faced with output that did not
+work, the response was to turn configuration knobs — precision, the `mllm`
+block, sync against async — four rounds of it, and then to promote "I could not
+make it work" into "the engine is defective", in a written decision.
+
+**The first question was never asked: has anyone already got this working?**
+They had. MNN ships an Android app that does audio in and speech out, and ten
+lines of its session code hold the answer. Turning knobs feels like work in a
+way that reading a working caller does not.
+
+This is the same shape this file records three times elsewhere — a measurement
+that cannot distinguish two explanations, read as though it had. "Silence" was
+equally consistent with a broken engine and with a wrong call, no experiment
+separated them, and the reading chosen was the one that allowed the
+investigation to stop.
+
+### Whether to adopt it
+
+**The case for**: it is the only way to get the model's own voice out, and that
+works today. Recognition through it is also plausibly better than SenseVoice's
+— Qwen2.5-Omni-3B fixed four transcription errors including a polarity flip, in
+the table above — though that was measured through llama.cpp and has not been
+reproduced in MNN's own quantization, because the reference clip is longer than
+the 30 s window.
+
+**The case against, and it is about arithmetic, not defects.** Recognition is
+already served by SenseVoice, which is cheap and uniquely gives the 60 ms
+alignment the C ABI already uses. Text is already served by llama.cpp,
+integrated, carrying the GBNF grammar the text axes decode against. Prosody is
+signal processing and needs no engine at all. So a second engine buys exactly
+one thing — the voice on the way out — and charges a second model format, a
+second quantization story, a second tuning surface, and 3.8 GB.
+
+**The 3.8 GB charges something the size figure hides**: it has to reach the
+phone. Twenty-four files whose layout MNN resolves relative to `config.json`,
+which nobody is going to copy by hand, so this repo now carries a bundle format
+and an extractor to make it one file. That is real code, and it exists only
+because of this engine.
+
+**A second engine also means a second set of headers in one binary.** MNN
+vendors rapidjson 1.1.0; this repo already vendored a much newer one. Both are
+header-only templates emitting the same weak symbols into one `.so`, the linker
+keeps one definition, and the newer `MemoryPoolAllocator` holds a `SharedData*`
+where 1.1.0 holds `chunkHead_`. The result was a segfault at 0x10 on MNN's first
+JSON parse. Not a defect in either library — a cost of carrying two.
+
+**And the one thing it buys costs 3.7× real time on the phone.** Measured, in
+the table above: ten seconds of spoken reply for thirty-seven seconds of the
+device's whole attention. That is the number to argue with, and it is not an
+implementation detail that improves with familiarity.
+
+**So: not yet — and now on a measurement rather than an extrapolation.** The
+engine works on the device, end to end, audio in and the model's own voice out.
+What the phone figure says is that a spoken reply cannot be waited for. Below
+about 1× it would be a feature; at 3.7× it is a demo.
+
+**What would change the answer**: Talker throughput near real time, and nothing
+else. The capability is proven and the remaining crashes are ours or fixable, so
+the ratio is the whole question — and the obvious way around it does not work.
+
+**Streaming is not the rescue, and that is arithmetic rather than an
+implementation detail.** The Talker hands PCM over in blocks, so a reply could
+in principle start playing before it is finished. **Measured**, on the run with
+nine blocks: 10.34 s of speech, 38.5 s of Talker, first block at **14.7 s** from
+the start of the exchange against 47.7 s for the whole exchange.
+
+Bringing the first word forward by thirty-three seconds sounds like the answer,
+and it is not, because of what arrives after it. Nine blocks over 38.5 s is a
+block every **4.3 s** carrying **1.15 s** of audio. Playback consumes a second
+per second, so it drains each block in 1.15 s and then waits 3.2 s for the next:
+**27% speech, 73% silence**. That is not a reply being spoken, it is a reply
+being spelled out.
+
+The duty cycle *is* the ratio — 1 ÷ 3.7 — and that is the general form. **Above
+1× the listener always outruns the generator**, so streaming can only ever move
+the first word earlier; it can never close the gaps. Below 1× it would close
+them for free.
+
+So chunking, `n_window`, and MNN's interleaved mode are all the same idea and
+all bounded by the same number. They are worth building **after** the ratio goes
+below 1, not instead of getting it there. What is left that could move it: the
+NPU backend, a smaller Talker, or accepting that the platform reads text aloud.
+
+**What was NOT established**, so it is not quietly assumed later: whether MNN's
+quantization transcribes as well as the GGUF build does. The reference clip is
+the one that crashes. The finding that Qwen2.5-Omni-3B beats SenseVoice on four
+errors including a polarity flip stands — but it was measured through
+llama.cpp, and it does not transfer to another runtime for free.
 
 ## What llama.cpp can do now
 

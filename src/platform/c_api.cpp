@@ -16,11 +16,13 @@
 #include "llm/local.hpp"
 #include "llm/openai_chat.hpp"
 #include "llm/types.hpp"
+#include "platform/bundle.hpp"
 #include "platform/log.hpp"
+#include "voice/omni.hpp"
 #include "voice/prosody.hpp"
 #include "voice/sensevoice.hpp"
 
-#include <ctime>
+#include <chrono>
 
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -41,6 +43,18 @@ using bodyclock::llm::LocalClient;
 using bodyclock::llm::LocalOptions;
 using bodyclock::llm::LocalStats;
 using bodyclock::llm::OpenAIChatOptions;
+
+// Wall clock, not clock(). These figures are reported to a person as "how long
+// it took", and clock() answers a different question: on POSIX it is processor
+// time summed across threads, so anything multithreaded reports several seconds
+// per second. Measured on a phone, an engine on four threads printed 87.9 s for
+// 18.2 s of work. The recognizer takes a thread count too, so the same applies
+// to everything timed below.
+typedef std::chrono::steady_clock wall_clk;
+
+double wall_seconds_since(wall_clk::time_point started) {
+    return std::chrono::duration<double>(wall_clk::now() - started).count();
+}
 
 //------------------------------------------------------------------------------
 // Registry
@@ -523,6 +537,65 @@ std::string& voice_buffer() {
     return buf;
 }
 
+// Sentence- and clause-ending marks, in the vocabulary's own spelling. Listed
+// rather than derived from a Unicode category because the transcript is this
+// model's output, not arbitrary text: this is the set it actually emits.
+//
+// Spelled as escapes rather than as the characters themselves. The file is
+// UTF-8 and the build passes /utf-8, so either would work -- but these bytes
+// have already been double-encoded once on the way into this file, and a
+// mis-encoded literal here does not fail loudly: it matches nothing, and the
+// clause cut silently falls back to pauses.
+const char* const kClauseMarks[] = {
+    "\xef\xbc\x8c",   // FULLWIDTH COMMA
+    "\xe3\x80\x82",   // IDEOGRAPHIC FULL STOP
+    "\xef\xbc\x81",   // FULLWIDTH EXCLAMATION MARK
+    "\xef\xbc\x9f",   // FULLWIDTH QUESTION MARK
+    "\xef\xbc\x9b",   // FULLWIDTH SEMICOLON
+    "\xef\xbc\x9a",   // FULLWIDTH COLON
+    "\xe3\x80\x81",   // IDEOGRAPHIC COMMA
+    ",", ".", "!", "?", ";", ":",
+    0
+};
+
+bool is_clause_mark(const std::string& piece) {
+    for (int i = 0; kClauseMarks[i]; ++i) {
+        if (piece == kClauseMarks[i]) return true;
+    }
+    return false;
+}
+
+// Clause boundaries from the transcript's own timestamps.
+//
+// This is what makes the analysis work on a note somebody will actually record.
+// Cutting at pauses yields about one unit per three seconds, so a ten-second
+// note gives three or four -- below the floor where a deviation means anything.
+// **Measured** on the reference monologue in ten-second windows: 4, 3, 4 and 3
+// by pause, against 4, 9, 7 and 5 by punctuation. People run straight through
+// clause boundaries they nonetheless mark when the words are written down.
+//
+// Raw, one segment per mark. analyze_segments merges them up to
+// min_supplied_utterance, which is where the short-unit pitch errors live.
+std::vector<std::pair<float, float> > clause_segments(
+    const bodyclock::voice::Transcript& transcript, float audio_seconds) {
+    std::vector<std::pair<float, float> > segs;
+    float start = 0.0f;
+    for (size_t i = 0; i < transcript.tokens.size(); ++i) {
+        const bodyclock::voice::Token& t = transcript.tokens[i];
+        if (t.frame < 0 || t.dropped) {
+            continue;   // a query token, or one the stray-capital filter removed
+        }
+        if (is_clause_mark(t.piece) && t.start > start) {
+            segs.push_back(std::make_pair(start, t.start));
+            start = t.start;
+        }
+    }
+    if (audio_seconds > start) {
+        segs.push_back(std::make_pair(start, audio_seconds));
+    }
+    return segs;
+}
+
 // The marker SentencePiece puts at the start of a word, and the space it means.
 void append_piece(std::string* text, const std::string& piece) {
     const char* kWordStart = "\xe2\x96\x81";
@@ -598,17 +671,36 @@ extern "C" const char* bodyclock_voice_analyze(const short* pcm,
     bool   have_transcript    = false;
     double transcribe_seconds = 0.0;
     if (voice_loaded()) {
-        const clock_t started = clock();
+        const wall_clk::time_point started = wall_clk::now();
         have_transcript = recognizer().transcribe(&samples[0], samples.size(), &transcript);
-        transcribe_seconds = static_cast<double>(clock() - started) / CLOCKS_PER_SEC;
+        transcribe_seconds = wall_seconds_since(started);
     }
 
+    // Cut at the transcript's clauses when there is a transcript, at pauses when
+    // there is not. Which one ran is reported: the two are different coordinate
+    // systems, and a number from one is not comparable with a number from the
+    // other.
+    const float audio_seconds = static_cast<float>(n_samples) / sample_rate;
     bodyclock::voice::Recording recording;
-    const clock_t prosody_started = clock();
-    const bool have_prosody = bodyclock::voice::analyze(
-        &samples[0], samples.size(), sample_rate, bodyclock::voice::ProsodyOptions(), &recording);
-    const double prosody_seconds =
-        static_cast<double>(clock() - prosody_started) / CLOCKS_PER_SEC;
+    const char* cut = "pause";
+    const wall_clk::time_point prosody_started = wall_clk::now();
+    bool have_prosody = false;
+    if (have_transcript) {
+        const std::vector<std::pair<float, float> > segs =
+            clause_segments(transcript, audio_seconds);
+        if (segs.size() > 1) {
+            cut = "clause";
+            have_prosody = bodyclock::voice::analyze_segments(
+                &samples[0], samples.size(), sample_rate, segs,
+                bodyclock::voice::ProsodyOptions(), &recording);
+        }
+    }
+    if (!have_prosody) {
+        have_prosody = bodyclock::voice::analyze(
+            &samples[0], samples.size(), sample_rate,
+            bodyclock::voice::ProsodyOptions(), &recording);
+    }
+    const double prosody_seconds = wall_seconds_since(prosody_started);
 
     rapidjson::StringBuffer buf;
     rapidjson::Writer<rapidjson::StringBuffer> w(buf);
@@ -653,10 +745,11 @@ extern "C" const char* bodyclock_voice_analyze(const short* pcm,
         w.Key("prosody");
         w.StartObject();
         w.Key("seconds"); w.Double(prosody_seconds);
+        w.Key("cut");     w.String(cut);
         // Below this the deviations are noise rather than signal. Reported as a
         // flag so the decision is the host's and is visible, instead of the core
         // silently returning numbers that should not be shown.
-        w.Key("enough");  w.Bool(recording.utterances.size() >= 5);
+        w.Key("enough");  w.Bool(recording.utterances.size() >= 3);
         w.Key("baseline");
         w.StartObject();
         w.Key("f0Mean");     w.Double(recording.baseline.f0_mean);
@@ -718,4 +811,208 @@ extern "C" const char* bodyclock_voice_analyze(const short* pcm,
 
     voice_buffer().assign(buf.GetString(), buf.GetSize());
     return voice_buffer().c_str();
+}
+
+//------------------------------------------------------------------------------
+// Omni (MNN)
+//------------------------------------------------------------------------------
+
+namespace {
+
+// One engine for the process, guarded, for the same two reasons the recognizer
+// is: the weights are gigabytes, and one instance owns compute buffers that a
+// call writes through.
+std::mutex& omni_mutex() {
+    static std::mutex m;
+    return m;
+}
+
+bodyclock::voice::Omni& omni() {
+    static bodyclock::voice::Omni engine;
+    return engine;
+}
+
+std::string& omni_buffer() {
+    static thread_local std::string buf;
+    return buf;
+}
+
+// Carries the host's C callback across the C++ sink signature. A struct rather
+// than two globals because a sink is per-call and the engine is not.
+struct OmniSinkBridge {
+    bodyclock_omni_audio_handler handler;
+    void*                   user_data;
+};
+
+bool omni_sink(const float* pcm, size_t n_samples, bool last, void* user_data) {
+    OmniSinkBridge* bridge = static_cast<OmniSinkBridge*>(user_data);
+    if (!bridge || !bridge->handler) {
+        return true;
+    }
+    return bridge->handler(pcm, static_cast<int>(n_samples), last ? 1 : 0,
+                           bridge->user_data) != 0;
+}
+
+}  // namespace
+
+extern "C" int bodyclock_omni_available(void) {
+    return bodyclock::voice::Omni::available() ? 1 : 0;
+}
+
+extern "C" int bodyclock_omni_load(const char* model_dir) {
+    if (blank(model_dir)) {
+        bodyclock::platform::log_warn("bodyclock_omni_load: model_dir is required");
+        return 1;
+    }
+    std::lock_guard<std::mutex> guard(omni_mutex());
+    return omni().load(model_dir) ? 0 : 1;
+}
+
+extern "C" int bodyclock_omni_loaded(void) {
+    std::lock_guard<std::mutex> guard(omni_mutex());
+    return omni().loaded() ? 1 : 0;
+}
+
+extern "C" void bodyclock_omni_unload(void) {
+    // Nothing to release explicitly: the engine drops its weights when another
+    // load replaces them or the process ends. Kept for symmetry with the other
+    // lanes, and so a host has one place to say "I am done with this".
+    bodyclock::platform::log_info("bodyclock_omni_unload: weights stay until replaced");
+}
+
+extern "C" const char* bodyclock_omni_ask(const short* pcm,
+                                     int n_samples,
+                                     const char* prompt,
+                                     bodyclock_omni_audio_handler on_audio,
+                                     void* user_data) {
+    if (pcm == nullptr || n_samples <= 0 || blank(prompt)) {
+        bodyclock::platform::log_warn("bodyclock_omni_ask: pcm, n_samples and prompt are required");
+        return nullptr;
+    }
+
+    std::vector<float> samples(static_cast<size_t>(n_samples));
+    for (int i = 0; i < n_samples; ++i) {
+        samples[i] = pcm[i] / 32768.0f;
+    }
+
+    std::lock_guard<std::mutex> guard(omni_mutex());
+
+    OmniSinkBridge bridge;
+    bridge.handler   = on_audio;
+    bridge.user_data = user_data;
+
+    bodyclock::voice::OmniReply reply;
+    const bool ok = omni().ask(&samples[0], samples.size(), prompt,
+                               on_audio ? omni_sink : 0,
+                               on_audio ? &bridge : 0, &reply);
+    if (!ok) {
+        return nullptr;
+    }
+
+    rapidjson::StringBuffer buf;
+    rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+    w.StartObject();
+    w.Key("text");
+    w.String(reply.text.data(), static_cast<rapidjson::SizeType>(reply.text.size()));
+    w.Key("audioSeconds");  w.Double(static_cast<double>(n_samples) / 16000.0);
+    w.Key("seconds");       w.Double(reply.seconds);
+    w.Key("thinkerSeconds"); w.Double(reply.thinker_seconds);
+    w.Key("speechSeconds"); w.Double(reply.speech_seconds);
+    w.Key("speechElapsed"); w.Double(reply.speech_elapsed);
+    // What a person actually waits before hearing anything, and how many blocks
+    // it arrived in. speechRealtime below is the cost of the WHOLE reply; these
+    // two say whether that cost is ever experienced.
+    w.Key("firstAudioSeconds"); w.Double(reply.first_audio_seconds);
+    w.Key("audioBlocks");       w.Int(reply.audio_blocks);
+    // The ratio the whole lane turns on: how many seconds of computation buy one
+    // second of speech. Above 1 the model cannot talk in real time.
+    w.Key("speechRealtime");
+    w.Double(reply.speech_seconds > 0.0f ? reply.speech_elapsed / reply.speech_seconds : 0.0);
+    w.EndObject();
+
+    omni_buffer().assign(buf.GetString(), buf.GetSize());
+    return omni_buffer().c_str();
+}
+
+//------------------------------------------------------------------------------
+// Model bundles
+//------------------------------------------------------------------------------
+
+namespace {
+
+std::string& bundle_buffer() {
+    static thread_local std::string buf;
+    return buf;
+}
+
+// Carries the host's C callback across the C++ progress signature.
+struct BundleProgressBridge {
+    bodyclock_bundle_progress handler;
+    void*                user_data;
+};
+
+bool bundle_progress_bridge(const char* name, unsigned long long done,
+                            unsigned long long total, void* user_data) {
+    BundleProgressBridge* b = static_cast<BundleProgressBridge*>(user_data);
+    if (!b || !b->handler) {
+        return true;
+    }
+    const double fraction = total ? static_cast<double>(done) / static_cast<double>(total) : 0.0;
+    return b->handler(name, fraction, b->user_data) != 0;
+}
+
+}  // namespace
+
+extern "C" const char* bodyclock_bundle_list(const char* bundle_path) {
+    if (blank(bundle_path)) {
+        bodyclock::platform::log_warn("bodyclock_bundle_list: bundle_path is required");
+        return nullptr;
+    }
+
+    std::vector<bodyclock::platform::BundleEntry> entries;
+    unsigned long long total = 0;
+    if (!bodyclock::platform::bundle_list(bundle_path, &entries, &total)) {
+        return nullptr;
+    }
+
+    rapidjson::StringBuffer buf;
+    rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+    w.StartObject();
+    w.Key("totalBytes"); w.Uint64(total);
+    w.Key("files");
+    w.StartArray();
+    for (size_t i = 0; i < entries.size(); ++i) {
+        w.StartObject();
+        w.Key("name");
+        w.String(entries[i].name.data(),
+                 static_cast<rapidjson::SizeType>(entries[i].name.size()));
+        w.Key("bytes"); w.Uint64(entries[i].size);
+        w.EndObject();
+    }
+    w.EndArray();
+    w.EndObject();
+
+    bundle_buffer().assign(buf.GetString(), buf.GetSize());
+    return bundle_buffer().c_str();
+}
+
+extern "C" int bodyclock_bundle_extract(const char* bundle_path,
+                                   const char* dest_dir,
+                                   bodyclock_bundle_progress on_progress,
+                                   void* user_data) {
+    if (blank(bundle_path) || blank(dest_dir)) {
+        bodyclock::platform::log_warn(
+            "bodyclock_bundle_extract: bundle_path and dest_dir are both required");
+        return 1;
+    }
+
+    BundleProgressBridge bridge;
+    bridge.handler   = on_progress;
+    bridge.user_data = user_data;
+
+    const bool ok = bodyclock::platform::bundle_extract(
+        bundle_path, dest_dir,
+        on_progress ? bundle_progress_bridge : 0,
+        on_progress ? &bridge : 0);
+    return ok ? 0 : 1;
 }

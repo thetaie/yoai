@@ -29,6 +29,7 @@
 #pragma once
 
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 namespace bodyclock {
@@ -53,6 +54,21 @@ struct ProsodyOptions {
     // frames for a pitch distribution to mean anything. A one-word segment has a
     // pitch, not a range.
     float min_utterance = 0.80f;
+
+    // The same floor for analyze_segments(), and deliberately much higher.
+    //
+    // 0.8 s is what the pause cut validated at, and it is not enough for a
+    // supplied cut. **Measured**: punctuation clauses of 0.8-1.2 s made the
+    // autocorrelation report 216 Hz against a speaker baseline of 123 -- an
+    // octave error -- which pushed the recording's own standard deviation from
+    // 11 Hz to 28 and then became its own maximum. One bad unit does not just
+    // add noise: it inflates the yardstick every other utterance is measured
+    // against.
+    //
+    // At 2.0 s the error disappears, the baseline returns to 12.1 Hz, and the
+    // arousal maximum lands where the pause cut put it. Raise this before
+    // lowering it.
+    float min_supplied_utterance = 2.00f;
 
     // Pitch search range, and the normalized autocorrelation peak below which a
     // frame is called unvoiced. 0.3 keeps breathy voiced frames while dropping
@@ -102,13 +118,44 @@ struct Recording {
 // recording's own spread, so [-1, 1] floats and raw int16 values give the same
 // answers.
 //
-// Returns false when the audio is too short to frame. **Succeeding with fewer
-// than a handful of utterances is not the same as succeeding**: z-scores over
-// three units are noise. The caller should check `utterances.size()` and decline
-// rather than report a confident number -- roughly five is the floor, which at
-// conversational rates is fifteen to twenty seconds of speech.
+// Returns false when the audio is too short to frame. **Succeeding with very
+// few utterances is not the same as succeeding**: the caller should check
+// `utterances.size()` and decline rather than report a confident number. Three
+// is the floor -- two units have no distribution between them -- and at
+// conversational rates the pause cut reaches three in about ten seconds. For a
+// note that short, cut at the transcript's clauses instead: see
+// analyze_segments().
 bool analyze(const float* pcm, size_t n_samples, int sample_rate,
              const ProsodyOptions& options, Recording* out);
+
+// The same measurements, over boundaries the caller supplies instead of the
+// pauses this file would find.
+//
+// The reason this exists is a constraint the pause cut cannot meet. Splitting on
+// silence yields about one unit per three seconds, so a **ten-second note gives
+// three or four** -- below the floor where a deviation means anything, and ten
+// seconds is what people will actually record. **Measured** on the reference
+// monologue, cut into ten-second windows: 4, 3, 4 and 3 units. Every one of them
+// declines.
+//
+// The transcript cuts finer. Punctuation marks clause boundaries that a speaker
+// runs straight through, and on the same four windows it gives 4, 9, 7 and 5 --
+// three of the four clear the floor. That is the whole motivation: same
+// arithmetic, more units, no cross-recording baseline needed.
+//
+// `segments` are [start, end) in seconds, in order. Each becomes one utterance;
+// a segment shorter than one analysis frame is skipped. Overlap is the caller's
+// business -- nothing here checks for it, because a caller combining pause and
+// punctuation boundaries may legitimately want to.
+//
+// **This changes the unit, and the unit is load-bearing.** The validated result
+// -- the arousal minimum landing on the sentence where the speaker turns to his
+// mother -- was measured over PAUSE boundaries. A punctuation cut is a different
+// coordinate system and inherits nothing automatically. Treat anything it
+// produces as unvalidated until it has its own version of that table.
+bool analyze_segments(const float* pcm, size_t n_samples, int sample_rate,
+                      const std::vector<std::pair<float, float> >& segments,
+                      const ProsodyOptions& options, Recording* out);
 
 // How far one utterance sits from the recording's own middle, per feature, in
 // standard deviations. Derived, never stored.
@@ -118,6 +165,19 @@ struct Deviation {
     float continuity = 0.0f;
 };
 
+// Computed LEAVE-ONE-OUT: the utterance is compared against the distribution of
+// the OTHERS, not against one it is itself part of.
+//
+// This is not a refinement, it is a correction, and it matters most exactly
+// where the data is thinnest. An utterance included in its own baseline drags
+// the mean toward itself by 1/n, so its deviation comes out systematically
+// small -- by a factor of (n-1)/n. At eleven units that is a 9% understatement
+// and invisible; at three it is 33%, which is the difference between a turn
+// showing up and not.
+//
+// Reported `Baseline` stays whole-recording, because that is the number a person
+// would check against: "your pitch averaged 123 Hz over eleven phrases" is a
+// fact about the recording, not about a leave-one-out fold.
 Deviation deviation(const Recording& recording, size_t index);
 
 // Pitch carries most of it. Loudness is the least trustworthy of the three and

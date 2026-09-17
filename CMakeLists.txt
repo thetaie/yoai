@@ -175,6 +175,7 @@ add_library(bodyclock_core STATIC
     src/llm/local.cpp
     src/llm/openai_chat.cpp
     src/llm/sse_parser.cpp
+    src/platform/bundle.cpp
     src/platform/c_api.cpp
     src/platform/log.cpp
     src/store/timeline.cpp
@@ -186,6 +187,9 @@ add_library(bodyclock_core STATIC
     src/voice/fbank.cpp
     src/voice/prosody.cpp
     src/voice/sensevoice.cpp
+    # A SECOND engine, for the one thing ggml cannot do here: speak in the
+    # model's own voice. Stubs out without BODYCLOCK_MNN.
+    src/voice/omni.cpp
 )
 
 target_include_directories(bodyclock_core PUBLIC src)
@@ -364,6 +368,79 @@ if(BODYCLOCK_ASR)
 endif()
 
 #-------------------------------------------------------------------------------
+# Omni speech output (MNN)
+#-------------------------------------------------------------------------------
+
+# A second inference engine, and the only reason to carry one: MNN has the omni
+# Talker -- thinker to codec tokens to a diffusion transformer to a vocoder --
+# and llama.cpp has no Talker checkpoint in GGUF at all. Everything else this
+# engine could do is already done by something smaller here, so src/voice/omni.*
+# is deliberately narrow: no transcription, no scoring.
+#
+# OFF by default, and more firmly than the other lanes. It is a second model
+# format, a second quantization story and 3.8 GB of weights, bought for one
+# capability whose cost has not been measured on a phone -- about 3x slower than
+# real time on a desktop CPU. See design/voice.md before turning it on.
+#
+# MNN_DIR points at an SDK dir shaped like the llama one: include/ + lib/.
+# harmony/build.cmd mnn assembles it at harmony/prebuilt/mnn-sdk/<abi>.
+option(BODYCLOCK_MNN "Build omni speech output (MNN + Qwen2.5-Omni)" OFF)
+
+if(BODYCLOCK_MNN)
+    if(NOT DEFINED MNN_DIR)
+        message(FATAL_ERROR
+            "BODYCLOCK_MNN=ON requires -DMNN_DIR=<MNN SDK dir (include/, lib/)>")
+    endif()
+    if(NOT EXISTS "${MNN_DIR}/include/llm/llm.hpp")
+        message(FATAL_ERROR "llm/llm.hpp not found under ${MNN_DIR}/include.")
+    endif()
+    # Not optional, and not a convenience. See the include-order note below.
+    if(NOT EXISTS "${MNN_DIR}/include/rapidjson/document.h")
+        message(FATAL_ERROR
+            "no rapidjson under ${MNN_DIR}/include. The MNN SDK must ship the "
+            "rapidjson libMNN was compiled with -- two versions in one .so "
+            "crash on the first JSON parse. Re-run harmony/build.cmd mnn.")
+    endif()
+
+    unset(MNN_LIB CACHE)
+    find_library(MNN_LIB NAMES MNN
+        PATHS "${MNN_DIR}/lib" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+    if(NOT MNN_LIB)
+        message(FATAL_ERROR "no MNN library under ${MNN_DIR}/lib.")
+    endif()
+
+    # ONE archive by design: built with MNN_SEP_BUILD=OFF, the llm engine is an
+    # OBJECT library folded into libMNN, so there is no libllm to find. Looking
+    # for one reports a good build as a failure.
+    target_compile_definitions(bodyclock_core PRIVATE BODYCLOCK_MNN)
+
+    # BEFORE, and that word is the whole fix for a crash that looked like a
+    # memory problem for a day.
+    #
+    # rapidjson is header-only templates: its member functions are emitted as
+    # weak symbols into every object that includes it, and the linker keeps ONE
+    # definition of each across the .so. src/llm and src/platform include the
+    # rapidjson this repo already vendors (a recent master); libMNN.a was
+    # compiled against the 1.1.0 release MNN keeps in 3rd_party. Same mangled
+    # names, different struct layouts -- the newer MemoryPoolAllocator holds a
+    # SharedData* where 1.1.0 holds chunkHead_ -- so one copy wins the link and
+    # then runs against the other's objects.
+    #
+    # Measured: SIGSEGV(SEGV_MAPERR)@0x10 in MemoryPoolAllocator::Malloc, from
+    # LlmConfig's first parse inside Llm::createLLM, with no MNN diagnostic
+    # ahead of it because MNN had not reached any code of its own yet.
+    #
+    # So this directory goes ahead of the vendored one and OUR two JSON files
+    # compile against MNN's copy as well. They are the only rapidjson users in
+    # the library; if that changes, the new one has to be in this target too,
+    # or the same crash comes back somewhere else.
+    target_include_directories(bodyclock_core BEFORE PRIVATE "${MNN_DIR}/include")
+    target_link_libraries(bodyclock_core PUBLIC "${MNN_LIB}")
+
+    message(STATUS "bodyclock_core: omni speech output ON -> ${MNN_LIB}")
+endif()
+
+#-------------------------------------------------------------------------------
 # cli -- a desktop harness for the core
 #-------------------------------------------------------------------------------
 
@@ -398,4 +475,10 @@ if(BODYCLOCK_BUILD_CLI)
     # the result design/voice.md records.
     add_executable(bodyclock-prosody-test tests/prosody_test.cpp)
     target_link_libraries(bodyclock-prosody-test PRIVATE bodyclock_core)
+
+    # One file in, a directory out. Checked against design/pack-mnn-model.py:
+    # a truncated weight file is the one failure MNN would answer through
+    # rather than report.
+    add_executable(bodyclock-bundle-test tests/bundle_test.cpp)
+    target_link_libraries(bodyclock-bundle-test PRIVATE bodyclock_core)
 endif()

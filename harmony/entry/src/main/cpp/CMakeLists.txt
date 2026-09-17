@@ -94,6 +94,24 @@ else()
     set(BODYCLOCK_ASR OFF CACHE BOOL "" FORCE)
 endif()
 
+# The omni lane, and it is opt-in twice over: the SDK has to exist AND the
+# capability has to be wanted. Unlike llama, whose presence is the switch, this
+# one stays off unless harmony/build.cmd mnn has been run -- it is 3.8 GB of
+# weights and a second quantization story bought for one capability whose cost
+# has not been measured on a phone. See design/voice.md.
+if(NOT DEFINED MNN_DIR)
+    set(_mnn_sdk "${BODYCLOCK_PREBUILT_ROOT}/mnn-sdk/${OHOS_ARCH}")
+    if(EXISTS "${_mnn_sdk}/include/llm/llm.hpp")
+        set(MNN_DIR "${_mnn_sdk}")
+    endif()
+endif()
+if(DEFINED MNN_DIR)
+    set(BODYCLOCK_MNN ON CACHE BOOL "" FORCE)
+    message(STATUS "bodyclock_napi: omni speech output from ${MNN_DIR}")
+else()
+    set(BODYCLOCK_MNN OFF CACHE BOOL "" FORCE)
+endif()
+
 add_subdirectory("${BODYCLOCK_REPO_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/bodyclock-core")
 
 # The target is bodyclock_napi but the artifact must be libbodyclock.so: it has to match

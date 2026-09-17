@@ -26,6 +26,11 @@
 
 #include "wav.hpp"
 
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
+#include <string>
+
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -39,9 +44,16 @@ using bodyclock::voice::Utterance;
 
 namespace {
 
-// Five is the floor, and it is a real one: a z-score over three units is noise.
-// Below it the honest output is nothing rather than a weak number.
-const size_t kMinUtterances = 5;
+// Three, lowered from five once the deviations were corrected to leave-one-out.
+//
+// Five was the right floor while an utterance sat inside its own baseline: at
+// n=3 it contributed a third of the mean it was measured against, so a real turn
+// came out a third too small. Excluding it restores the factor, which is what
+// makes three usable rather than merely permitted.
+//
+// It is still a floor, and it is still enforced: two units have no distribution
+// between them, and the honest output there is nothing rather than a weak number.
+const size_t kMinUtterances = 3;
 
 void print_recording(const Recording& r, double elapsed) {
     std::printf("      baseline F0 %.1f Hz (sd %.1f), %zu utterances over %.1f s, "
@@ -91,6 +103,28 @@ void print_recording(const Recording& r, double elapsed) {
 
 }  // namespace
 
+// Boundaries read from a file, one "start end" pair of seconds per line.
+//
+// The point of the file is that the boundaries come from somewhere this harness
+// cannot produce: the transcript. SenseVoice's CTC gives every token the encoder
+// frame that emitted it -- 60 ms -- so punctuation marks clause boundaries with
+// timestamps, and clauses are finer than pauses. A ten-second note yields three
+// or four pause-delimited units, below the floor where a deviation means
+// anything; the same seconds cut at punctuation yield more.
+std::vector<std::pair<float, float> > read_segments(const char* path) {
+    std::vector<std::pair<float, float> > segs;
+    std::ifstream in(path);
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream ls(line);
+        float a = 0.0f, b = 0.0f;
+        if (ls >> a >> b && b > a) {
+            segs.push_back(std::make_pair(a, b));
+        }
+    }
+    return segs;
+}
+
 // How many utterances survive at one setting, and how long the longest is.
 //
 // The second number is the one that matters. A cut that yields five units by
@@ -136,15 +170,23 @@ void sweep(const std::vector<float>& pcm) {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::printf("usage: %s [--sweep] <audio.wav> [more.wav ...]\n", argv[0]);
+        std::printf("usage: %s [--sweep] [--segments <file>] <audio.wav> [...]\n", argv[0]);
         return 2;
     }
 
-    bool do_sweep = false;
-    int  first    = 1;
-    if (std::strcmp(argv[1], "--sweep") == 0) {
-        do_sweep = true;
-        first    = 2;
+    bool        do_sweep = false;
+    const char* seg_file = 0;
+    int         first    = 1;
+    while (first < argc) {
+        if (std::strcmp(argv[first], "--sweep") == 0) {
+            do_sweep = true;
+            ++first;
+        } else if (std::strcmp(argv[first], "--segments") == 0 && first + 1 < argc) {
+            seg_file = argv[first + 1];
+            first += 2;
+        } else {
+            break;
+        }
     }
 
     int failures = 0;
@@ -169,8 +211,15 @@ int main(int argc, char** argv) {
 
         Recording r;
         const std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
-        const bool ok = bodyclock::voice::analyze(&pcm[0], pcm.size(), 16000,
-                                                  ProsodyOptions(), &r);
+        bool ok = false;
+        if (seg_file) {
+            std::vector<std::pair<float, float> > segs = read_segments(seg_file);
+            std::printf("      (%d boundaries supplied)\n", static_cast<int>(segs.size()));
+            ok = bodyclock::voice::analyze_segments(&pcm[0], pcm.size(), 16000, segs,
+                                                    ProsodyOptions(), &r);
+        } else {
+            ok = bodyclock::voice::analyze(&pcm[0], pcm.size(), 16000, ProsodyOptions(), &r);
+        }
         const double elapsed =
             std::chrono::duration_cast<std::chrono::duration<double> >(
                 std::chrono::steady_clock::now() - t0).count();

@@ -3,6 +3,7 @@
 /build-*
 /vcpkg_installed
 /out
+.mnn-build
 
 # Editor / tooling
 /.vscode

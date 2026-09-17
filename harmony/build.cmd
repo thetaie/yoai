@@ -4,7 +4,7 @@ rem Everything the HarmonyOS app needs built natively, before DevEco can compile
 rem the HAP. This does NOT build the app itself -- open harmony\ in DevEco for
 rem that. It builds what the app links against.
 rem
-rem   build.cmd [abi] [deps^|llama^|hap^|all] [clean] [arch=<march>^|baseline]
+rem   build.cmd [abi] [deps^|llama^|mnn^|hap^|all] [clean] [arch=<march>^|baseline]
 rem
 rem     abi     arm64-v8a (default) ^| x86_64 ^| armeabi-v7a
 rem     deps    the core's C++ dependencies via vcpkg -> prebuilt\<abi>\
@@ -12,6 +12,9 @@ rem             (REQUIRED: without it the native module fails to configure on
 rem             its first find_package)
 rem     llama   the on-device LLM engine  -> prebuilt\llama-sdk\<abi>\
 rem             (building it is what turns on-device chat on)
+rem     mnn     MNN with the omni Talker -> prebuilt\mnn-sdk\<abi>\
+rem             An EVALUATION lane, deliberately NOT part of `all`: nothing in
+rem             the app links it yet. See :mnn for what it is for.
 rem     hap     compile and sign the app itself, via hvigor. No IDE needed.
 rem     all     all three, in that order -- and what a bare `build.cmd` does
 rem     clean   discard llama's cached build tree and SDK first. `deps` always
@@ -44,6 +47,7 @@ rem   VCPKG_ROOT      vcpkg checkout (default: a sibling of the repo)
 rem   OHOS_SDK_ROOT   the SDK dir CONTAINING native\ (default: from DEVECO_HOME)
 rem   LLAMA_SRC       llama.cpp checkout (default: a sibling of the repo)
 rem   LLAMA_SDK_DIR   where to assemble the llama SDK (default: auto-detected)
+rem   MNN_SRC         MNN checkout (default: a sibling of the repo), `mnn` only
 rem ---------------------------------------------------------------------------
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
@@ -55,6 +59,7 @@ rem -march string, so a mistyped target silently became `-march=lama`.
 set "ABI="
 set "DO_DEPS="
 set "DO_LLAMA="
+set "DO_MNN="
 set "DO_HAP="
 set "ARCH="
 set "ARCH_SET="
@@ -65,6 +70,7 @@ if "%~1"=="" goto args_done
 set "TOK=%~1"
 if /I "!TOK!"=="deps"     ( set "DO_DEPS=1"  & goto args_next )
 if /I "!TOK!"=="llama"    ( set "DO_LLAMA=1" & goto args_next )
+if /I "!TOK!"=="mnn"      ( set "DO_MNN=1"   & goto args_next )
 if /I "!TOK!"=="hap"      ( set "DO_HAP=1"   & goto args_next )
 if /I "!TOK!"=="all"      ( set "DO_DEPS=1"  & set "DO_LLAMA=1" & set "DO_HAP=1" & goto args_next )
 if /I "!TOK!"=="clean"    ( set "CLEAN=1"    & goto args_next )
@@ -200,6 +206,7 @@ echo [build] abi=%ABI%
 echo [build] sdk=!OHOS_SDK_ROOT!
 if defined DO_DEPS  echo [build] target: deps  ^(vcpkg -^> prebuilt\%ABI%^)
 if defined DO_LLAMA echo [build] target: llama ^(llama.cpp -^> prebuilt\llama-sdk\%ABI%^)
+if defined DO_MNN   echo [build] target: mnn   ^(MNN -^> prebuilt\mnn-sdk\%ABI%^)
 if defined DO_HAP   echo [build] target: hap   ^(hvigor -^> entry\build\default\outputs^)
 echo.
 
@@ -211,6 +218,11 @@ if defined DO_LLAMA (
     call :llama
     if errorlevel 1 exit /b 1
 )
+if defined DO_MNN (
+    call :mnn
+    if errorlevel 1 exit /b 1
+)
+
 if defined DO_HAP (
     call :hap
     if errorlevel 1 exit /b 1
@@ -230,11 +242,12 @@ exit /b 0
 
 rem ===========================================================================
 :usage
-echo Usage: build.cmd [abi] [deps^|llama^|hap^|all] [clean] [arch=^<march^>^|baseline]
+echo Usage: build.cmd [abi] [deps^|llama^|mnn^|hap^|all] [clean] [arch=^<march^>^|baseline]
 echo.
 echo   abi     arm64-v8a ^(default^) ^| x86_64 ^| armeabi-v7a
 echo   deps    the core's C++ dependencies via vcpkg   ^(required^)
 echo   llama   the on-device LLM engine                ^(turns on-device chat on^)
+echo   mnn     MNN with the omni Talker, for evaluation ^(NOT part of `all`^)
 echo   hap     compile and sign the app, via hvigor    ^(no IDE needed^)
 echo   all     all three, in that order
 echo   clean   discard llama's cached build tree and SDK first
@@ -508,6 +521,158 @@ rem one DevEco writes -- so a HAP built here is signed exactly as one built in
 rem the IDE. Without that block the build still succeeds and produces only the
 rem unsigned artifact, which is fine for CI and not installable on a device.
 rem ===========================================================================
+rem ===========================================================================
+rem MNN with the omni Talker, cross-compiled for this ABI.
+rem
+rem This is an EVALUATION lane, not a dependency: nothing in the app links it,
+rem and it is deliberately excluded from `all` so a bare build.cmd does not
+rem spend twenty minutes on an engine the core does not use.
+rem
+rem It exists to answer one question that cannot be answered on a desktop.
+rem MNN is the only way to get the model's own voice out -- llama.cpp has no
+rem Talker checkpoint in GGUF -- and it works: measured, an 8.8 s clip in and
+rem 4.0 s of real speech out. What is NOT known is whether generating that
+rem speech is affordable on a phone. On a desktop CPU it runs at about 3x
+rem slower than real time, which is the figure that decides the feature, and
+rem a desktop figure does not transfer. See design/voice.md.
+rem
+rem Output: prebuilt\mnn-sdk\<abi>\{include,lib}, shaped like the llama SDK so
+rem that whatever links it later resolves it by repo-relative path.
+rem ===========================================================================
+:mnn
+if not defined MNN_SRC for %%I in ("%~dp0..\..") do set "MNN_SRC=%%~fI\MNN"
+if not exist "!MNN_SRC!\CMakeLists.txt" (
+    echo no MNN at "!MNN_SRC!".>&2
+    echo clone it, or set MNN_SRC to an existing checkout:>&2
+    echo   git clone --depth 1 https://github.com/alibaba/MNN "!MNN_SRC!">&2
+    exit /b 1
+)
+echo [mnn] src=!MNN_SRC!
+
+set "NATIVE=!OHOS_SDK_ROOT!\native"
+set "TOOLCHAIN=!NATIVE!\build\cmake\ohos.toolchain.cmake"
+set "CMAKE=!NATIVE!\build-tools\cmake\bin\cmake.exe"
+set "NINJA=!NATIVE!\build-tools\cmake\bin\ninja.exe"
+if not exist "!CMAKE!" for %%P in (cmake.exe) do set "CMAKE=%%~$PATH:P"
+if not exist "!NINJA!" for %%P in (ninja.exe) do set "NINJA=%%~$PATH:P"
+if not exist "!CMAKE!" (
+    echo need cmake ^(the SDK's build-tools\cmake\bin, or on PATH^)>&2
+    exit /b 1
+)
+if not exist "!NINJA!" (
+    echo need ninja ^(the SDK's build-tools\cmake\bin, or on PATH^)>&2
+    exit /b 1
+)
+
+set "MBUILD=%~dp0.mnn-build\%ABI%"
+set "MSDK=%~dp0prebuilt\mnn-sdk\%ABI%"
+
+if defined CLEAN (
+    echo [mnn] cleaning
+    if exist "!MBUILD!" rmdir /s /q "!MBUILD!"
+    if exist "!MSDK!"   rmdir /s /q "!MSDK!"
+)
+
+rem MNN_BUILD_LLM_OMNI forces MNN_BUILD_OPENCV and MNN_BUILD_AUDIO on: the omni
+rem path needs both front ends compiled in even when only audio is used at run
+rem time. Which of them actually LOADS is a runtime flag -- is_visual / is_audio
+rem / has_talker are plain booleans in the model's llm_config.json -- so the
+rem 353 MB vision encoder costs nothing here beyond code size.
+rem
+rem MNN_ARM82 turns on the fp16 kernels every current arm64 phone has.
+rem
+rem MNN_SME2 has to be turned off EXPLICITLY -- it defaults ON, and leaving it
+rem alone does not leave it off. Two reasons to disable it. It does not build
+rem here: its kernels call the fp16 FML intrinsics (vfmlalq_low_f16), which need
+rem `+fp16fml`, while MNN compiles those sources with `-march=armv8.2-a+fp16`,
+rem and the OHOS clang does not supply the extension by default the way other
+rem toolchains apparently do. And it would not pay: SME2 is Armv9, which no
+rem phone this app targets has. Like the `+sve` note under :llama, it is a
+rem feature to measure before enabling, not one to inherit from a default.
+set "CFG=-S "!MNN_SRC!" -B "!MBUILD!" -G Ninja"
+set "CFG=!CFG! -DCMAKE_MAKE_PROGRAM="!NINJA!""
+set "CFG=!CFG! -DCMAKE_TOOLCHAIN_FILE="!TOOLCHAIN!""
+set "CFG=!CFG! -DOHOS_ARCH=%ABI%"
+set "CFG=!CFG! -DCMAKE_BUILD_TYPE=Release"
+rem MNN has its OWN switch for this and ignores the standard CMake one: with
+rem only BUILD_SHARED_LIBS=OFF it happily builds five .so files. MNN_SEP_BUILD
+rem has to go with it -- it splits the backends into separate shared objects
+rem and upstream documents it as meaningful only when shared.
+set "CFG=!CFG! -DBUILD_SHARED_LIBS=OFF"
+set "CFG=!CFG! -DMNN_BUILD_SHARED_LIBS=OFF"
+set "CFG=!CFG! -DMNN_SEP_BUILD=OFF"
+set "CFG=!CFG! -DMNN_BUILD_LLM=ON"
+set "CFG=!CFG! -DMNN_BUILD_LLM_OMNI=ON"
+set "CFG=!CFG! -DMNN_LOW_MEMORY=ON"
+set "CFG=!CFG! -DMNN_SUPPORT_TRANSFORMER_FUSE=ON"
+set "CFG=!CFG! -DMNN_BUILD_TOOLS=OFF"
+set "CFG=!CFG! -DMNN_BUILD_BENCHMARK=OFF"
+set "CFG=!CFG! -DMNN_BUILD_TEST=OFF"
+set "CFG=!CFG! -DMNN_SME2=OFF"
+if /I "%ABI%"=="arm64-v8a" set "CFG=!CFG! -DMNN_ARM82=ON"
+
+"!CMAKE!" !CFG!
+if errorlevel 1 exit /b 1
+
+"!CMAKE!" --build "!MBUILD!" --target MNN llm
+if errorlevel 1 exit /b 1
+
+echo [mnn] assembling !MSDK!
+if not exist "!MSDK!\include" mkdir "!MSDK!\include"
+if not exist "!MSDK!\lib"     mkdir "!MSDK!\lib"
+
+rem MNN's public headers, plus the llm engine's own. Copied rather than
+rem referenced so the SDK is self-contained the way the llama one is.
+xcopy /e /i /y /q "!MNN_SRC!\include\MNN" "!MSDK!\include\MNN" >nul
+if errorlevel 1 exit /b 1
+xcopy /e /i /y /q "!MNN_SRC!\transformers\llm\engine\include\llm" "!MSDK!\include\llm" >nul
+if errorlevel 1 exit /b 1
+
+rem And MNN's OWN rapidjson, which is not a convenience -- it is the fix for a
+rem crash. rapidjson is header-only templates, so its member functions land in
+rem the object files of whoever includes it, as weak symbols. The whole app is
+rem one .so, the linker keeps exactly ONE definition of each, and this repo
+rem already carries a much newer rapidjson under prebuilt\<abi>\include for
+rem src/llm and src/platform. MNN's llm engine parses config.json with the 1.1.0
+rem release it vendors.
+rem
+rem Two layouts, one symbol: the newer MemoryPoolAllocator keeps a SharedData*
+rem where 1.1.0 keeps chunkHead_ and userBuffer_. Whichever copy wins the link
+rem runs against the other one's objects. Measured: SIGSEGV at 0x10 inside
+rem MemoryPoolAllocator::Malloc, on the FIRST json parse of Llm::createLLM,
+rem before a single log line of MNN's own.
+rem
+rem So the SDK ships the version libMNN.a was compiled with, and the root
+rem CMakeLists puts it ahead of the prebuilt one. One rapidjson per .so.
+xcopy /e /i /y /q "!MNN_SRC!\3rd_party\rapidjson" "!MSDK!\include\rapidjson" >nul
+if errorlevel 1 exit /b 1
+if not exist "!MSDK!\include\rapidjson\document.h" (
+    echo [mnn] no rapidjson under !MSDK!\include>&2
+    echo [mnn] MNN vendors it at 3rd_party\rapidjson -- look there>&2
+    exit /b 1
+)
+
+rem ONE archive, and that is correct: with MNN_SEP_BUILD=OFF the llm engine is
+rem an OBJECT library, so its objects are folded into libMNN.a rather than
+rem sitting beside it. There is no libllm.a to find, and looking for one reports
+rem a successful build as a failure -- which is how this check first read it.
+rem
+rem Verified by symbol: Omni, Talker, generateWavform and setWavformCallback are
+rem all inside the 14.5 MB archive.
+rem
+rem Checked before copying, so a partial SDK stops here rather than surfacing
+rem later as a link error.
+if not exist "!MBUILD!\libMNN.a" (
+    echo [mnn] no libMNN.a under !MBUILD!>&2
+    echo [mnn] MNN moves its output around between versions -- look there>&2
+    exit /b 1
+)
+copy /y "!MBUILD!\libMNN.a" "!MSDK!\lib\" >nul
+if errorlevel 1 exit /b 1
+
+echo [mnn] SDK at !MSDK!
+exit /b 0
+
 :hap
 if not defined DEVECO_HOME (
     echo DevEco Studio not found. Set DEVECO_HOME to its install directory.>&2

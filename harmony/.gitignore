@@ -14,10 +14,11 @@ oh_modules/
 **/build
 /.hvigor
 .cxx
-# Prebuilt native artifacts, from two targets of build.cmd / build.sh: <abi>/ for
-# the core's vcpkg dependencies (`deps`) and llama-sdk/<abi>/ for the on-device
-# engine (`llama`). Hundreds of MB, and reproducible from vcpkg.json and a
-# llama.cpp checkout respectively.
+# Prebuilt native artifacts, from three targets of build.cmd / build.sh: <abi>/
+# for the core's vcpkg dependencies (`deps`), llama-sdk/<abi>/ for the on-device
+# engine (`llama`), and mnn-sdk/<abi>/ for the MNN evaluation lane (`mnn`).
+# Hundreds of MB, and reproducible from vcpkg.json and a checkout of llama.cpp
+# or MNN respectively.
 /prebuilt
 # `llama`'s cached llama.cpp build tree, kept so a re-run is incremental.
 /.llama-build

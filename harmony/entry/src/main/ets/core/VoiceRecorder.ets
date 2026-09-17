@@ -27,7 +27,7 @@ function log(msg: string): void {
 export const VOICE_SAMPLE_RATE: number = 16000;
 
 /** Below this the within-recording comparison has nothing to compare. */
-export const VOICE_MIN_SECONDS: number = 15;
+export const VOICE_MIN_SECONDS: number = 8;
 
 export class VoiceRecorder {
   private capturer: audio.AudioCapturer | undefined = undefined;

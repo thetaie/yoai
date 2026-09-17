@@ -325,6 +325,132 @@ const char* bodyclock_voice_analyze(const short* pcm,
                                int n_samples,
                                int sample_rate);
 
+//------------------------------------------------------------------------------
+// Omni (MNN)
+//------------------------------------------------------------------------------
+//
+// A SECOND engine, for the one thing the first cannot do: speak in the model's
+// own voice. llama.cpp has no Talker checkpoint in GGUF; MNN has the whole chain
+// -- thinker, talker, diffusion transformer, vocoder -- and it works. Measured
+// on a desktop: audio in, a spoken answer out, in one call.
+//
+// It is NOT a replacement for anything. Recognition stays with SenseVoice, which
+// is cheap and uniquely supplies the 60 ms alignment the clause cut needs; text
+// stays with llama.cpp and its grammar; prosody is signal processing and needs no
+// engine at all. This lane buys exactly one thing, and design/voice.md argues
+// over whether that one thing is affordable. These entry points exist so the
+// question can be answered on a phone instead of a workstation.
+//
+// Threading and cost: everything here BLOCKS, and generating speech measured
+// about 3x slower than real time on a desktop CPU -- a fifteen-second reply is
+// most of a minute. Call it off the drawing thread and expect to wait.
+
+// Whether this build has the engine compiled in: 1 if yes, 0 if it was built
+// without MNN. When 0 everything below still links and answers truthfully.
+int bodyclock_omni_available(void);
+
+// Read a model. BLOCKS.
+//
+// `model_dir` is a DIRECTORY, not a file -- and that is the difference from the
+// other two lanes. An MNN model is config.json plus a dozen .mnn graphs and
+// their weights (thinker, audio encoder, talker, predit, dit, bigvgan, speaker
+// dictionary), about 3.8 GB together. A host whose file picker hands back single
+// files has to pick the directory instead.
+//
+// Returns 0 when the model is resident.
+int bodyclock_omni_load(const char* model_dir);
+
+int bodyclock_omni_loaded(void);
+
+// Drop the weights.
+void bodyclock_omni_unload(void);
+
+// Streaming callback for the generated voice, invoked as the waveform is
+// produced. `pcm` is mono float at 24000 Hz -- note that this is NOT the 16 kHz
+// the input side uses, so a host feeding it back to a speaker must say so.
+//
+// Return non-zero to keep going, 0 to abort. `last` is 1 on the final chunk.
+typedef int (*bodyclock_omni_audio_handler)(const float* pcm,
+                                       int n_samples,
+                                       int last,
+                                       void* user_data);
+
+// Ask the model about one recording, and optionally have it answer aloud.
+//
+//   pcm, n_samples   16-bit signed mono at 16000 Hz, as with the voice lane.
+//   prompt           what to ask about the audio. Required.
+//   on_audio         NULL for a text-only answer. Non-NULL asks the Talker to
+//                    speak the reply, which is most of the cost.
+//
+// Returns a JSON object, owned by the core and valid until this thread's next
+// call, or NULL on a bad argument or an engine failure. It carries the reply
+// `text` and the timings the decision in design/voice.md turns on:
+//
+//   speechRealtime      seconds of computation per second of speech, for the
+//                       TALKER alone. Above 1 it cannot talk as fast as it
+//                       speaks. Measured 3.7 on a phone.
+//   firstAudioSeconds   the wait before the first PCM arrives, from the start
+//                       of the exchange.
+//   audioBlocks         how many handovers that took. 1 means nothing streamed.
+//
+// Those two were added to ask whether playing the reply as it arrives rescues
+// the ratio. Measured: no. Nine blocks carried 10.34 s of speech over 38.5 s --
+// one every 4.3 s holding 1.15 s of audio, so playback drains each in 1.15 s
+// and then waits 3.2 s. 27% speech, 73% silence, which is 1 / 3.7. Streaming
+// moves the first word much earlier and cannot close the gaps.
+//   thinkerSeconds      audio in to last text token; `seconds` is everything.
+//
+// **Audio over about 30 seconds is refused rather than attempted.** Measured:
+// 28 s works, 31 s segfaults inside the audio front end. Thirty seconds is the
+// window every Whisper-family encoder has, so the limit is expected -- crashing
+// instead of saying so is not, and the check here is what keeps that upstream
+// bug out of the app.
+const char* bodyclock_omni_ask(const short* pcm,
+                          int n_samples,
+                          const char* prompt,
+                          bodyclock_omni_audio_handler on_audio,
+                          void* user_data);
+
+//------------------------------------------------------------------------------
+// Model bundles
+//------------------------------------------------------------------------------
+//
+// One file in, a directory out, so a model that is twenty files can be copied to
+// a phone as one. Packed by design/pack-mnn-model.py; the format lives in
+// src/platform/bundle.hpp.
+//
+// This is here for the omni lane, whose model MNN resolves as a directory
+// relative to config.json -- but nothing in it is omni-specific, and it is
+// available whether or not that engine was compiled in.
+
+// What a bundle contains, without reading its payload: a JSON object with
+// `files` (name and bytes each) and `totalBytes`. Cheap, so a host can show the
+// contents and check for room before committing to several gigabytes of copying.
+//
+// Returns NULL when the file is missing, truncated, or not a bundle. The buffer
+// is owned by the core and valid until this thread's next call.
+const char* bodyclock_bundle_list(const char* bundle_path);
+
+// Called as extraction runs. `fraction` is 0..1 over the whole payload.
+// Return non-zero to continue, 0 to abort -- an abort removes what was written.
+typedef int (*bodyclock_bundle_progress)(const char* name,
+                                    double fraction,
+                                    void* user_data);
+
+// Extract into `dest_dir`, creating it. Returns 0 on success.
+//
+// **Either it all arrives or nothing does.** A failure removes what it wrote,
+// because the alternative -- a truncated weight file -- is one MNN loads
+// without complaint and then answers through.
+//
+// Entry names are validated: absolute paths, drive letters, backslashes and
+// ".." anywhere cause the whole extraction to be refused. A bundle is a file the
+// user copied from somewhere.
+int bodyclock_bundle_extract(const char* bundle_path,
+                        const char* dest_dir,
+                        bodyclock_bundle_progress on_progress,
+                        void* user_data);
+
 #ifdef __cplusplus
 }
 #endif
