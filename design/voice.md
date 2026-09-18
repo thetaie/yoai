@@ -1716,14 +1716,208 @@ them for free.
 
 So chunking, `n_window`, and MNN's interleaved mode are all the same idea and
 all bounded by the same number. They are worth building **after** the ratio goes
-below 1, not instead of getting it there. What is left that could move it: the
-NPU backend, a smaller Talker, or accepting that the platform reads text aloud.
+below 1, not instead of getting it there.
+
+#### The diffusion steps were the one free lever, and they are worth 0.9×
+
+`dit_steps` is a plain config value MNN reads at generation time, so
+`bodyclock_omni_set_dit_steps` changes it without dropping the weights. MNN runs
+`steps - 1` DiT forwards per chunk. **Measured on the phone:**
+
+| `dit_steps` | DiT forwards | RTF | by ear |
+| --- | --- | --- | --- |
+| 5 (the model's own config) | 4 | 3.7× | — |
+| 3 | 2 | **3.0×** | acceptable |
+| 2 | 1 | 2.8× | audible artefacts |
+
+**About 0.3× per forward, so the diffusion is a third of the bill and the
+talker plus vocoder are the other 2.5×.** Extrapolated to free diffusion the
+ratio still sits near 2.5, and there is no knob on the rest. The lever is real
+and it is spent.
+
+It was predicted at 1.5×, on the reasoning that the talker's autoregression
+costs about 1× — 50 codec tokens a second against 0.392 GB is 19.6 GB/s, inside
+what this device reads — and that the remainder was diffusion. The first half
+held; the second did not. `predit` and BigVGAN are ~1.4× between them and have
+no equivalent setting.
+
+What is left that could move it: the NPU backend, a smaller Talker, or accepting
+that something else reads text aloud.
 
 **What was NOT established**, so it is not quietly assumed later: whether MNN's
 quantization transcribes as well as the GGUF build does. The reference clip is
 the one that crashes. The finding that Qwen2.5-Omni-3B beats SenseVoice on four
 errors including a polarity flip stands — but it was measured through
 llama.cpp, and it does not transfer to another runtime for free.
+
+## A text-driven TTS on the engine already here
+
+`ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF` is the first candidate that is better
+than omni on every axis except the one that decides.
+
+**llama.cpp supports it first-party.** `tools/mtmd/models/qwen3tts-gen.cpp` and
+`qwen3tts-spkenc.cpp`, driven by `tools/tts/tts.cpp`, against `libmtmd` —
+`mtmd_init_from_file` for the codec decoder, `mtmd_helper::gen_audio` to
+generate. `mtmd` is its own `add_library` needing only ggml, llama, Threads and
+four vendored header libraries, so it can be built without turning the whole
+tools tree on — which is what `-DLLAMA_BUILD_TOOLS=OFF` in this repo's cross
+build currently skips.
+
+| | omni, `dit_steps` 3 | Qwen3-TTS-12Hz |
+| --- | --- | --- |
+| Size | 3.8 GB | **1.47 GB** (Q4_K_M + Q8_0 mmproj) |
+| Engine | a second one, MNN | **the one already built** |
+| Driven by | thinker hidden states | **text**, and a reference wav for the voice |
+| Measured RTF | 3.0 on the phone | 1.64 short / **1.41 long**, on a desktop |
+
+**Quality: acceptable, judged by ear on both a short and a long Chinese
+passage.** That is the bar every cheap TTS had failed — VITS-class models
+(Piper, MeloTTS, what sherpa-onnx ships) sound like the broadcast voice, which
+is the thing being replaced.
+
+### Its cost is a constant plus a rate, and the mmproj is in the inner loop
+
+**Measured** on the desktop, eight threads, Q8_0 mmproj:
+
+| | audio | generation | final stage | total | RTF |
+| --- | --- | --- | --- | --- | --- |
+| short | 3.20 s | 2.65 s | 2.52 s | 5.29 s | **1.65** |
+| long | 20.24 s | 25.26 s | 2.81 s | 28.45 s | **1.41** |
+
+**The final stage takes the same 2.5–2.8 s either way.** It is a per-utterance
+constant, not a rate — which inverts the lesson taken from omni one section up,
+where the decoder half was the majority. That lesson does not transfer: it was a
+property of a diffusion sampler run per chunk, not of codec decoders in general.
+
+Generation goes the other way, at 105 ms per frame over 37 frames and 142 over
+269 — attention's quadratic term. The long passage is still cheaper per second
+of audio, because the constant amortises faster than the rate degrades.
+
+**The mmproj quantisation is a real lever, and not where it looks.** Q8_0 (426
+MB) against bf16 (638 MB), two runs each:
+
+| mmproj | generation | final stage | RTF |
+| --- | --- | --- | --- |
+| Q8_0 | 2.65 / 2.92 s | 2.52 / 2.56 s | **1.65 / 1.63** |
+| bf16 | 4.06 / 4.03 s | 2.62 / 2.60 s | 2.13 / 2.17 |
+
+The final stage moves 3%; **generation moves 35%**. So the mmproj is not "the
+vocoder" — calling it that was the mistake. `tools/tts/tts.cpp` samples a
+semantic code from the backbone and feeds the hidden state to
+`mtmd_helper::gen_audio` **every frame**, so the mmproj runs inside the
+autoregressive loop and its size is paid per frame. Q8_0 is 33% smaller and 24%
+faster, for 1.47 GB total.
+
+**Which end this lands on is decided by the product, and the chain's replies are
+short by design.** The measured chain answers in 12 to 18 characters, about
+three seconds of speech — the end where 2.65 s of fixed cost is most of the
+bill.
+
+### And it cannot hold a voice, which disqualifies it
+
+**Base means no speakers.** The GGUF carries no chat template and no speaker
+list; its metadata is a bare architecture plus the model's own recommended
+sampling (`temp 0.9, top_k 50, top_p 1.0` — not the `top_k 40, top_p 0.95`
+llama.cpp defaults this was measured with). Free-running, it draws a speaker and
+a recording style per utterance, and the draw is not pinned by anything
+available:
+
+- **The same seed gives different speakers on different texts** — judged by ear,
+  one male and one female. Not a subtle drift; the person changes.
+- `top_k` moves quality, not identity. 1 collapses outright (160 s of audio for a
+  20 s passage, running to the frame cap — the same greedy collapse MNN's own
+  talker config warns about), 5 is too tight, 20 beats 5, and 40 with a lucky
+  seed beat both.
+- The good draws were the good ones: *very clear, close-miked, slight breath,
+  strong prosody*. That is a recording style the model imagines, not a quality
+  setting, and it arrived by lottery.
+
+**The one mechanism that does pin it destroys what made it worth having.**
+`--tts-speaker-file` holds identity and pace, and flattens the prosody — the
+pauses between sentences come out identical and mechanical. Confirmed across
+three samples, two mmproj quantisations and two sampling configs, including
+cloning a take that had been judged good: the clone of it was not. A speaker
+encoder compresses a voice into one global embedding, and the time-varying part
+is what gets left behind.
+
+So: a voice that changes between sentences, or a voice that sounds mechanical.
+**For an assistant that speaks every day, the first is worse than the second and
+neither ships.**
+
+### The variant that solves it is on a third runtime
+
+The family has more than the Base checkpoint, and llama.cpp supports only Base.
+
+| variant | identity | prosody | runtime |
+| --- | --- | --- | --- |
+| Base, free-running | **changes, including gender** | good | llama.cpp |
+| Base, cloned | stable | **flattened** | llama.cpp |
+| CustomVoice, 9 named speakers | stable | untested | CrispASR |
+| **VoiceDesign**, text attributes | **stable** | **good** | qwentts.cpp |
+
+`mtmd_helper_gen_audio_inp` has no speaker id or name — `prompt`, `speaker_ref`,
+`lang`, `top_k`, `top_p`, `seed`, `out_type`, and that is all. The named and
+described voices live in ports that carry their own codec GGUF instead of an
+mmproj, so adopting either means a third engine.
+
+**VoiceDesign was built and measured, and it clears every quality bar Base
+failed.** `qwentts.cpp`, a C++17 ggml port with a C ABI and a termux build
+script — much narrower than MNN, which was a whole inference framework.
+
+- **Identity holds across texts.** The same instruction, two different passages,
+  judged the same voice. This is the requirement Base failed.
+- **The instruction is a real control surface, not a preset list.** Written
+  `gentle, speaks slowly`, the result was audibly listless — the words landed.
+  Rewritten `breathy, unhurried but not slow`, it was the one chosen. Pace,
+  energy, mic distance and breath are all writable, and Base had no control over
+  any of them.
+- **Prosody survives**, because nothing goes through a speaker encoder.
+
+**Measured**, same long passage as the table above, and it reports its own
+split:
+
+| | |
+| --- | --- |
+| Prefill | 0.79 s |
+| Talker decode, 275 frames | 8.81 s (32.0 ms/frame) |
+| Code predictor | 7.65 s (27.8 ms/frame) |
+| Codec decode | 8.25 s |
+| **Total, 22.00 s of audio** | 25.52 s — **RTF 1.16** |
+
+The fastest of the three, the only one that holds a voice, for 2.33 GB and a
+third runtime. **There is no cheap lever left**: the three stages cost within 15%
+of each other, so nothing here is the `dit_steps` of this engine, and the 0.6B
+talker exists only as base and customvoice — VoiceDesign is 1.7B or nothing.
+
+**It is still above 1, and the phone will be worse.** So this belongs to
+prepared playback, not to conversation. Conversation already has its answer, and
+that answer is 1.37 s of silence with the platform voice.
+
+### Four predictions, four misses, and what they had in common
+
+The arithmetic in these two sections was wrong every time it was used, in two
+recurring shapes, so the pattern is worth more than the numbers:
+
+| predicted | measured | what was left out |
+| --- | --- | --- |
+| omni at 1 DiT forward: **1.5×** | 2.8× | the DiT was only a third of the cost |
+| Qwen3-TTS: **0.7×** | 2.15× | the codec stage entirely, and the AR half was assumed to reach peak bandwidth |
+| Qwen3-TTS on the phone: **3.6×** | still unmeasured | — |
+| "Qwen3-TTS cannot hold a voice" | it can, on another runtime | the family has three checkpoints and Base is the cloning one |
+
+**Shape one: count the autoregressive half, assume it saturates the bus.** It
+does not — 12 frames a second against 1.04 GB is 12.5 GB/s and the measurement
+implies about 9.9 — and both times the half that was not counted mattered more
+than the half that was.
+
+**Shape two, and it is the one this file already records three times: reading a
+limit off one's own failure to configure something.** "The seed does not pin the
+speaker, so the model cannot hold a voice" was stated before the model card had
+been read. `-Base` is the name of the cloning checkpoint. CustomVoice and
+VoiceDesign were one lookup away, and VoiceDesign is both faster and stable.
+The correction came from being asked whether a TTS with no way to fix its voice
+was plausible — which is the question that should have been asked first, exactly
+as with MNN's silence.
 
 ## What llama.cpp can do now
 

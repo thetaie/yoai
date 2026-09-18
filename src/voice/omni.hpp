@@ -93,6 +93,15 @@ public:
     bool load(const std::string& model_dir);
     bool loaded() const;
 
+    // Solver steps for the diffusion vocoder. Takes effect on the next ask; the
+    // weights stay resident. False with no model loaded, or below 2.
+    //
+    // MNN runs `steps - 1` DiT forwards per chunk, so 5 is four and 2 is one.
+    // It is the only lever on this lane's 3.7x that does not need a different
+    // model -- and it trades exactly what the lane is for, because a coarser
+    // sampler is a less natural voice. See the note in src/bodyclock.h.
+    bool set_dit_steps(int steps);
+
     // Ask about one recording.
     //
     // `pcm` is mono float at 16 kHz in [-1, 1], which is what the microphone

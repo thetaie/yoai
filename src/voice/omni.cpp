@@ -329,6 +329,30 @@ bool Omni::load(const std::string& model_dir) {
     return true;
 }
 
+bool Omni::set_dit_steps(int steps) {
+    Impl* m = impl_;
+    if (!m->loaded || !m->llm) {
+        platform::log_warn("omni: set_dit_steps with no model loaded");
+        return false;
+    }
+    // Below 2 would make MNN's loop run zero forwards and hand the vocoder the
+    // initial noise, which is not a fast voice -- it is a broken one. Refused
+    // here rather than discovered by listening.
+    if (steps < 2) {
+        platform::log_warn("omni: dit_steps must be at least 2, got %d", steps);
+        return false;
+    }
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "{\"dit_steps\":%d}", steps);
+    m->llm->set_config(buf);
+    // Logged rather than returned, because the number that matters is the one
+    // the NEXT "talker produced" line was made with, and the two are read
+    // together.
+    platform::log_info("omni: dit_steps -> %d (%d DiT forward(s) per chunk)",
+                       steps, steps - 1);
+    return true;
+}
+
 bool Omni::ask(const float* pcm, size_t n_samples, const std::string& prompt,
                OmniAudioSink sink, void* user_data, OmniReply* out) {
     if (!out) {
@@ -517,6 +541,10 @@ bool Omni::loaded() const { return false; }
 
 bool Omni::load(const std::string&) {
     platform::log_error("omni: this build has no MNN engine compiled in");
+    return false;
+}
+
+bool Omni::set_dit_steps(int) {
     return false;
 }
 

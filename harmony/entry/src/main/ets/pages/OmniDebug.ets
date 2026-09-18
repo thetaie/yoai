@@ -76,6 +76,8 @@ struct OmniDebug {
   @State private recording: boolean = false;
   @State private elapsed: number = 0;
   @State private speak: boolean = true;
+  /** The model's own config.json asks for 5, which is four DiT forwards. */
+  @State private ditSteps: number = 5;
 
   @State private reply: OmniJson | undefined = undefined;
   @State private speechBytes: number = 0;
@@ -193,6 +195,23 @@ struct OmniDebug {
    */
   private loadUnpacked(): void {
     this.load(this.dest(), '');
+  }
+
+  /**
+   * Change the diffusion step count for the next ask.
+   *
+   * Synchronous and cheap: MNN reads the value when it generates, so nothing is
+   * reloaded and a sweep compares step counts rather than page caches — the
+   * same reason the thread sweep on /asr does not reload either.
+   */
+  private setDitSteps(n: number): void {
+    const rc: number = bodyclock.nativeOmniSetDitSteps(n);
+    if (rc !== 0) {
+      this.note = 'the engine would not take ' + n + ' DiT steps';
+      return;
+    }
+    this.ditSteps = n;
+    this.note = '';
   }
 
   /** Hand a directory to the engine. Shared by all three ways in. */
@@ -446,6 +465,32 @@ struct OmniDebug {
           .layoutWeight(1)
       }
       .width('100%')
+
+      // The diffusion sampler's step count, swept like the thread count on /asr.
+      //
+      // MNN runs steps-1 DiT forwards per chunk, so these are four, two and one.
+      // It is the only lever on 3.7x that does not need a different model — and
+      // it spends exactly what the model is here for, because a coarser sampler
+      // is a less natural voice. So this is a two-handed measurement: the number
+      // on screen and what it sounds like, together.
+      if (this.modelName !== '') {
+        Row({ space: 6 }) {
+          Text('DiT steps')
+            .fontSize(12)
+            .fontColor(this.theme.text_secondary)
+          ForEach([5, 3, 2], (n: number) => {
+            Button(n.toString())
+              .height(32)
+              .layoutWeight(1)
+              .fontSize(13)
+              .backgroundColor(this.ditSteps === n ? this.theme.brand : this.theme.bg_surface)
+              .fontColor(this.ditSteps === n ? this.theme.on_brand : this.theme.text_primary)
+              .enabled(!this.recording && this.busy === '')
+              .onClick(() => { this.setDitSteps(n); })
+          }, (n: number) => n.toString())
+        }
+        .width('100%')
+      }
 
       Text(this.statusLine())
         .fontSize(12)

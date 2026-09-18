@@ -426,6 +426,27 @@ int bodyclock_omni_loaded(void);
 // Drop the weights.
 void bodyclock_omni_unload(void);
 
+// How many solver steps the diffusion vocoder takes. Returns 0 on success, or
+// non-zero with no model loaded or for a count below 2.
+//
+// **This is the one lever on the 3.7x that does not need a different model.**
+// The chain that makes sound is an autoregressive talker, then a diffusion
+// transformer, then a vocoder. The talker's half is affordable on arithmetic:
+// codec tokens run at 50 Hz and its weights are 0.392 GB, so one second of
+// audio needs 19.6 GB/s of reads -- inside what this device was measured to do.
+// The excess is the diffusion, and MNN runs `steps - 1` DiT forwards per chunk.
+// The shipped config says 5, which is four forwards; 2 is one.
+//
+// Read at GENERATION time, not load time, so this takes effect on the next ask
+// and the model stays resident -- the same reason bodyclock_local_set_threads
+// exists, and it makes a sweep compare step counts rather than page caches.
+//
+// It trades the thing being bought. Fewer steps is a coarser sampler, and what
+// it coarsens is naturalness, which is the whole reason this engine is being
+// considered. So the number to find is not the fastest one: it is the fewest
+// steps that still sound better than the platform voice.
+int bodyclock_omni_set_dit_steps(int steps);
+
 // Streaming callback for the generated voice, invoked as the waveform is
 // produced. `pcm` is mono float at 24000 Hz -- note that this is NOT the 16 kHz
 // the input side uses, so a host feeding it back to a speaker must say so.

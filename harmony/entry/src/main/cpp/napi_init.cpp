@@ -625,6 +625,19 @@ napi_value NativeOmniLoaded(napi_env env, napi_callback_info) {
     return out;
 }
 
+// nativeOmniSetDitSteps(steps: number): number
+//
+// Synchronous and cheap -- MNN reads the value when it generates, so this sets
+// a field the next ask uses and does not touch the 3.8 GB of weights.
+napi_value NativeOmniSetDitSteps(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    std::int32_t n = 0;
+    if (argc >= 1) napi_get_value_int32(env, argv[0], &n);
+    return Int32(env, bodyclock_omni_set_dit_steps(n));
+}
+
 // nativeOmniLoad(modelDir, onDone: (type, content) => void): void
 napi_value NativeOmniLoad(napi_env env, napi_callback_info info) {
     size_t argc = 2;
@@ -841,6 +854,7 @@ napi_value Init(napi_env env, napi_value exports) {
         {"nativeOmniLoaded",     nullptr, NativeOmniLoaded,     nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeOmniAsk",        nullptr, NativeOmniAsk,        nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeOmniLastSpeech", nullptr, NativeOmniLastSpeech, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeOmniSetDitSteps", nullptr, NativeOmniSetDitSteps, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeBundleList",     nullptr, NativeBundleList,     nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeBundleExtract",  nullptr, NativeBundleExtract,  nullptr, nullptr, nullptr, napi_default, nullptr},
     };

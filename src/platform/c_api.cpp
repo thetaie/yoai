@@ -949,6 +949,11 @@ extern "C" int bodyclock_omni_loaded(void) {
     return omni().loaded() ? 1 : 0;
 }
 
+extern "C" int bodyclock_omni_set_dit_steps(int steps) {
+    std::lock_guard<std::mutex> guard(omni_mutex());
+    return omni().set_dit_steps(steps) ? 0 : 1;
+}
+
 extern "C" void bodyclock_omni_unload(void) {
     // Nothing to release explicitly: the engine drops its weights when another
     // load replaces them or the process ends. Kept for symmetry with the other

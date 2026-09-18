@@ -283,6 +283,23 @@ export const nativeOmniLoad: (
 export const nativeOmniLoaded: () => boolean;
 
 /**
+ * Solver steps for the diffusion vocoder. Returns 0 on success; needs a loaded
+ * model, and refuses anything below 2. Takes effect on the next ask without
+ * dropping the weights, so a sweep compares step counts and not page caches.
+ *
+ * The only lever on this lane's 3.7× that does not need a different model. MNN
+ * runs `steps - 1` DiT forwards per chunk, so the shipped 5 is four forwards and
+ * 2 is one. The talker's autoregressive half is affordable on arithmetic — 50
+ * codec tokens a second against 0.392 GB of weights is 19.6 GB/s, inside what
+ * this device reads — so the diffusion is where the excess is.
+ *
+ * It trades the thing being bought: a coarser sampler is a less natural voice,
+ * which is the only reason this engine is a candidate. The number to find is not
+ * the fastest, it is the fewest steps still better than the platform voice.
+ */
+export const nativeOmniSetDitSteps: (steps: number) => number;
+
+/**
  * Ask the model about one recording, optionally aloud.
  *
  * Calls back once with ('result', json) or ('error', reason). The JSON carries
