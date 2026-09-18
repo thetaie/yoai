@@ -71,12 +71,21 @@ struct LocalOptions {
      * 4 rather than 6, then — the same throughput while leaving two more cores
      * to the UI and the battery.
      *
-     * The decode row is also the disproof of a claim this project carried for a
-     * while, that one core already saturates the memory controller. One core
-     * reaches 7.4 GB/s of weight reads against about 16.5 at saturation. What
-     * survives is the conclusion drawn from it: four cores do reach ~85% of the
-     * chip's read bandwidth, so there is little left for another compute unit
-     * to find.
+     * The decode row also disproves a claim this project carried for a while,
+     * that one core already saturates the memory controller: one core reaches
+     * 7.4 GB/s of weight reads and four reach about 16.5.
+     *
+     * **It says nothing about where the bus is**, and an earlier version of this
+     * note claimed it did — that four cores take ~85% of the chip's bandwidth,
+     * leaving nothing for another compute unit. That was the same measurement
+     * read twice: the plateau is explained two paragraphs up by running out of
+     * performance cores, which is a COMPUTE limit, and a curve that flattens at
+     * the usable-core count cannot also be evidence the bus is full.
+     *
+     * A read loop with no model in it measures **24.4 GB/s** on this device at
+     * eight threads, and that is a lower bound — every fix to the benchmark
+     * raised it. So llama.cpp's decode sits at 73-75% of what the chip gives up,
+     * the headroom is real, and design/voice.md has the sweep and the caveats.
      */
     int n_threads = 4;
 

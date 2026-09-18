@@ -141,10 +141,12 @@ struct VoiceDebug {
   @State private axesRaw: string = '';
   @State private axesSent: string = '';
 
-  // Thread sweep. Present to settle one question: whether decode throughput is
-  // flat in the thread count, which is what "one core already saturates the
-  // memory controller" predicts, or rises through four to six cores, which
-  // would make that wall per-core and not per-chip.
+  // Thread sweep. It answered the question it was added for -- one core does
+  // NOT saturate the memory controller, decode goes 5.8 to 12.6 tok/s from one
+  // thread to four -- and then could not answer the follow-up, because a
+  // plateau at four threads on a chip with four performance cores is equally a
+  // compute limit and a bus limit. Kept as the engine-side half of that
+  // comparison; the model-free half is the bandwidth probe below.
   @State private threads: number = 4;   // the core's own default
   @State private benching: boolean = false;
   @State private benchNote: string = '';

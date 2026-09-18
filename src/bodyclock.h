@@ -183,11 +183,19 @@ int bodyclock_local_load(const char* id);
 // Takes effect on the NEXT turn. Returns 0, or non-zero if `id` is unknown or
 // is not an on-device model.
 //
-// This exists for a specific measurement. The claim it is there to settle is
-// that decode is bandwidth-bound and one core already saturates the memory
-// controller; if that is right, decode throughput is flat in this number, and
-// if it rises through four or six cores then the wall is per-core rather than
-// per-chip and several conclusions that lean on it have to be re-derived.
+// This exists for a specific measurement, and that measurement has been taken.
+// The claim it was added to settle -- that one core already saturates the
+// memory controller -- is false: decode rises 5.8 -> 12.6 tok/s from one thread
+// to four (see llm/local.hpp for the sweep), so one core reaches well under
+// half of what the chip gives up.
+//
+// **The other half of the question it was framed around was a false choice.**
+// "Flat means a per-chip wall, rising means per-core" leaves out the reading
+// that turned out to be right: throughput plateaus at four because four is this
+// SoC's performance-core count, which says nothing about the bus at all. No
+// thread sweep of a language model can separate those -- every point on it is
+// one engine's kernels as much as the hardware. That is what
+// bodyclock_memory_bandwidth below is for.
 int bodyclock_local_set_threads(const char* id, int threads);
 
 // How fast this machine reads memory, measured WITHOUT a language model.
