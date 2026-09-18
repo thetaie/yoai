@@ -111,6 +111,29 @@ export const nativeLocalLoad: (
 export const nativeLocalSetThreads: (id: string, threads: number) => number;
 
 /**
+ * How fast this device reads memory, with no language model involved.
+ *
+ * Calls back once with ('result', json) — `threads`, `bytes`, `passes`,
+ * `seconds`, `gbPerSecond` in **decimal** GB — or ('error', reason). Runs on a
+ * worker and blocks it for tens of milliseconds per call.
+ *
+ * `threads` <= 0 means one; sweep it. `mib` <= 0 selects 256, past any phone's
+ * last-level cache. `passes` <= 0 selects 4.
+ *
+ * It exists to check a constant. The thread sweep above showed decode
+ * saturating at four threads, which was read as the memory bus filling up — but
+ * four is also this SoC's performance-core count, so the curve cannot tell the
+ * two apart. A model's throughput is its own kernels as much as the chip's
+ * memory; this is a read loop and a division.
+ */
+export const nativeMemoryBandwidth: (
+  threads: number,
+  mib: number,
+  passes: number,
+  onDone: (type: string, content: string) => void
+) => void;
+
+/**
  * Run one chat turn on a worker thread, streaming events back on the ArkTS
  * thread in arrival order.
  *
@@ -188,6 +211,21 @@ export const nativeVoiceUnload: () => number;
  * PUNCTUATION at all, which costs the sentence boundaries. Pick per use.
  */
 export const nativeVoiceSetItn: (on: number) => number;
+
+/**
+ * Worker threads for the recognition encoder. <= 0 means all cores. Takes effect
+ * on the next analysis; the weights are not reloaded, so a sweep compares thread
+ * counts rather than page caches. Returns 0 on success; needs a loaded model.
+ *
+ * The default is 4, carried over from the on-device LLM lane on the reasoning
+ * that the pass is memory-bound. It is not: the model is ~250 MB read once per
+ * pass, under a percent of the 24.4 GB/s this device was measured to read, and
+ * the pass is a GEMM over ~80 stacked frames that reuses every weight 80 times.
+ * Compute-bound work is the kind little cores help with, so 4 may be leaving
+ * throughput unused — which matters because recognition is the first term of the
+ * silence between a person speaking and being answered.
+ */
+export const nativeVoiceSetThreads: (threads: number) => number;
 
 /**
  * Analyse one recording: transcript, the model's four tags, per-token

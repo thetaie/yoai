@@ -93,6 +93,15 @@ interface AnalysisJson {
   prosody?: ProsodyJson;
 }
 
+/** What bodyclock_memory_bandwidth returns. gbPerSecond is DECIMAL GB. */
+interface MemBwJson {
+  threads: number;
+  bytes: number;
+  passes: number;
+  seconds: number;
+  gbPerSecond: number;
+}
+
 @Entry
 @Component
 struct VoiceDebug {
@@ -306,6 +315,11 @@ struct VoiceDebug {
       return;
     }
 
+    // The thread selector drives recognition as well as the model, so one
+    // setting produces one comparable pair of numbers. Ignored when no
+    // recognition model is loaded, which is the case the page already supports.
+    bodyclock.nativeVoiceSetThreads(this.threads);
+
     this.analysing = true;
     bodyclock.nativeVoiceAnalyze(pcm, VOICE_SAMPLE_RATE, (type: string, content: string) => {
       this.analysing = false;
@@ -314,6 +328,18 @@ struct VoiceDebug {
         return;
       }
       const parsed: AnalysisJson = JSON.parse(content) as AnalysisJson;
+      // Logged as well as shown, because the interesting form of this number is
+      // a sweep and a sweep is read off the log, paired with the
+      // `voice threads:` line the setter writes.
+      if (parsed.transcript !== undefined) {
+        hilog.info(0x0000, 'bodyclock', '%{public}s',
+          'asr: ' + this.fixed(parsed.audioSeconds, 2) + ' s of audio in ' +
+          this.fixed(parsed.transcript.seconds, 2) + ' s at ' + this.threads +
+          ' threads = ' +
+          this.fixed(parsed.transcript.seconds > 0
+            ? parsed.audioSeconds / parsed.transcript.seconds : 0, 2) +
+          'x real time');
+      }
       this.audioSeconds = parsed.audioSeconds;
       this.prosody = parsed.prosody;
       this.transcript = parsed.transcript;
@@ -410,6 +436,43 @@ struct VoiceDebug {
   }
 
   /**
+   * The same thread count, measured against memory instead of a model.
+   *
+   * Bench decode answers "how fast is this engine"; this answers "how fast is
+   * this chip", and the two have been conflated. design/voice.md derives its
+   * whole on-device throughput argument from a constant — 19.5 GB/s — that came
+   * from llama.cpp's own tokens per second. The thread sweep then showed decode
+   * flattening at four threads and that was read as the memory bus filling up,
+   * but four is also this SoC's performance-core count, so the curve cannot
+   * separate "the bus is full" from "there are no more cores worth using".
+   *
+   * MNN's thinker was later measured reading 27.6 GB/s on this device, which
+   * one of those two readings has to explain away. A read loop over a buffer
+   * far larger than any cache does not care which engine is right.
+   *
+   * 256 MiB and four passes: a gigabyte of reads, tens of milliseconds, well
+   * past a phone's last-level cache and small enough to allocate beside a
+   * resident model.
+   */
+  private benchMemory(): void {
+    this.benching = true;
+    this.benchNote = 'reading memory at ' + this.threads + ' threads…';
+    bodyclock.nativeMemoryBandwidth(this.threads, 256, 4,
+      (type: string, content: string) => {
+        this.benching = false;
+        if (type !== 'result') {
+          this.benchNote = content;
+          return;
+        }
+        const r: MemBwJson = JSON.parse(content) as MemBwJson;
+        this.benchNote = this.threads + ' threads · ' +
+          r.gbPerSecond.toFixed(1) + ' GB/s · ' +
+          r.seconds.toFixed(3) + ' s for ' +
+          (r.bytes * r.passes / 1e9).toFixed(2) + ' GB read';
+      });
+  }
+
+  /**
    * Ask the platform engine which voices this device has.
    *
    * One question only: how many. Huawei's offline pack is widely assumed to be
@@ -470,10 +533,19 @@ struct VoiceDebug {
    *
    * The point is not the demo. It is the four numbers: a chain is usable or not
    * depending on how long the person sits in silence after they stop talking,
-   * and that total is made of parts with very different fixes. Recognition is
-   * already known to run at 1.6x real time; the model's prefill scales with the
-   * transcript; the platform voice is 1x by construction. Which one dominates
-   * decides whether this becomes a page and what would have to change first.
+   * and that total is made of parts with very different fixes. Recognition
+   * measures **5.8x real time** on this device at four threads — 0.17 s of
+   * compute per second of clip, so a ten-second note costs 1.7 s and it is not
+   * the term to attack. The model's prefill scales with the transcript AND with
+   * the system prompt, which does not change between turns; the platform voice
+   * is 1x by construction and runs while the model is still writing. Which one
+   * dominates decides whether this becomes a page and what would have to change
+   * first.
+   *
+   * An earlier version of this comment said recognition "is already known to
+   * run at 1.6x". It was not known — design/voice.md called the encoder speed on
+   * a Kirin unmeasured at the time — and it was wrong by 3.6x, in the direction
+   * that would have sent the first optimisation at the wrong stage.
    *
    * The reply is capped in the prompt rather than by `predict`, because a
    * length limit that truncates mid-sentence measures the wrong thing — what
@@ -555,10 +627,14 @@ struct VoiceDebug {
    * a pause that scales with the answer's length and one that does not.
    *
    * The system prompt is as short as it can be while still doing its four jobs
-   * -- length, register, no lists, no emoji. It is re-prefilled on EVERY turn,
-   * because the engine frees its context when a turn ends, so every token in it
-   * is paid for again each time. The persona sentence it used to open with was
-   * 12 tokens of politeness on that bill.
+   * -- length, register, no lists, no emoji.
+   *
+   * It used to be re-prefilled on every turn, and the note here said so. That
+   * stopped being true when the on-device lane learned to keep its KV: measured,
+   * a second chain recording reuses **102 of 115** prompt tokens and prefill
+   * drops from 2.68 s to 0.29 s. Keeping the prompt short still pays, but on the
+   * FIRST turn of a conversation rather than on all of them — and the first turn
+   * of a session also pays 3.4 s to load the model, which dwarfs it.
    */
   private answerAndSpeak(provider: string, transcript: string): Promise<SpeakTiming | undefined> {
     return new Promise<SpeakTiming | undefined>(
@@ -995,18 +1071,34 @@ struct VoiceDebug {
       }
       .width('100%')
 
-      Button(this.benching ? 'generating…' : 'Bench decode')
-        .width('100%')
-        .height(40)
-        .backgroundColor(this.theme.bg_surface)
-        .fontColor(this.theme.text_primary)
-        .enabled(!this.benching && !this.recording && !this.analysing)
-        .onClick(() => { this.benchDecode(); })
+      Row({ space: 6 }) {
+        Button(this.benching ? 'running…' : 'Bench decode')
+          .layoutWeight(1)
+          .height(40)
+          .backgroundColor(this.theme.bg_surface)
+          .fontColor(this.theme.text_primary)
+          .fontSize(14)
+          .enabled(!this.benching && !this.recording && !this.analysing)
+          .onClick(() => { this.benchDecode(); })
+
+        Button('Bench memory')
+          .layoutWeight(1)
+          .height(40)
+          .backgroundColor(this.theme.bg_surface)
+          .fontColor(this.theme.text_primary)
+          .fontSize(14)
+          .enabled(!this.benching && !this.recording && !this.analysing)
+          .onClick(() => { this.benchMemory(); })
+      }
+      .width('100%')
 
       Text(this.benchNote === ''
-        ? 'Counts to a hundred on the on-device model and leaves the timings ' +
-          'in the log — prefill scales with cores, decode should not if ' +
-          'bandwidth is the wall.'
+        ? 'Threads apply to recognition too — every recording logs `asr: N s of ' +
+          'audio in N s at N threads`. Decode counts to a hundred on the ' +
+          'on-device model; Memory reads a gigabyte with no model at all. Three ' +
+          'curves worth having separately: recognition and prefill are GEMMs ' +
+          'that should scale with cores, decode is a GEMV that should not, and ' +
+          'the chip itself is the ceiling all three are measured against.'
         : this.benchNote)
         .fontSize(11)
         .fontColor(this.theme.text_tertiary)

@@ -178,6 +178,9 @@ add_library(bodyclock_core STATIC
     src/platform/bundle.cpp
     src/platform/c_api.cpp
     src/platform/log.cpp
+    # No engine behind it: it reads a buffer and divides. See its header for the
+    # claim it is there to check.
+    src/platform/membw.cpp
     src/store/timeline.cpp
 
     # Voice. One subsystem, two halves with different appetites -- the same split

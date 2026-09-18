@@ -18,6 +18,7 @@
 #include "llm/types.hpp"
 #include "platform/bundle.hpp"
 #include "platform/log.hpp"
+#include "platform/membw.hpp"
 #include "voice/omni.hpp"
 #include "voice/prosody.hpp"
 #include "voice/sensevoice.hpp"
@@ -421,6 +422,31 @@ extern "C" int bodyclock_local_set_threads(const char* id, int threads) {
     return 0;
 }
 
+extern "C" const char* bodyclock_memory_bandwidth(int threads, int mib, int passes) {
+    bodyclock::platform::MemoryBandwidth m;
+    if (!bodyclock::platform::measure_memory_bandwidth(threads, mib, passes, &m)) {
+        return nullptr;
+    }
+
+    rapidjson::StringBuffer buf;
+    rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+    w.StartObject();
+    w.Key("threads");     w.Int(m.threads);
+    w.Key("bytes");       w.Double(static_cast<double>(m.bytes));
+    w.Key("passes");      w.Int(m.passes);
+    w.Key("seconds");     w.Double(m.seconds);
+    // Decimal GB, matching the 19.5 this is here to check. Mixing GB and GiB is
+    // a silent 7% and has already produced one wrong table in design/voice.md.
+    w.Key("gbPerSecond"); w.Double(m.gb_per_s);
+    w.EndObject();
+
+    // Thread-local for the same reason the others are: two callers must not
+    // overwrite each other's answer.
+    static thread_local std::string out;
+    out = buf.GetString();
+    return out.c_str();
+}
+
 //------------------------------------------------------------------------------
 // Chat
 //------------------------------------------------------------------------------
@@ -508,13 +534,21 @@ extern "C" int bodyclock_chat(const char* provider_id,
             bodyclock::platform::log_info(
                 "on-device turn: %d prompt (%d reused) + %d decoded tokens, ctx %d, "
                 "threads %d, load %.0fms prefill %.0fms (%.1f tok/s) "
-                "decode %.0fms (%.1f tok/s), %d msgs dropped",
+                "decode %.0fms (first %.0fms, then %.1f tok/s), %d msgs dropped",
                 st.prompt_tokens, st.reused_tokens, st.decoded_tokens, st.n_ctx,
                 st.n_threads, st.load_ms,
                 st.prefill_ms,
                 st.prefill_ms > 0
                     ? (st.prompt_tokens - st.reused_tokens) * 1000.0 / st.prefill_ms : 0.0,
-                st.decode_ms,  st.decode_ms  > 0 ? st.decoded_tokens * 1000.0 / st.decode_ms : 0.0,
+                st.decode_ms, st.first_token_ms,
+                // The rate AFTER the first token, which is the one that predicts
+                // a longer reply. Dividing the whole span by the whole count
+                // mixes in a per-turn cost that does not repeat, and on an
+                // eleven-token reply that cost is most of the span.
+                (st.decode_ms - st.first_token_ms) > 0 && st.decoded_tokens > 1
+                    ? (st.decoded_tokens - 1) * 1000.0 /
+                          (st.decode_ms - st.first_token_ms)
+                    : 0.0,
                 st.dropped_msgs);
         }
         return ok ? 0 : 1;
@@ -671,6 +705,20 @@ extern "C" int bodyclock_voice_set_itn(int on) {
         return 1;
     }
     return recognizer().set_inverse_text_normalization(on != 0) ? 0 : 1;
+}
+
+extern "C" int bodyclock_voice_set_threads(int threads) {
+    std::lock_guard<std::mutex> guard(voice_mutex());
+    if (!voice_loaded()) {
+        bodyclock::platform::log_warn("bodyclock_voice_set_threads: no model is loaded");
+        return 1;
+    }
+    recognizer().set_threads(threads);
+    // Logged rather than returned, for the same reason the on-device lane's is:
+    // the number that matters is the one the NEXT transcript was produced with,
+    // and the two lines are read together.
+    bodyclock::platform::log_info("voice threads: -> %d", threads);
+    return 0;
 }
 
 extern "C" const char* bodyclock_voice_analyze(const short* pcm,

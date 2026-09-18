@@ -190,6 +190,25 @@ int bodyclock_local_load(const char* id);
 // per-chip and several conclusions that lean on it have to be re-derived.
 int bodyclock_local_set_threads(const char* id, int threads);
 
+// How fast this machine reads memory, measured WITHOUT a language model.
+//
+// Returns a JSON object -- threads, bytes, passes, seconds, gbPerSecond (in
+// decimal GB, the unit the figures in design/voice.md use) -- owned by the core
+// and valid until this thread's next call. NULL if the buffer would not
+// allocate. BLOCKS for tens of milliseconds per call.
+//
+//   threads  <= 0 means one. Sweep it; nothing here guesses a good value.
+//   mib      <= 0 selects 256, past any phone's last-level cache.
+//   passes   <= 0 selects 4.
+//
+// This exists for the same argument bodyclock_local_set_threads was added for,
+// one step further down. That sweep showed decode saturating at four threads and
+// was read as the memory bus filling up -- but it saturates at the number of
+// performance cores, which is equally consistent with running out of cores worth
+// using. A language model cannot separate those: every number it gives is one
+// engine's kernels as much as the chip. This reads a large buffer and divides.
+const char* bodyclock_memory_bandwidth(int threads, int mib, int passes);
+
 //------------------------------------------------------------------------------
 // Chat
 //------------------------------------------------------------------------------
@@ -319,6 +338,26 @@ void bodyclock_voice_unload(void);
 // Requires a loaded model; it changes what the model is asked, not how the
 // answer is read.
 int bodyclock_voice_set_itn(int on);
+
+// Worker threads for the encoder pass. <= 0 means all cores. Takes effect on the
+// next analysis. Returns 0 on success.
+//
+// Requires a loaded model, and does NOT reload it -- so a sweep compares thread
+// counts rather than page caches, the same reason bodyclock_local_set_threads
+// exists.
+//
+// **The default is 4 and the reason given for it does not hold.** The header it
+// came from says the encoder pass is "memory-bound enough that a phone's little
+// cores hold the batch up", and the arithmetic says otherwise: the model is
+// about 250 MB, read once per pass, which even at a slow pass is under a percent
+// of the 24.4 GB/s this device was measured to read. It is a GEMM over roughly
+// eighty stacked frames, reusing every weight eighty times -- compute-bound, and
+// compute-bound work is what little cores can help with.
+//
+// This exists so the default can be chosen by measurement instead. Recognition
+// is the first term of the silence a person sits through between speaking and
+// being answered, and it is the term nobody has timed on a phone.
+int bodyclock_voice_set_threads(int threads);
 
 // Analyse one recording. Returns a JSON object, or NULL on a bad argument.
 //

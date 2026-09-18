@@ -109,10 +109,26 @@ public:
     // nothing changed. Takes effect on the next transcribe().
     bool set_inverse_text_normalization(bool on);
 
-    // Worker threads for the encoder. Default 4: the pass is memory-bound
-    // enough that a phone's little cores hold the batch up rather than help,
-    // which is the same reason the LLM lane does not default to all cores.
-    // Takes effect on the next transcribe().
+    // Worker threads for the encoder. Takes effect on the next transcribe().
+    //
+    // **Default 4, and now measured** -- on a Kirin 9020, seconds of compute per
+    // second of clip:
+    //
+    //     threads      1      2      4      6      8
+    //     s per s    0.392  0.259  0.173  0.163  0.161
+    //     vs one       1.0   1.51   2.27   2.40   2.43
+    //
+    // Four is where it stops paying. Eight buys 7% -- 0.07 s on a four-second
+    // clip -- against two more cores taken from the UI, so 4 stays.
+    //
+    // The number 4 was originally inherited from the LLM lane and justified as
+    // "the pass is memory-bound enough that a phone's little cores hold the
+    // batch up rather than help". Both halves of that were wrong and the right
+    // answer came out the same, which is the least useful way to be right. The
+    // pass is a GEMM over ~80 stacked frames reusing every weight 80 times, and
+    // the model is ~250 MB read once -- under a percent of this device's 24.4
+    // GB/s. It is compute-bound, the little cores do contribute, and the
+    // contribution is simply small.
     void set_threads(int n);
 
     // `pcm` is mono 16 kHz float in [-1, 1] -- what a microphone callback hands

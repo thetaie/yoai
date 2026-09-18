@@ -835,13 +835,67 @@ profile first, the transcript second, and the model's own emotion tag last,
 labelled as not trusted with the reason. Below five utterances it shows the
 reason it is showing nothing.
 
-**Status: it compiles, and it has not run on a device.** The ArkTS builds clean
-and the recognition lane is in the built `libbodyclock.so` for `arm64-v8a`. The
-HAP is not signed on this machine: the debug signing profile predates
-`8dcabe5 rename: YoAI becomes Body Clock` and was issued for the old bundle
-name, so DevEco has to reissue it for `ai.bodyclock.app` before anything can be
-installed. Every number this page is meant to settle — microphone gain, room
-noise, load time, encoder speed on a Kirin — is still unmeasured.
+**It runs on the device now.** The signing profile that blocked this — issued
+for the bundle name that predates `8dcabe5 rename: YoAI becomes Body Clock` —
+has been reissued, and the page has been driven through recordings on a Kirin
+9020.
+
+**Encoder speed, measured**, seconds of compute per second of clip, swept with
+`bodyclock_voice_set_threads` without reloading the weights:
+
+| threads | 1 | 2 | 4 | 6 | 8 |
+|---|---|---|---|---|---|
+| s per s of clip | 0.392 | 0.259 | **0.173** | 0.163 | 0.161 |
+| × real time | 2.55 | 3.87 | **5.77** | 6.14 | 6.24 |
+| against one thread | 1.0 | 1.51 | 2.27 | 2.40 | 2.43 |
+
+**5.8× real time at four threads**, and four is where it stops paying: eight
+buys 7%, which is 0.07 s on a four-second clip, against two more cores taken
+from the UI. The default stays at 4.
+
+**So recognition is not the term to attack.** A ten-second note costs 1.7 s.
+That matters because the chain's own comment had it at "1.6× real time, already
+known" — unmeasured, wrong by 3.6×, and wrong in the direction that would have
+aimed the first optimisation at the cheapest stage.
+
+Microphone gain and room noise are still unmeasured.
+
+### The whole chain, measured: 1.4 seconds of silence
+
+Recognition, an on-device answer, and the platform voice — end to end on the
+Kirin. **The only number is the silence**: from the moment the person stops
+talking to the first sound coming back. Everything after that first sound is
+heard rather than waited through, because the platform voice speaks at 1× while
+the model is still writing the next sentence.
+
+| | first exchange of a session | second recording in a row |
+| --- | --- | --- |
+| model load | 3.42 s | 0 |
+| recognition, per clip | 0.62 s (3.78 s of audio) | 0.51 s (3.10 s) |
+| TTS engine start | 0.39 s | **0.00 s** — kept |
+| prefill | 2.43 s, 0 of 119 reused | **0.29 s, 102 of 115 reused** |
+| decode to the first sentence | 0.59 s (8 tokens) | 0.62 s (9 tokens) |
+| **silence** | **7.57 s** | **1.37 s** |
+
+**Two numbers, not one, and the gap between them is the product decision.** A
+session's first exchange costs five and a half times its steady state, and
+almost all of that is the model load and a prefix cache that has nothing in it
+yet. Both are fixable by warming on entry rather than on the first recording.
+
+**In the steady state there is no dominant term left**: decode to the first
+sentence 0.62 s (45%), recognition 0.51 s (37%), prefill 0.29 s (21%). That is
+the signal to stop. Any single fix from here is worth two or three hundred
+milliseconds.
+
+It is also a caution about reading proportions. Recognition was 17% of the cold
+exchange and the conclusion drawn from that was "not the term to attack" — true
+of that exchange, and it became 37% the moment prefill collapsed. A share is a
+statement about the other terms as much as its own.
+
+**Against the omni lane, for the same job**: 1.37 s of silence here against
+14.3 s before omni's first block of audio, and this one then speaks at 1× while
+omni streams at 3.7×. Three engines that each do one thing beat one that does
+all three, by an order of magnitude, on the only number a person experiences.
 
 ## The platforms do not offer the same thing
 
@@ -876,7 +930,9 @@ is settled.
 
 Measured elsewhere on the real target: a Kirin 9020 at 16 GB running Qwen3.5-2B
 `Q4_K_M` (1.28 GB) gets **~43 tok/s prefill and 11.2 tok/s decode** against a
-read bandwidth of **19.5 GB/s that a single core already saturates**.
+read bandwidth of ~~**19.5 GB/s that a single core already saturates**~~ — both
+halves of that clause were later measured false, and the corrections are two
+paragraphs down. The device reads **24.4 GB/s**, and it takes four cores.
 
 That figure is worth being able to re-derive: decode reads every weight for
 every token, so a model of size S cannot exceed bandwidth/S tokens per second —
@@ -888,15 +944,31 @@ compute-bound.
 **Confirmed at two sizes, through this app's own lane**, on the same prompt
 (「您好，请问几点钟了？」, 19 tokens):
 
-| | Size | Decode | Weights read | Of 19.5 GB/s | Load |
-| --- | --- | --- | --- | --- | --- |
-| Qwen3.5-2B `Q4_K_M` | 1.19 GB | 14.0 tok/s | 16.7 GB/s | 85% | 5.9 s |
-| Qwen3.5-4B `Q4_K_M` | 2.55 GB | 6.70 tok/s | 17.1 GB/s | 88% | 14.5 s |
+| | Size | Decode | Weights read | Of the 19.5 | Of the measured 24.4 | Load |
+| --- | --- | --- | --- | --- | --- | --- |
+| Qwen3.5-2B `Q4_K_M` | 1.281 GB | 14.0 tok/s | 17.9 GB/s | 92% | 73% | 5.9 s |
+| Qwen3.5-4B `Q4_K_M` | 2.741 GB | 6.70 tok/s | 18.4 GB/s | 94% | 75% | 14.5 s |
 
-Two points, both landing at 85–88% of the ceiling, and the 4B's rate was
-predicted as ~6.5 before it was run. That is what makes this the settled part:
-doubling the model halves the tokens per second, and no amount of tuning moves
-it, because the wall is how fast the memory can be read.
+**Decimal GB throughout**, because that is the unit the 19.5 is in and mixing
+the two is a silent 7% error. A first version of this table used GiB under a GB
+label and reported 85–88% against the 19.5 instead of 92–94%.
+
+Two points, and the 4B's rate was predicted as ~6.5 before it was run. **The law
+is what is settled**: doubling the model halves the tokens per second, because
+decode reads every weight for every token. Which constant it runs into is a
+separate question, and the last column is the one that turned out to matter.
+
+**Two corrections that arrived later, both further down.** "A single core
+already saturates it" is false — a thread sweep puts saturation at four, the
+performance-core count. And **19.5 GB/s is not the chip's ceiling**: measured
+with a read loop and no model at all, the device does at least 24.4 GB/s, of
+which llama.cpp's decode uses 73–75%.
+
+The inverse-with-size law holds and the two-point table above is still the way
+to predict a model's decode rate **for this engine**. What does not hold is
+reading that constant as physics. Anything below that argues "nothing can be
+faster because the bus is full" needs re-deriving against 24.4, and the
+headroom is real: MNN's thinker already decodes above what llama.cpp reaches.
 
 Prefill came out 41.3 and 16.9 tok/s, but on a 19-token prompt that is mostly
 fixed overhead and should not be quoted.
@@ -915,14 +987,57 @@ and the mmproj is not optional, against 1.53 GB for SenseVoice `q8` plus a 2B
 text model, of which the recognition half is loaded only while transcribing.
 
 **Measured** here for comparison: Qwen2.5-Omni took 36 s on the 48-second clip
-that SenseVoice handled in 1.5 s. Twenty-four times.
+that SenseVoice handled in 1.5 s. Twenty-four times — **but that pair is not
+like for like**, and reading it as "recognition is 24× slower" is the mistake it
+invites. The 36 s is a whole exchange, encoder and prefill and generation; the
+1.5 s is transcription with no language model in it at all.
 
-The derived figure now has a real anchor beside it, though not a clean one. On
-the phone, through MNN, 4.8 s of recorded audio came to **194 prompt tokens**,
-and the thinker spent **17.2 s** on them plus sixteen decoded tokens — the log
-does not separate prefill from decode, so this neither confirms nor refutes
-~26 tok/s. What it does settle is the direction: feeding audio to a 3B on this
-hardware is tens of seconds, not seconds.
+**The encoders are close. It is what they emit that differs.** Both measured on
+the Kirin, per second of clip:
+
+| | encoder | × real time |
+| --- | --- | --- |
+| SenseVoice, 4 threads | 0.173 s | 5.8 |
+| Qwen2.5-Omni's audio encoder in MNN | ~0.31 s | ~3.2 |
+
+Under two times apart. And the omni thinker's 9.3 s splits **audio 1.57 s,
+prefill 5.68 s, decode 2.01 s** — the encoder is 17% of it and the prefill is
+61%.
+
+That is the whole argument, arriving as a measurement rather than a derivation:
+an audio encoder hands the language model ~25 tokens per second of clip, and
+every one is prefilled. A transcript of the same speech is nearer 4 tokens per
+second. **Recognition first is not a faster encoder, it is a sixfold shorter
+prompt** — and on this device that came to 5.68 s against about 1.5 s, of which
+2.6× is the token count and 1.5× is 3B against 2B.
+
+(The ~0.31 is inferred: that run logged its token count but not its clip length,
+which is the bug the logging fix in `src/voice/omni.cpp` was for. The next run
+prints the length directly.)
+
+**The derived ~26 tok/s was close.** Measured on the phone through MNN, with the
+prefill separated out: **182 tokens in 5.68 s, 32.0 tok/s**. So a minute of
+speech — ~1500 audio tokens plus the template — is about **49 seconds** before
+the answer starts, against the 58 s this paragraph derived. The derivation was
+pessimistic by a fifth and right in every way that mattered.
+
+**That extrapolation assumes prefill is linear in the token count, and it was
+checked.** Two phone runs looked like it might not be: 182 tokens took 5.64 s
+and 150 took 5.50 s, which fits a large fixed cost far better than a rate. A
+large fixed cost would make long clips much cheaper than the line predicts, so
+it mattered. Two desktop runs on the same clip with deliberately different
+prompt lengths:
+
+| prompt tokens | prefill | average |
+| --- | --- | --- |
+| 264 | 3.09 s | 85.4 tok/s |
+| 465 | 5.75 s | 80.9 tok/s |
+
+13.2 ms per token with an intercept of **−0.4 s** — no fixed cost, and the
+average creeping up with length is attention's quadratic term showing through.
+So the line holds and the phone pair is not structural. Most likely thermal:
+those two runs were three minutes apart and the second followed a 38-second
+Talker run on eight threads.
 
 ### Whether it hears tone at all — and three conclusions withdrawn
 
@@ -1298,10 +1413,12 @@ is 2.5× slower on the device, decode only 1.2×. The split is the expected shap
 — prefill is compute-bound and decode is memory-bound — and it says which half
 to attack.
 
-**One number here did not fit**, and chasing it found a wrong sentence
+**One number here did not fit**, and chasing it found two wrong sentences
 elsewhere. The thinker decodes at 15.9 tok/s against a 1.74 GB weight file,
 which is **27.6 GB/s** of reads — half again the 19.5 GB/s the section above
-calls a wall that a single core already saturates.
+calls a wall that a single core already saturates. The number turned out to be
+real; both the "single core" claim and the first attempt to explain the number
+away did not.
 
 #### The thread sweep, and what it disproves
 
@@ -1324,25 +1441,91 @@ big, three mid, four little — so the little cores contribute nothing to either
 The project's default of six threads was one cluster too many and is now four,
 for the same throughput and two more cores left to the UI.
 
-What survives is the *conclusion* the wrong sentence supported. Four cores do
-reach about 85% of the 19.5, and llama.cpp's own ceiling of 15.2 tok/s for a
-1.28 GB model holds — 12.9 measured is 85% of it. So "another compute unit does
-not move that wall" still stands, for a different reason: not that one core
-fills the bus, but that four already take most of what there is.
+What survives is narrower than it first appeared. llama.cpp's own ceiling of
+15.2 tok/s for a 1.28 GB model holds — 12.9 measured is 85% of it — so within
+this engine, threads are not the lever.
 
-#### Which makes 27.6 GB/s a wrong denominator, not a fast engine
+**But the plateau is not the bus.** It arrives at the performance-core count,
+which is as consistent with running out of useful cores as with filling the
+memory controller, and a sweep of one engine cannot separate those. Measured
+directly two sections down, the chip reads at 24.4 GB/s and llama.cpp's decode
+uses 73–75% of it. The threads stop helping before the memory does.
 
-llama.cpp cannot exceed ~16.5 GB/s on this chip however it is threaded, so a
-second engine reading 27.6 is not plausible. The likely error is the divisor:
-1.74 GB is the whole **bundle**, and the twenty-four files in it include the
-audio encoder, the Talker, the DiT and the vocoder, none of which are read per
-token of thinker decode. If the thinker's own weights are about 1.05 GB, then
-15.9 tok/s is **16.7 GB/s** — the ceiling measured above, arrived at
-independently.
+#### The 27.6 GB/s survives the check, and the wall is llama.cpp's
 
-Not verified: it needs the per-file sizes from the MNN bundle. But the 27.6
-should not be quoted again without that check, and it is no longer evidence
-that the bandwidth figure is wrong.
+**The denominator was checked and it is right.** A previous version of this
+section explained the 27.6 away as a divisor error — 1.74 GB read as the whole
+bundle, the thinker's own weights guessed at 1.05 GB, which lands on 16.7 GB/s
+and agrees with the sweep. It does not survive the numbers it asked for:
+
+- **`llm.mnn.weight` is the thinker alone**, 1,737,291,202 bytes (1.618 GiB).
+  The bundle is 3.77 GiB across 24 files, and the audio encoder, Talker, DiT and
+  vocoder are separate files beside it. The per-file listing was already in the
+  device log that produced the 27.6.
+- **The graph accounts for every byte of it.** `llm.mnn.json` has 327 ops
+  carrying external blobs, and they sum to exactly 1,737,291,202 —
+  1655.7 MiB in `Convolution`, which is how MNN stores a Linear, plus 1.2 MiB of
+  `LayerNorm`. The model is dense: no routing, no conditional layers, so decode
+  reads all of it for every token.
+
+**And the inference undercut itself.** "llama.cpp cannot exceed ~16.5 GB/s on
+this chip however it is threaded" treats the sweep's plateau as a property of
+the bus — but the sweep explains that plateau two paragraphs earlier by the
+performance-core count, *the little cores contribute nothing*. That is a compute
+explanation. A curve that flattens at the number of usable cores cannot by
+itself tell you the memory bus is full; it is equally consistent with having run
+out of cores worth using.
+
+#### Measured without a model: the chip does at least 24.4 GB/s
+
+`bodyclock_memory_bandwidth` reads a 256 MiB buffer with no engine involved —
+threads claiming 4 MiB chunks from a shared counter, four accumulators to keep
+loads in flight, the buffer written before the clock starts. Swept the same way
+as the decode bench, on the same device:
+
+| threads | 1 | 2 | 4 | 6 | 8 |
+|---|---|---|---|---|---|
+| GB/s | 6.5 | 10.6 | 20.9 | 21.9 | **24.4** |
+
+**19.5 GB/s is not a hardware wall.** A few dozen lines of ordinary C beat it by
+a quarter, and llama.cpp's decode implies 17.9–18.4 GB/s — 73–75% of what the
+chip gives up to a read loop. So the constant this file has been dividing by was
+one engine's throughput all along, and "no other compute unit moves that wall"
+was only ever tested against engines with llama.cpp's access pattern.
+
+**24.4 is a lower bound, not a peak.** Each fix to the benchmark raised it, which
+is the sign of a measurement not yet limited by the thing it is measuring:
+
+| | 1 | 4 | 6 | 8 |
+|---|---|---|---|---|
+| equal static slices | 6.0 | 18.2 | 16.0 | 21.4 |
+| chunks claimed from a counter | 5.5 | 18.2 | 22.7 | 23.0 |
+| plus a 2 MiB-aligned buffer | 6.5 | 20.9 | 21.9 | **24.4** |
+
+The first row contains its own refutation: **six threads slower than four**, five
+runs each. Equal slices on one big, three mid and four little cores means the
+timer waits for a little core carrying a sixth of the buffer while the fast ones
+idle. That is not the machine's bandwidth, it is the bandwidth of an unlucky
+split — and it inverted the very ordering the table exists to show.
+
+**Huge pages were tried and are not available.** 256 MiB of 4 KiB pages is 65,536
+translations against a TLB holding a few thousand, so a page walk every 512 loads
+was a plausible reason the loop might understate. `madvise(MADV_HUGEPAGE)` was
+refused by this kernel. It is worth recording as closed rather than untried,
+because it also means MNN does not get huge pages for its weights either: page
+size cannot explain any gap between the two.
+
+**What is left unexplained is 13%**, and it is left there. MNN's thinker implies
+27.6 GB/s against a measured 24.4, which is inside the range that "the read loop
+uses scalar 8-byte loads and has not been tuned" covers — every previous fix
+moved it further than that. Chasing it further would not change anything below:
+the wall is higher than 19.5 either way, and by enough that the arithmetic in
+this file should be re-derived rather than patched.
+
+**MNN's side was cross-checked and holds.** The 15.9 tok/s comes from MNN's own
+counter, so it was verified against wall-clock differences between runs instead:
+184 prompt tokens to 8 generated took 7.5 s, and to 25 generated took 8.6 s —
+17 tokens in 1.1 s, **15.5 tok/s**, arrived at without touching MNN's timers.
 
 **The desktop extrapolation was right in direction**, and how far is not
 settled. "On a phone it can only be worse" is how the paragraph above ends, and

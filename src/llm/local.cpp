@@ -623,6 +623,14 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
                 utf8_carry.erase(0, whole);
             }
         }
+        // Stamped on the first token only, and before the forward that produces
+        // the second. What it captures is everything between the end of prefill
+        // and the first piece of text: the sample from the prefill logits, and
+        // whatever llama.cpp does once when the batch size drops from the whole
+        // prompt to one.
+        if (impl_->stats.decoded_tokens == 0) {
+            impl_->stats.first_token_ms = ms_since(t0);
+        }
         ++impl_->stats.decoded_tokens;
 
         batch = llama_batch_get_one(const_cast<llama_token*>(&tok), 1);

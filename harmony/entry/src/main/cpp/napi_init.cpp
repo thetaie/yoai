@@ -276,6 +276,50 @@ napi_value NativeLocalSetThreads(napi_env env, napi_callback_info info) {
     return Int32(env, bodyclock_local_set_threads(id.c_str(), n));
 }
 
+// nativeMemoryBandwidth(threads, mib, passes, onDone: (json) => void): void
+//
+// On a worker, because it blocks: at 256 MiB and four passes it is a gigabyte
+// of reads, tens of milliseconds, and a sweep is a dozen of those back to back.
+// Run on the UI thread it would drop frames in exactly the way that makes a
+// bandwidth number unreliable.
+void MemoryBandwidthWorker(int threads, int mib, int passes,
+                           napi_threadsafe_function tsfn) {
+    const char* json = bodyclock_memory_bandwidth(threads, mib, passes);
+    auto* ev = new StreamEvent{json ? "result" : "error",
+                               json ? std::string(json)
+                                    : std::string("could not allocate the buffer")};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+}
+
+napi_value NativeMemoryBandwidth(napi_env env, napi_callback_info info) {
+    size_t argc = 4;
+    napi_value argv[4] = {nullptr, nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 4) {
+        napi_throw_error(env, nullptr,
+                         "nativeMemoryBandwidth(threads, mib, passes, onDone) needs four arguments");
+        return nullptr;
+    }
+    std::int32_t threads = 0, mib = 0, passes = 0;
+    napi_get_value_int32(env, argv[0], &threads);
+    napi_get_value_int32(env, argv[1], &mib);
+    napi_get_value_int32(env, argv[2], &passes);
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "bodyclock_memory_bandwidth", NAPI_AUTO_LENGTH, &work_name);
+
+    napi_threadsafe_function tsfn = nullptr;
+    if (napi_create_threadsafe_function(env, argv[3], nullptr, work_name, 0, 1,
+                                        nullptr, nullptr, nullptr, CallJs, &tsfn) != napi_ok) {
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+
+    std::thread(MemoryBandwidthWorker, threads, mib, passes, tsfn).detach();
+    return nullptr;
+}
+
 napi_value NativeLocalLoad(napi_env env, napi_callback_info info) {
     size_t argc = 2;
     napi_value argv[2] = {nullptr, nullptr};
@@ -423,6 +467,19 @@ napi_value NativeVoiceSetItn(napi_env env, napi_callback_info info) {
     std::int32_t on = 1;
     if (argc >= 1) napi_get_value_int32(env, argv[0], &on);
     return Int32(env, bodyclock_voice_set_itn(on));
+}
+
+// nativeVoiceSetThreads(threads: number): number
+//
+// Synchronous and cheap -- it sets a field the next transcript reads, and does
+// not touch the weights, so a sweep compares thread counts and not page caches.
+napi_value NativeVoiceSetThreads(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    std::int32_t n = 0;
+    if (argc >= 1) napi_get_value_int32(env, argv[0], &n);
+    return Int32(env, bodyclock_voice_set_threads(n));
 }
 
 // nativeVoiceLoad(path, onDone: (type, content) => void): void
@@ -769,6 +826,7 @@ napi_value Init(napi_env env, napi_value exports) {
         {"nativeLocalSet",       nullptr, NativeLocalSet,       nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeLocalLoad",      nullptr, NativeLocalLoad,      nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeLocalSetThreads", nullptr, NativeLocalSetThreads, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeMemoryBandwidth", nullptr, NativeMemoryBandwidth, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChat",           nullptr, NativeChat,           nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChatCancel",     nullptr, NativeChatCancel,     nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeVoiceAvailable", nullptr, NativeVoiceAvailable, nullptr, nullptr, nullptr, napi_default, nullptr},
@@ -776,6 +834,7 @@ napi_value Init(napi_env env, napi_value exports) {
         {"nativeVoiceLoaded",    nullptr, NativeVoiceLoaded,    nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeVoiceUnload",    nullptr, NativeVoiceUnload,    nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeVoiceSetItn",    nullptr, NativeVoiceSetItn,    nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeVoiceSetThreads", nullptr, NativeVoiceSetThreads, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeVoiceAnalyze",   nullptr, NativeVoiceAnalyze,   nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeOmniAvailable",  nullptr, NativeOmniAvailable,  nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeOmniLoad",       nullptr, NativeOmniLoad,       nullptr, nullptr, nullptr, napi_default, nullptr},

@@ -145,6 +145,15 @@ struct LocalStats {
     double load_ms        = 0;   // model load; non-zero only on the turn that paid
     double prefill_ms     = 0;
     double decode_ms      = 0;
+    /// Time to the FIRST decoded token, inside decode_ms rather than beside it.
+    ///
+    /// Separated because a short reply cannot be read without it. Two turns of
+    /// the same model measured 14.0 tok/s over 106 tokens and 8.2 over 11 — not
+    /// a slowdown, a per-turn cost the short reply had nowhere to hide. Solving
+    /// the pair put it near half a second, which is most of a chain's wait
+    /// before the first spoken word, so it is worth a number of its own instead
+    /// of an inference across mismatched runs.
+    double first_token_ms = 0;
     int    prompt_tokens  = 0;
     int    decoded_tokens = 0;
     int    n_threads      = 0;   // what the turn actually ran with
