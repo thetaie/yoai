@@ -1598,8 +1598,64 @@ investigation to stop.
 
 ### Whether to adopt it
 
-**The case for**: it is the only way to get the model's own voice out, and that
-works today. Recognition through it is also plausibly better than SenseVoice's
+**The case for, and the half this file never priced**: it is the only way to get
+the model's own voice out, and that works today.
+
+**Its voice is reported to sound more natural than the platform's.** That is an
+observation from listening to both, not a measurement, and it is recorded
+because everything else here prices only the cost side. A decision that weighs
+3.7× against "one capability" has quietly assumed the capability is
+interchangeable with the free one — and if it is not, the trade is a product
+judgement rather than arithmetic.
+
+**The obvious objection was checked: the platform is not simply misconfigured.**
+An app cannot ask for a nicer voice than the one it is getting.
+
+- `@hms.ai.textToSpeech` lists **three** voices on this handset, and only person
+  13 (聆小珊) is INSTALLED. Every one of them has style
+  `interaction-broadcast`, and **style cannot be requested** — it appears in
+  those typings only as a field on `VoiceInfo`, never in `VoiceQuery` or
+  `CreateEngineParams`. `person` is the whole of the choice.
+- **The online engine is not a door.** `online: 0` is refused with
+  `401 online type error`. An earlier note here said offline was the only engine
+  HarmonyOS offers and was demoted to "an assumption"; it was right, and now it
+  is checked.
+- `@hms.ai.textReader` is a second surface with a richer model on paper —
+  `Person { tone, style }`, style as an *input*, an online mode — and driven
+  with its defaults it speaks **the same voice**. The panel says 小艺朗读 and
+  what comes out is the broadcast timbre.
+
+So the platform's ceiling for a third-party app is that timbre. The voices in
+the assistant's own settings menu belong to the assistant and are not reachable
+from either API. **The comparison against omni is therefore a fair one**, which
+is the opposite of what checking it was expected to show.
+
+One thread is unpulled: `textReader`'s `person` was never passed, and
+`interaction-broadcast` is obviously one name in a scheme. The typings enumerate
+nothing, so that is guessing string constants, and a wrong guess speaks in the
+default and looks like a success.
+
+**The obvious middle path is closed for this model.** Driving the Talker from
+text — the cheap chain writes, omni's voice speaks — would skip the thinker's
+9 s entirely. MNN has the entry point, `generateTTS`, but it refuses anything
+whose `talker_type` is not `qwen3_tts`, and Qwen2.5-Omni's Talker consumes the
+thinker's hidden states rather than text. It is not a wiring problem.
+
+**A standalone TTS in the same family would be the route**, and it changes the
+size argument though not the speed one. The parts that make sound are talker
+391 MB, DiT 348 MB, vocoder 116 MB, predit 17 MB and the talker embeddings
+34 MB — about **0.9 GB**, against 3.8 for the bundle. The 3B thinker is the
+freight, and it is exactly the part a text-driven TTS does not need. But the
+3.7× was measured on `generateWavform()` alone, so removing the thinker does not
+move it.
+
+**What the ratio actually rules out is conversation, not playback.** Everything
+above assumes somebody is waiting to be answered. An app reading back something
+it prepared — a day's recap — spends 3.7× in the background and nothing in
+front of the person. That is a different product, and this file has never
+costed it.
+
+Recognition through it is also plausibly better than SenseVoice's
 — Qwen2.5-Omni-3B fixed four transcription errors including a polarity flip, in
 the table above — though that was measured through llama.cpp and has not been
 reproduced in MNN's own quantization, because the reference clip is longer than

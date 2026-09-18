@@ -54,6 +54,11 @@ const ENDERS: string = '。！？!?…';
  */
 export interface Voice {
   person: number;
+  /**
+   * Which engine reported it: 0 online, 1 offline. Carried on the row because
+   * use() has to rebuild with the same one, and nothing else on the row says.
+   */
+  online: number;
   language: string;
   style: string;
   gender: string;
@@ -76,6 +81,17 @@ export class SystemTts {
   // passing back whatever the engine itself reported.
   private static person: number = 0;
   private static language: string = 'zh-CN';
+
+  // 0 online, 1 offline -- the SDK's spelling, and it reads backwards.
+  //
+  // **Offline is the app's answer; online is a measurement.** Nothing this app
+  // says aloud requires the text to leave the device, which is a privacy
+  // property rather than a performance one. Enumerating what the online engine
+  // offers costs nothing, because listing voices sends no utterance. SPEAKING
+  // with one sends the sentence to a server, and that is the line -- which is
+  // why the mode travels on the Voice row instead of being a global setting
+  // somebody could flip once and forget.
+  private static mode: number = 1;
 
   // Why the last createEngine failed, for a page that has to say something
   // better than "it did not work". Cleared on every success.
@@ -107,9 +123,11 @@ export class SystemTts {
    * Create the engine, or hand back the one already made.
    *
    * `online: 1` is the OFFLINE engine despite how it reads -- the field is
-   * "which engine", not "is networked", and offline is the only one HarmonyOS
-   * currently offers. Keeping it offline also keeps this lane consistent with
-   * the rest of the app, where nothing said aloud has to leave the device.
+   * "which engine", not "is networked". Which one this builds comes from `mode`,
+   * and the default is offline because nothing this app says aloud has to leave
+   * the device. An earlier version of this note added "and offline is the only
+   * one HarmonyOS currently offers", which was an assumption rather than
+   * something looked up.
    *
    * **Callers in flight share one creation.** Checking `engine` alone is not
    * enough: creation takes 0.4-0.6 s, and two calls inside that window both see
@@ -137,7 +155,7 @@ export class SystemTts {
       const params: textToSpeech.CreateEngineParams = {
         language: SystemTts.language,
         person: SystemTts.person,
-        online: 1
+        online: SystemTts.mode
       };
       textToSpeech.createEngine(params,
         (err: BusinessError, engine: textToSpeech.TextToSpeechEngine) => {
@@ -191,7 +209,7 @@ export class SystemTts {
    * log rather than the return, because there is nothing different a caller
    * could do about the two.
    */
-  static voices(): Promise<Voice[]> {
+  static voices(online: number): Promise<Voice[]> {
     return new Promise<Voice[]>((resolve: (v: Voice[]) => void) => {
       SystemTts.init().then((ok: boolean) => {
         const engine: textToSpeech.TextToSpeechEngine | undefined = SystemTts.engine;
@@ -200,9 +218,12 @@ export class SystemTts {
           return;
         }
         SystemTts.seq += 1;
+        // The query's own `online` selects which set to enumerate. Whether an
+        // offline engine will list the online set is not documented, so the two
+        // outcomes -- a list, or an error in the log -- are both answers.
         const query: textToSpeech.VoiceQuery = {
           requestId: 'bc-q' + SystemTts.seq,
-          online: 1
+          online: online
         };
         engine.listVoices(query,
           (err: BusinessError, infos: Array<textToSpeech.VoiceInfo>) => {
@@ -216,6 +237,7 @@ export class SystemTts {
               const v: textToSpeech.VoiceInfo = infos[i];
               const one: Voice = {
                 person: v.person,
+                online: online,
                 language: v.language,
                 style: v.style,
                 gender: v.gender,
@@ -272,12 +294,17 @@ export class SystemTts {
    */
   static use(voice: Voice): Promise<boolean> {
     return new Promise<boolean>((resolve: (v: boolean) => void) => {
-      if (voice.person === SystemTts.person && SystemTts.engine !== undefined) {
+      // The mode is part of the identity. Two voices can share a person number
+      // across the online and offline sets, so comparing the person alone would
+      // hand back the engine already running and silently ignore the switch.
+      if (voice.person === SystemTts.person && voice.online === SystemTts.mode &&
+          SystemTts.engine !== undefined) {
         resolve(true);
         return;
       }
       const previousPerson: number = SystemTts.person;
       const previousLanguage: string = SystemTts.language;
+      const previousMode: number = SystemTts.mode;
       const spellings: string[] = [voice.language];
       const other: string = SystemTts.otherSpelling(voice.language);
       if (other !== voice.language) {
@@ -291,6 +318,7 @@ export class SystemTts {
           // app's voice.
           SystemTts.person = previousPerson;
           SystemTts.language = previousLanguage;
+          SystemTts.mode = previousMode;
           const code: number = SystemTts.lastCode;
           const message: string = SystemTts.lastMessage;
           SystemTts.init().then(() => {
@@ -304,6 +332,7 @@ export class SystemTts {
         }
         SystemTts.person = voice.person;
         SystemTts.language = spellings[i];
+        SystemTts.mode = voice.online;
         SystemTts.init().then((ok: boolean) => {
           if (ok) {
             resolve(true);

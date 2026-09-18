@@ -34,6 +34,7 @@ import { ModelStore } from '../core/ModelStore';
 import { TextAxes, TextAxesReader, TextAxesResult } from '../core/TextAxes';
 import { SpeakTiming, SystemTts, Voice } from '../core/SystemTts';
 import { ChainPrompt, DEFAULT_CHAIN_PROMPT } from '../core/ChainPrompt';
+import { TextReaderTts } from '../core/TextReaderTts';
 
 //------------------------------------------------------------------------------
 // The shape the core returns (src/bodyclock.h, bodyclock_voice_analyze)
@@ -92,6 +93,15 @@ interface AnalysisJson {
   transcript?: TranscriptJson;
   prosody?: ProsodyJson;
 }
+
+/**
+ * One line, spoken by whichever engine is being judged.
+ *
+ * A constant because the comparison is only worth anything if both voices say
+ * the same thing: it has a question, a statement, and enough syllables for
+ * prosody to show.
+ */
+const DEMO_LINE: string = '今天过得怎么样？这是我现在说话的声音。';
 
 /** What bodyclock_memory_bandwidth returns. gbPerSecond is DECIMAL GB. */
 interface MemBwJson {
@@ -479,16 +489,27 @@ struct VoiceDebug {
   /**
    * Ask the platform engine which voices this device has.
    *
-   * One question only: how many. Huawei's offline pack is widely assumed to be
-   * a single female voice, and an assumption about what a device contains is
-   * worth exactly one button press to replace with a fact. The answer also goes
-   * to the log, because it is a property of the handset that the next person
-   * reading these timings will want and cannot re-derive.
+   * An assumption about what a device contains is worth exactly one button press
+   * to replace with a fact, and this one replaced two. The offline set is three
+   * voices, of which only person 13 is INSTALLED -- and every one of them has
+   * style `interaction-broadcast`. That style is not selectable: it appears in
+   * the SDK typings only as a field on VoiceInfo, never as a query or an engine
+   * parameter, so `person` is the whole of the choice.
+   *
+   * Which is why `online` is a parameter here. The broadcast timbre is not the
+   * assistant's conversational one, so "the platform voice sounds less natural
+   * than omni's" may be a statement about which voices this API hands out rather
+   * than about engines. Listing the online set costs nothing -- enumerating
+   * sends no utterance. Speaking with one would send the sentence to a server,
+   * which is a different decision and belongs to the person pressing Hear it.
+   *
+   * The answer goes to the log as well as the screen: it is a property of the
+   * handset that the next person reading these timings cannot re-derive.
    */
-  private async probeVoices(): Promise<void> {
+  private async probeVoices(online: number): Promise<void> {
     this.voicesBusy = true;
     this.voicesNote = '';
-    const got: Voice[] = await SystemTts.voices();
+    const got: Voice[] = await SystemTts.voices(online);
     this.voicesBusy = false;
     this.voicesAsked = true;
     this.voices = got;
@@ -496,7 +517,21 @@ struct VoiceDebug {
     this.voicesNote = got.length === 0
       ? 'the engine returned nothing — an error code is in the log'
       : '';
+    // The whole list, not the count. Which timbres this handset actually has is
+    // the question behind whether the platform voice is a fair comparison for
+    // omni's: if what the API hands out is a broadcast voice and a better one is
+    // sitting in the list unselected, the comparison was never about engines.
+    // `style` and `description` are the fields that say which is which, and a
+    // count says nothing.
     hilog.info(0x0000, 'bodyclock', '%{public}s', 'tts voices: ' + got.length);
+    for (let i: number = 0; i < got.length; i++) {
+      const v: Voice = got[i];
+      hilog.info(0x0000, 'bodyclock', '%{public}s',
+        'tts voice[' + i + '] person=' + v.person +
+        ' language=' + v.language + ' gender=' + v.gender +
+        ' style=' + v.style + ' status=' + (v.status === '' ? '?' : v.status) +
+        ' desc=' + v.description);
+    }
     for (let i: number = 0; i < got.length; i++) {
       const v: Voice = got[i];
       hilog.info(0x0000, 'bodyclock', '%{public}s',
@@ -529,7 +564,26 @@ struct VoiceDebug {
       return;
     }
     this.voicesNote = '';
-    await SystemTts.say('今天过得怎么样？这是我现在说话的声音。');
+    await SystemTts.say(DEMO_LINE);
+  }
+
+  /**
+   * The same sentence, through the other platform voice.
+   *
+   * Same words, same handset, same moment -- which is what the comparison was
+   * missing. "The platform sounds less natural than omni" was judged across two
+   * pages speaking two different texts, and a claim that decides whether a
+   * 3.8 GB engine is worth 3.7x real time should not rest on that.
+   *
+   * Hear it above plays 聆小珊 in interaction-broadcast. This plays whatever
+   * @hms.ai.textReader defaults to, which is a different voice model entirely --
+   * there `style` is an input rather than a field the engine reports back.
+   */
+  private async readerSay(): Promise<void> {
+    this.voicesBusy = true;
+    const ok: boolean = await TextReaderTts.say(this.ctx(), DEMO_LINE);
+    this.voicesBusy = false;
+    this.voicesNote = ok ? '' : 'textReader: ' + TextReaderTts.error();
   }
 
   /**
@@ -1081,13 +1135,39 @@ struct VoiceDebug {
         .fontColor(this.theme.text_primary)
         .width('100%')
 
-      Button(this.voicesBusy ? 'asking…' : 'List voices')
+      Row({ space: 6 }) {
+        Button(this.voicesBusy ? 'asking…' : 'Offline')
+          .layoutWeight(1)
+          .height(40)
+          .backgroundColor(this.theme.bg_surface)
+          .fontColor(this.theme.text_primary)
+          .fontSize(14)
+          .enabled(!this.voicesBusy && !this.recording && !this.analysing)
+          .onClick(() => { this.probeVoices(1); })
+
+        // Enumerating costs nothing — no utterance is sent to ask what exists.
+        // Hearing one is the decision, and it belongs to whoever presses it.
+        Button('Online')
+          .layoutWeight(1)
+          .height(40)
+          .backgroundColor(this.theme.bg_surface)
+          .fontColor(this.theme.text_primary)
+          .fontSize(14)
+          .enabled(!this.voicesBusy && !this.recording && !this.analysing)
+          .onClick(() => { this.probeVoices(0); })
+      }
+      .width('100%')
+
+      // The other platform voice, on the same line as Hear it above so the two
+      // can be judged against each other rather than across two pages.
+      Button('Say it with AI 朗读')
         .width('100%')
         .height(40)
         .backgroundColor(this.theme.bg_surface)
         .fontColor(this.theme.text_primary)
+        .fontSize(14)
         .enabled(!this.voicesBusy && !this.recording && !this.analysing)
-        .onClick(() => { this.probeVoices(); })
+        .onClick(() => { this.readerSay(); })
 
       if (this.voicesAsked && this.voices.length > 0) {
         ForEach(this.voices, (v: Voice) => {
@@ -1109,6 +1189,11 @@ struct VoiceDebug {
             }
             .width('100%')
 
+            // Which set it came from, because two rows can share a person
+            // number across the two engines and nothing else on the row says.
+            this.metric('engine', v.online === 0
+              ? 'online — speaking sends the text to a server'
+              : 'offline')
             this.metric('language', v.language === '' ? '—' : v.language)
             this.metric('gender', v.gender === '' ? '—' : v.gender)
             this.metric('style', v.style === '' ? '—' : v.style)
@@ -1125,7 +1210,7 @@ struct VoiceDebug {
           .width('100%')
           .padding({ top: 8, bottom: 8 })
           .border({ width: { bottom: 1 }, color: this.theme.divider })
-        }, (v: Voice) => v.person + ':' + v.style)
+        }, (v: Voice) => v.online + ':' + v.person + ':' + v.style)
       }
 
       if (this.voicesNote !== '') {
@@ -1139,8 +1224,10 @@ struct VoiceDebug {
         ? 'Speaking with ' + this.person + '. The person is fixed when the ' +
           'engine is created, so each switch shuts it down and builds another ' +
           '— fine here, not something to do between two sentences of a reply.'
-        : 'The offline engine speaks with whatever voice packs this handset ' +
-          'ships; the list is a property of the device, not of the SDK.')
+        : 'Every offline voice this handset has is style interaction-broadcast, ' +
+          'and style is not selectable — it appears in the SDK only as a field ' +
+          'the engine reports. Online lists the other set; enumerating it sends ' +
+          'nothing, hearing one sends the sentence to a server.')
         .fontSize(11)
         .fontColor(this.theme.text_tertiary)
         .width('100%')
