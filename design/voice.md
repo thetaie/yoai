@@ -868,19 +868,30 @@ talking to the first sound coming back. Everything after that first sound is
 heard rather than waited through, because the platform voice speaks at 1× while
 the model is still writing the next sentence.
 
-| | first exchange of a session | second recording in a row |
-| --- | --- | --- |
-| model load | 3.42 s | 0 |
-| recognition, per clip | 0.62 s (3.78 s of audio) | 0.51 s (3.10 s) |
-| TTS engine start | 0.39 s | **0.00 s** — kept |
-| prefill | 2.43 s, 0 of 119 reused | **0.29 s, 102 of 115 reused** |
-| decode to the first sentence | 0.59 s (8 tokens) | 0.62 s (9 tokens) |
-| **silence** | **7.57 s** | **1.37 s** |
+| | first exchange, cold | second in a row | first exchange, warmed |
+| --- | --- | --- | --- |
+| model load | 3.42 s | 0 | 0 |
+| recognition, per clip | 0.62 s (3.78 s of audio) | 0.51 s (3.10 s) | 0.55 s (3.30 s) |
+| TTS engine start | 0.39 s | **0.00 s** — kept | **0.00 s** |
+| prefill | 2.43 s, 0 of 119 reused | **0.29 s, 102 of 115** | **0.35 s, 102 of 116** |
+| decode to the first sentence | 0.59 s (8 tok) | 0.62 s (9 tok) | 1.04 s (15 tok) |
+| **silence** | **7.57 s** | **1.37 s** | **1.53 s** |
 
-**Two numbers, not one, and the gap between them is the product decision.** A
-session's first exchange costs five and a half times its steady state, and
-almost all of that is the model load and a prefix cache that has nothing in it
-yet. Both are fixable by warming on entry rather than on the first recording.
+**The gap between the first two columns was the whole product decision, and the
+third column closes it.** A session's first exchange cost five and a half times
+its steady state, all of it in three costs that do not depend on what the person
+said: the model load, an empty prefix cache, and creating the TTS engine.
+
+**Warming on intent, not on entry.** They are paid when the chain is switched
+on — about 5.5 s from the toggle to ready, spent while the person is still
+deciding what to say — rather than when the page opens, because reading 1.28 GB
+for somebody who came to look at a prosody profile is the page charging for a
+feature they did not ask for. The prefix cache is filled by asking the model
+something and discarding the answer; there is no prefill-only entry point.
+
+With that, **the first recording of a session behaves like the steady state**:
+1.53 s against 1.37 s, and the difference is a longer reply (15 decoded tokens
+against 9), not a colder engine.
 
 **In the steady state there is no dominant term left**: decode to the first
 sentence 0.62 s (45%), recognition 0.51 s (37%), prefill 0.29 s (21%). That is

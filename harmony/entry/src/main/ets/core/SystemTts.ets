@@ -95,6 +95,8 @@ export class SystemTts {
   private static cancelled: boolean = false;
   private static onDrained: ((v: SpeakTiming | undefined) => void) | undefined = undefined;
   private static spokenChars: number = 0;
+  /** A creation already in flight, so concurrent callers share one engine. */
+  private static creating: Promise<boolean> | undefined = undefined;
 
   /** Whether an engine has already been created and is ready to speak. */
   static ready(): boolean {
@@ -108,13 +110,30 @@ export class SystemTts {
    * "which engine", not "is networked", and offline is the only one HarmonyOS
    * currently offers. Keeping it offline also keeps this lane consistent with
    * the rest of the app, where nothing said aloud has to leave the device.
+   *
+   * **Callers in flight share one creation.** Checking `engine` alone is not
+   * enough: creation takes 0.4-0.6 s, and two calls inside that window both see
+   * undefined and both create, after which the second assignment wins and the
+   * first engine leaks with nothing holding it. That was unreachable while one
+   * code path owned the engine, and stopped being unreachable when warming
+   * became a second one -- toggle the chain on and hit Record immediately and
+   * both fire. `creating` is cleared on settle so a failure can be retried, and
+   * it is NOT called `pending` -- that name is already the queue of sentences
+   * waiting to be spoken, three fields up.
    */
   static init(): Promise<boolean> {
+    if (SystemTts.engine !== undefined) {
+      return Promise.resolve(true);
+    }
+    if (SystemTts.creating !== undefined) {
+      return SystemTts.creating;
+    }
+    SystemTts.creating = SystemTts.create();
+    return SystemTts.creating;
+  }
+
+  private static create(): Promise<boolean> {
     return new Promise<boolean>((resolve: (v: boolean) => void) => {
-      if (SystemTts.engine !== undefined) {
-        resolve(true);
-        return;
-      }
       const params: textToSpeech.CreateEngineParams = {
         language: SystemTts.language,
         person: SystemTts.person,
@@ -132,6 +151,7 @@ export class SystemTts {
             log('tts createEngine failed person=' + SystemTts.person +
                 ' language=' + SystemTts.language +
                 ' code=' + err.code + ' ' + err.message);
+            SystemTts.creating = undefined;
             resolve(false);
             return;
           }
@@ -140,6 +160,7 @@ export class SystemTts {
           SystemTts.engine = engine;
           log('tts engine ready person=' + SystemTts.person +
               ' language=' + SystemTts.language);
+          SystemTts.creating = undefined;
           resolve(true);
         });
     });

@@ -149,6 +149,10 @@ struct VoiceDebug {
   // a rebuild per wording is not one.
   @State private chainPrompt: string = DEFAULT_CHAIN_PROMPT;
   @State private promptOpen: boolean = false;
+  // Warming state. `warmed` is set once the three first-exchange costs have
+  // been paid, so switching the toggle off and on again does not pay them twice.
+  @State private warming: string = '';
+  private warmed: boolean = false;
 
   // Voices. Here because "can the voice be changed" has no answer off the
   // device: the offline engine speaks with whatever packs the system image
@@ -618,6 +622,86 @@ struct VoiceDebug {
   }
 
   /**
+   * Pay the first exchange's costs before there is anything to say.
+   *
+   * Measured, the same chain twice: **7.57 s of silence on a session's first
+   * recording against 1.37 s on the second.** The whole of that gap is three
+   * costs that are paid once and then never again:
+   *
+   *   model load        3.42 s   the weights are not resident yet
+   *   empty prefix      2.43 s   0 of 119 prompt tokens reused; on the second
+   *                              recording 102 of 115 are, and prefill is 0.29 s
+   *   TTS engine start  0.39 s   kept afterwards, so 0.00 s on the second
+   *
+   * None of them depend on what the person said, so none of them have to happen
+   * while they wait. Doing it here means the first recording behaves like the
+   * second, which is the difference between a chain that feels broken once per
+   * session and one that does not.
+   *
+   * Hung off the toggle rather than aboutToAppear on purpose: reading 1.28 GB
+   * for somebody who opened this page to look at a prosody profile would be the
+   * page paying for a feature they did not ask for. Turning the chain on is the
+   * statement of intent.
+   *
+   * Not awaited, and nothing depends on it finishing. Record early and the
+   * exchange is simply the slow one it would have been anyway.
+   */
+  private async warmChain(): Promise<void> {
+    if (this.warmed || this.warming !== '') {
+      return;
+    }
+    const provider: string = await ModelStore.activeId(this.ctx());
+    if (provider.length === 0) {
+      return;
+    }
+
+    this.warming = 'starting the voice engine…';
+    await SystemTts.init();
+
+    this.warming = 'reading the model…';
+    // 'end' on success, not 'ok' -- nativeLocalLoad reuses the chat callback's
+    // vocabulary. Guessing 'ok' here cost a round trip: the load itself worked,
+    // so the model was warm and the log showed `load 0ms`, but priming never
+    // ran and the first recording still paid 2.35 s of prefill.
+    bodyclock.nativeLocalLoad(provider, (type: string, content: string) => {
+      if (type === 'error') {
+        // A remote provider, or no on-device engine in this build. Neither is
+        // an error here: the chain still runs, it just pays the prefill.
+        this.warming = '';
+        return;
+      }
+      if (type === 'end') {
+        this.primeCache(provider);
+      }
+    });
+  }
+
+  /**
+   * Fill the KV with the system prompt, by asking something and throwing the
+   * answer away.
+   *
+   * There is no prefill-only entry point -- bodyclock_chat always generates --
+   * so this costs a handful of decoded tokens. It buys the 2.4 s that the first
+   * real recording would otherwise spend prefilling a prompt that never changes.
+   *
+   * What survives is the prefix up to where the user's text begins, which is
+   * exactly what the next turn needs: the measured 102-of-115 reuse came from
+   * precisely this shape, a previous turn with the same system prompt and a
+   * different transcript.
+   */
+  private primeCache(provider: string): void {
+    this.warming = 'warming the prompt…';
+    const wire: string = JSON.stringify([{ role: 'user', content: '嗯' }]);
+    bodyclock.nativeChat(provider, wire, this.chainPrompt, '',
+      (type: string, content: string) => {
+        if (type === 'end' || type === 'error') {
+          this.warming = '';
+          this.warmed = true;
+        }
+      });
+  }
+
+  /**
    * One chat turn, spoken sentence by sentence as it is written.
    *
    * The reply is not waited for. Every delta is appended, and as soon as a
@@ -886,11 +970,22 @@ struct VoiceDebug {
           .layoutWeight(1)
         Toggle({ type: ToggleType.Switch, isOn: this.chainOn })
           .enabled(!this.recording && !this.analysing)
-          .onChange((on: boolean) => { this.chainOn = on; })
+          .onChange((on: boolean) => {
+            this.chainOn = on;
+            // Turning it on is the statement of intent, so it is where the
+            // first exchange's costs get paid. Not awaited: the page stays
+            // usable and an early recording is just the slow one it would
+            // have been.
+            if (on) {
+              this.warmChain();
+            }
+          })
       }
       .width('100%')
 
-      Text(this.chainOn
+      Text(this.warming !== ''
+        ? this.warming + ' — recording now still works, it is just the slow one'
+        : this.chainOn
         ? 'The next recording goes through the whole chain instead of the axes.'
         : 'Off — a recording is measured but not answered.')
         .fontSize(11)
@@ -932,10 +1027,16 @@ struct VoiceDebug {
           .onChange((v: string) => {
             this.chainPrompt = v;
             ChainPrompt.set(this.ctx(), v);
+            // The cached prefix was this prompt's, so editing throws it away.
+            // Marked stale rather than re-warmed: re-warming is a whole chat
+            // turn, and this fires per keystroke. The next recording pays the
+            // prefill once, or toggling the chain off and on warms it again.
+            this.warmed = false;
           })
 
-        Text('Saved as you type. Cached after the first reply of a session, ' +
-             'so length costs almost nothing — examples beat rules.')
+        Text('Saved as you type. Cached after the first reply that uses it, so ' +
+             'length costs almost nothing after that — examples beat rules. ' +
+             'Editing drops the cache; the next recording pays it back once.')
           .fontSize(11)
           .fontColor(this.theme.text_tertiary)
           .width('100%')
