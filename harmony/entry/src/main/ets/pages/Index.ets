@@ -142,6 +142,10 @@ struct Index {
       router.pushUrl({ url: 'pages/OmniDebug' });
       return true;
     }
+    if (text === '/tts') {
+      router.pushUrl({ url: 'pages/TtsDebug' });
+      return true;
+    }
     return false;
   }
 

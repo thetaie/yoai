@@ -731,6 +731,257 @@ napi_value NativeOmniLastSpeech(napi_env env, napi_callback_info) {
 }
 
 //------------------------------------------------------------------------------
+// Speech output (qwentts.cpp)
+//------------------------------------------------------------------------------
+//
+// Same shape as the omni lane above and for the same reasons: the two calls that
+// block run on a detached thread, and the waveform is accumulated here rather
+// than streamed to ArkTS, because a page wants one buffer to play.
+//
+// Keeping it separate from the omni lane rather than generalising the two: they
+// answer the same question with different models and the point of having both is
+// to compare them, which is easier when neither had to bend to fit a shared
+// wrapper.
+
+std::mutex g_tts_speech_mutex;
+std::vector<float> g_tts_speech;   // 24 kHz mono, the last thing said
+
+// Runs OFF the ArkTS thread, once per chunk, on the engine's compute worker.
+int TtsCollect(const float* pcm, int n_samples, int last, void* user_data) {
+    auto* into = static_cast<std::vector<float>*>(user_data);
+    if (into && pcm && n_samples > 0) {
+        into->insert(into->end(), pcm, pcm + n_samples);
+    }
+    (void)last;   // the end marker arrives empty; there is nothing to do with it
+    return 1;     // never abort: the page asked for the whole utterance
+}
+
+void TtsLoadWorker(std::string talker, std::string codec, napi_threadsafe_function tsfn) {
+    const int rc = bodyclock_tts_load(talker.c_str(), codec.c_str());
+    // The engine's own message on failure, not a rewrite of it: the commonest
+    // failure is a talker of the wrong kind, and it says which kind it got.
+    auto* ev = new StreamEvent{rc == 0 ? "ok" : "error",
+                               rc == 0 ? std::string(bodyclock_tts_model_type())
+                                       : std::string(bodyclock_tts_last_error())};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+}
+
+void TtsSayWorker(std::string text, bool keep_audio, napi_threadsafe_function tsfn) {
+    std::vector<float> speech;
+    const char* json = bodyclock_tts_say(text.c_str(),
+                                         keep_audio ? TtsCollect : nullptr,
+                                         keep_audio ? &speech : nullptr);
+    if (keep_audio) {
+        std::lock_guard<std::mutex> lock(g_tts_speech_mutex);
+        g_tts_speech.swap(speech);
+    }
+
+    auto* ev = json ? new StreamEvent{"result", std::string(json)}
+                    : new StreamEvent{"error", std::string(bodyclock_tts_last_error())};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+}
+
+// nativeTtsAvailable(): boolean
+napi_value NativeTtsAvailable(napi_env env, napi_callback_info) {
+    napi_value out = nullptr;
+    napi_get_boolean(env, bodyclock_tts_available() != 0, &out);
+    return out;
+}
+
+// nativeTtsLoaded(): boolean
+napi_value NativeTtsLoaded(napi_env env, napi_callback_info) {
+    napi_value out = nullptr;
+    napi_get_boolean(env, bodyclock_tts_loaded() != 0, &out);
+    return out;
+}
+
+// nativeTtsModelType(): string
+napi_value NativeTtsModelType(napi_env env, napi_callback_info) {
+    return Utf8(env, bodyclock_tts_model_type());
+}
+
+// nativeTtsLastError(): string
+napi_value NativeTtsLastError(napi_env env, napi_callback_info) {
+    return Utf8(env, bodyclock_tts_last_error());
+}
+
+// nativeTtsLoad(talkerPath, codecPath, onDone: (type, content) => void): void
+napi_value NativeTtsLoad(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value argv[3] = {nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 3) {
+        napi_throw_error(env, nullptr,
+                         "nativeTtsLoad(talkerPath, codecPath, onDone) needs three arguments");
+        return nullptr;
+    }
+
+    std::string talker = ToUtf8(env, argv[0]);
+    std::string codec  = ToUtf8(env, argv[1]);
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "bodyclock_tts_load", NAPI_AUTO_LENGTH, &work_name);
+
+    napi_threadsafe_function tsfn = nullptr;
+    if (napi_create_threadsafe_function(env, argv[2], nullptr, work_name, 0, 1,
+                                        nullptr, nullptr, nullptr, CallJs, &tsfn) != napi_ok) {
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+
+    std::thread(TtsLoadWorker, std::move(talker), std::move(codec), tsfn).detach();
+    return nullptr;
+}
+
+// nativeTtsSetVoice(instruct: string): void
+//
+// Synchronous and cheap: it sets a string the next say() reads, and never
+// touches the weights.
+napi_value NativeTtsSetVoice(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    const std::string instruct = ArgUtf8(env, argc, argv, 0);
+    bodyclock_tts_set_voice(instruct.c_str());
+    return nullptr;
+}
+
+// nativeTtsSpeakers(): string   (a JSON array, '[]' when the model has none)
+napi_value NativeTtsSpeakers(napi_env env, napi_callback_info) {
+    return Utf8(env, bodyclock_tts_speakers());
+}
+
+// nativeTtsSetSpeaker(name: string): void
+napi_value NativeTtsSetSpeaker(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    const std::string name = ArgUtf8(env, argc, argv, 0);
+    bodyclock_tts_set_speaker(name.c_str());
+    return nullptr;
+}
+
+// nativeTtsSetSeed(seed: number): void
+napi_value NativeTtsSetSeed(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    std::int64_t seed = -1;
+    if (argc >= 1) napi_get_value_int64(env, argv[0], &seed);
+    bodyclock_tts_set_seed(static_cast<long long>(seed));
+    return nullptr;
+}
+
+// nativeTtsSetTopK(k: number): void
+napi_value NativeTtsSetTopK(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    std::int32_t k = 0;
+    if (argc >= 1) napi_get_value_int32(env, argv[0], &k);
+    bodyclock_tts_set_top_k(k);
+    return nullptr;
+}
+
+// nativeTtsSetReference(wavPath: string, transcript: string): number
+//
+// Synchronous: it reads a WAV off the disk, which is megabytes rather than
+// gigabytes, and the page is picking the file at the time anyway.
+napi_value NativeTtsSetReference(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    const std::string path = ArgUtf8(env, argc, argv, 0);
+    const std::string text = ArgUtf8(env, argc, argv, 1);
+    return Int32(env, bodyclock_tts_set_reference(path.c_str(), text.c_str()));
+}
+
+// nativeTtsReferenceSeconds(): number
+napi_value NativeTtsReferenceSeconds(napi_env env, napi_callback_info) {
+    napi_value out = nullptr;
+    napi_create_double(env, bodyclock_tts_reference_seconds(), &out);
+    return out;
+}
+
+// nativeTtsSetStreaming(on: boolean): void
+napi_value NativeTtsSetStreaming(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    bool on = true;
+    if (argc >= 1) napi_get_value_bool(env, argv[0], &on);
+    bodyclock_tts_set_streaming(on ? 1 : 0);
+    return nullptr;
+}
+
+// nativeTtsSetThreads(n: number): void
+//
+// Synchronous and cheap, but it only bites on the NEXT load: qwen.h has no
+// thread parameter and the count is consumed inside qt_init.
+napi_value NativeTtsSetThreads(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    std::int32_t n = 0;
+    if (argc >= 1) napi_get_value_int32(env, argv[0], &n);
+    bodyclock_tts_set_threads(n);
+    return nullptr;
+}
+
+// nativeTtsSay(text: string, keepAudio: boolean,
+//              onDone: (type, content) => void): void
+napi_value NativeTtsSay(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value argv[3] = {nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 3) {
+        napi_throw_error(env, nullptr,
+                         "nativeTtsSay(text, keepAudio, onDone) needs three arguments");
+        return nullptr;
+    }
+
+    std::string text = ToUtf8(env, argv[0]);
+    bool keep_audio = false;
+    napi_get_value_bool(env, argv[1], &keep_audio);
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "bodyclock_tts_say", NAPI_AUTO_LENGTH, &work_name);
+
+    napi_threadsafe_function tsfn = nullptr;
+    if (napi_create_threadsafe_function(env, argv[2], nullptr, work_name, 0, 1,
+                                        nullptr, nullptr, nullptr, CallJs, &tsfn) != napi_ok) {
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+
+    std::thread(TtsSayWorker, std::move(text), keep_audio, tsfn).detach();
+    return nullptr;
+}
+
+// nativeTtsLastSpeech(): ArrayBuffer   (16-bit mono at 24 kHz, empty when none)
+napi_value NativeTtsLastSpeech(napi_env env, napi_callback_info) {
+    std::vector<float> speech;
+    {
+        std::lock_guard<std::mutex> lock(g_tts_speech_mutex);
+        speech = g_tts_speech;
+    }
+
+    void* data = nullptr;
+    napi_value out = nullptr;
+    napi_create_arraybuffer(env, speech.size() * sizeof(std::int16_t), &data, &out);
+    auto* pcm = static_cast<std::int16_t*>(data);
+    for (size_t i = 0; i < speech.size(); ++i) {
+        float v = speech[i] * 32768.0f;
+        if (v > 32767.0f)  v = 32767.0f;
+        if (v < -32768.0f) v = -32768.0f;
+        pcm[i] = static_cast<std::int16_t>(v);
+    }
+    return out;
+}
+
+//------------------------------------------------------------------------------
 // Model bundles
 //------------------------------------------------------------------------------
 
@@ -855,6 +1106,23 @@ napi_value Init(napi_env env, napi_value exports) {
         {"nativeOmniAsk",        nullptr, NativeOmniAsk,        nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeOmniLastSpeech", nullptr, NativeOmniLastSpeech, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeOmniSetDitSteps", nullptr, NativeOmniSetDitSteps, nullptr, nullptr, nullptr, napi_default, nullptr},
+
+        {"nativeTtsAvailable",   nullptr, NativeTtsAvailable,   nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsLoad",        nullptr, NativeTtsLoad,        nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsLoaded",      nullptr, NativeTtsLoaded,      nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsModelType",   nullptr, NativeTtsModelType,   nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsSetVoice",    nullptr, NativeTtsSetVoice,    nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsSpeakers",    nullptr, NativeTtsSpeakers,    nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsSetSpeaker",  nullptr, NativeTtsSetSpeaker,  nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsSetSeed",     nullptr, NativeTtsSetSeed,     nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsSetTopK",     nullptr, NativeTtsSetTopK,     nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsSetThreads",  nullptr, NativeTtsSetThreads,  nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsSetStreaming", nullptr, NativeTtsSetStreaming, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsSetReference", nullptr, NativeTtsSetReference, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsReferenceSeconds", nullptr, NativeTtsReferenceSeconds, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsSay",         nullptr, NativeTtsSay,         nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsLastSpeech",  nullptr, NativeTtsLastSpeech,  nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsLastError",   nullptr, NativeTtsLastError,   nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeBundleList",     nullptr, NativeBundleList,     nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeBundleExtract",  nullptr, NativeBundleExtract,  nullptr, nullptr, nullptr, napi_default, nullptr},
     };

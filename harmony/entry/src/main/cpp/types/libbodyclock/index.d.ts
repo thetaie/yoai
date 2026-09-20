@@ -340,6 +340,173 @@ export const nativeOmniAsk: (
 export const nativeOmniLastSpeech: () => ArrayBuffer;
 
 //------------------------------------------------------------------------------
+// Speech output (qwentts.cpp + Qwen3-TTS VoiceDesign)
+//------------------------------------------------------------------------------
+//
+// The third engine, and it exists because the second one's answer was no. Omni
+// buys a natural voice at about 3× slower than real time with the diffusion
+// sampler already at its coarsest, on top of thinking. This one speaks text
+// something else produced and measured 1.16× on a desktop.
+//
+// The voice is WRITTEN, not cloned: `nativeTtsSetVoice` takes an English
+// description and the same description gives the same speaker across different
+// passages. design/voice.md records the five other ways of pinning a voice in
+// this model family that were tried first, and why each failed.
+
+/** Whether this build has qwentts.cpp compiled in. */
+export const nativeTtsAvailable: () => boolean;
+
+/**
+ * Read the two GGUFs, about 2.2 GB together. Calls back once with
+ * ('ok', modelType) or ('error', reason).
+ *
+ * `modelType` is 'voice_design', 'base' or 'custom_voice' — the checkpoint
+ * decides which parameters are legal, so it is worth showing. The error is the
+ * engine's own message: the commonest failure is a talker of the wrong kind,
+ * and it says which kind it got.
+ */
+export const nativeTtsLoad: (
+  talkerPath: string,
+  codecPath: string,
+  onDone: (type: string, content: string) => void
+) => void;
+
+/** Whether a TTS model is resident right now. */
+export const nativeTtsLoaded: () => boolean;
+
+/** 'voice_design', 'base', 'custom_voice', or '' with nothing loaded. */
+export const nativeTtsModelType: () => string;
+
+/**
+ * The voice, described in English: `breathy, unhurried but not slow`.
+ *
+ * A real control surface rather than a preset list — written `gentle, speaks
+ * slowly` the result was audibly listless, the words land. Pace, energy,
+ * microphone distance and breath are all writable. Takes effect on the next
+ * `nativeTtsSay` without dropping the weights.
+ */
+export const nativeTtsSetVoice: (instruct: string) => void;
+
+/**
+ * The named speakers a custom_voice checkpoint carries, as a JSON array of
+ * strings — `'[]'` for the other two kinds and before a load.
+ *
+ * Read from the model rather than hard-coded: "nine named speakers" is
+ * something this repo took from a model card and never checked.
+ */
+export const nativeTtsSpeakers: () => string;
+
+/**
+ * Which of them speaks. Takes effect on the next `nativeTtsSay`.
+ *
+ * **Only legal on a custom_voice checkpoint**, and the core sends it only
+ * there, so a name left over from an earlier model cannot break a VoiceDesign
+ * run. On that checkpoint it combines with `nativeTtsSetVoice`: the speaker
+ * fixes who is talking, the description fixes how.
+ */
+export const nativeTtsSetSpeaker: (name: string) => void;
+
+/**
+ * −1 draws a fresh seed per call.
+ *
+ * Safe here where on the cloning checkpoint it was a trap: there the seed WAS
+ * the speaker, and two seeds gave a man and a woman reading the same sentence.
+ * The description pins the identity, so this only varies the delivery.
+ */
+export const nativeTtsSetSeed: (seed: number) => void;
+
+/** ≤ 0 leaves the engine's own default (50) alone. */
+export const nativeTtsSetTopK: (k: number) => void;
+
+/**
+ * A recording to sound like, and what is said in it. Returns 0 on success, or
+ * non-zero with the reason in `nativeTtsLastError()`.
+ *
+ * For a `base` checkpoint, which is the cloning one and takes neither a
+ * description nor a named speaker. **The WAV must be mono, 16-bit, exactly
+ * 24000 Hz** — refused rather than converted, because the core carries no
+ * resampler on purpose.
+ *
+ * The transcript is what makes this IN-CONTEXT cloning rather than a
+ * speaker-embedding copy, and that distinction decides the result: pinning a
+ * voice through the speaker encoder held the identity and flattened the
+ * prosody; carrying the audio and its text in context held both.
+ *
+ * **It is not free** — the whole reference stays in the talker's context for
+ * every frame, so a 22-second clip adds 280 frames of attention to each step.
+ *
+ * Pass '' for both to drop it.
+ */
+export const nativeTtsSetReference: (wavPath: string, transcript: string) => number;
+
+/** Seconds of reference currently held; 0 when none. */
+export const nativeTtsReferenceSeconds: () => number;
+
+/**
+ * Whether audio is emitted as it is generated. On by default, and **measured to
+ * cost nothing**.
+ *
+ * It moves the first audio from the end of the run to about a second — 930 to
+ * 1109 ms over four runs, against 8.5 to 9.6 s buffered. Seven alternating runs
+ * on a pinned seed put buffered's best codec pass at 3073 ms against
+ * streaming's 3013, despite streaming re-decoding the codec's left context per
+ * chunk.
+ *
+ * The switch stays because that measurement found something else: the codec
+ * stage varies by ±14% on identical input, where the two autoregressive stages
+ * hold ±2.5%.
+ *
+ * **Pin the seed before comparing anything here.** Otherwise the model
+ * generates a different number of frames each time and only the per-frame rates
+ * survive.
+ */
+export const nativeTtsSetStreaming: (on: boolean) => void;
+
+/**
+ * Worker threads for the NEXT `nativeTtsLoad`. ≤ 0 restores the engine's own
+ * choice.
+ *
+ * **Swept, and it is not a lever**: 4, 6 and 8 land within ~2% of each other,
+ * inside the ~9% a five-run sweep drifts from heat, and only 2 is clearly worse
+ * (12%). The engine's own 6 costs nothing.
+ *
+ * **Needs a reload, unlike the llama thread setter** — the count is consumed
+ * inside the engine's init and there is no parameter for it. About a second
+ * from page cache after the first load.
+ */
+export const nativeTtsSetThreads: (n: number) => void;
+
+/**
+ * Speak `text`. Calls back once with ('result', json) or ('error', reason).
+ *
+ * The JSON carries `speechSeconds`, `seconds`, `realtime`, `firstAudioSeconds`,
+ * `chunks` and `streamed`. `realtime` is seconds of computation per second of
+ * speech and is the number this lane exists to produce; above 1 it cannot talk
+ * as fast as it speaks. `streamed` is the path the run actually took, which is
+ * not what `nativeTtsSetStreaming` asked for when `keepAudio` is false — with no
+ * handler there is nobody to stream to.
+ *
+ * @param keepAudio false generates and discards, which measures the engine
+ *                  without the handover. true keeps the waveform for
+ *                  `nativeTtsLastSpeech`.
+ */
+export const nativeTtsSay: (
+  text: string,
+  keepAudio: boolean,
+  onDone: (type: string, content: string) => void
+) => void;
+
+/**
+ * The waveform from the last `nativeTtsSay(..., true, ...)`, as 16-bit signed
+ * mono at **24000 Hz** — the same rate omni produces, not the 16 kHz of the
+ * input side. Empty when the last call did not keep it.
+ */
+export const nativeTtsLastSpeech: () => ArrayBuffer;
+
+/** Why the last load or say failed. '' after a success. */
+export const nativeTtsLastError: () => string;
+
+//------------------------------------------------------------------------------
 // Model bundles
 //------------------------------------------------------------------------------
 
