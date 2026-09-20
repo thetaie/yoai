@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Compose owns every pixel above the window, so this exists only to give the
+      splash and the task switcher something that is not the platform default.
+    -->
+    <style name="Theme.Bodyclock" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

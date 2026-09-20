@@ -24,6 +24,7 @@ src/                  the core -- a static library plus a C ABI
   platform/             logging, and the C ABI's implementation
 cli/                  a desktop harness -- run the core without a device
 harmony/              the HarmonyOS app (ArkTS) + its NAPI bridge
+android/              a measurement bench (Compose) + its JNI bridge
 ```
 
 ### The core is a library, not a server
@@ -158,6 +159,32 @@ In the app it is Settings → **On-device models** → pick a `.gguf`. The file 
 where it is: it is referenced, never copied into the sandbox, and removing the
 model never deletes it. From there it is a model like any other in the picker.
 
+### Android
+
+A **bench**, not a second app. One screen of measurements against the same core,
+so a figure taken on a phone here and a figure in
+[design/voice.md](design/voice.md) are comparable — every number in that file
+was taken on one chip, and several of its conclusions are about the chip rather
+than about the engines.
+
+```
+cd android
+./build.sh          # deps, the on-device engine, the APK -- the first run
+./build.sh apk      # every run after that
+```
+
+`build.cmd` is the same thing on Windows. Lanes turn on the same way they do on
+HarmonyOS: `./build.sh qtts` for speech out, `./build.sh vulkan` to also build
+ggml's Vulkan backend for Adreno — which is the one lane HarmonyOS could not
+measure, having killed the process by policy before it could be timed.
+
+One thing differs and is worth knowing before reading a number off it. The
+`-march` feature set is **asserted by the build, not detected**, because CMake's
+probes compile and run a test binary and cannot run one for the phone; the
+default is the Kirin 9020's, so the first run on a new device is comparable
+rather than optimal. The Device panel prints what the chip actually reports.
+See [android/README.md](android/README.md).
+
 ## Status
 
 | Capability | State |
@@ -168,6 +195,7 @@ model never deletes it. From there it is a model like any other in the picker.
 | Conversations persisted on device | working |
 | On-device inference (llama.cpp + GGUF) | working on HarmonyOS, in the default build |
 | Local personal-data storage | not yet |
+| Android measurement bench | scaffolded; not yet run on a device |
 | Android app | not yet |
 | Tools / MCP, attachments, markdown rendering | not yet |
 

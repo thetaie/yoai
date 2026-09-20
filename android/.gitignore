@@ -1,0 +1,13 @@
+*.iml
+.gradle/
+.idea/
+.kotlin/
+build/
+local.properties
+.cxx/
+
+# Everything android/build.* produces. Cross-compiled archives are gigabytes and
+# are reproducible from the scripts, which is the point of the scripts.
+prebuilt/
+.llama-build/
+.qtts-build/

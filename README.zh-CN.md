@@ -23,6 +23,7 @@ src/                  核心 —— 一个静态库加一层 C ABI
   platform/             日志,以及 C ABI 的实现
 cli/                  桌面调试壳 —— 不用设备也能跑核心
 harmony/              HarmonyOS app(ArkTS)及其 NAPI 桥
+android/              一个测量台(Compose)及其 JNI 桥
 ```
 
 ### 核心是一个库，不是一个服务
@@ -144,6 +145,28 @@ checkout 放在仓库旁边（用 `LLAMA_SRC` 可以改位置），而且不会�
 在 app 里是设置 → **本机模型** → 选一个 `.gguf`。文件留在原处：只是被引用，不会
 复制进沙箱，删掉模型也不会删文件。加完之后它在选择器里就是一个普通模型。
 
+### Android
+
+是**测量台**，不是第二个 app。一屏读数，跑的是同一个核心，所以在手机上量到的数字
+和 [design/voice.md](design/voice.md) 里的数字可以直接比 —— 那份文件里的每一个数
+都来自同一颗芯片，而其中好几个结论说的是芯片而不是引擎。
+
+```
+cd android
+./build.sh          # 依赖、本机引擎、APK —— 第一次这么跑
+./build.sh apk      # 之后每次只要这个
+```
+
+Windows 上用 `build.cmd`，是同一件事。开关一条路的方式和 HarmonyOS 一样：
+`./build.sh qtts` 打开语音输出，`./build.sh vulkan` 连 ggml 的 Vulkan 后端一起编，
+给 Adreno 用 —— 那正是 HarmonyOS 没能量成的一条，进程还没来得及计时就被系统策略
+杀掉了。
+
+有一处不同，读数之前值得先知道。`-march` 的特性集是**构建时断言的，不是探测出来
+的**，因为 CMake 的探测要编译并**运行**一个测试程序，而它跑不了手机上的；默认值
+取的是麒麟 9020 的，所以在新机器上第一次跑出来的数是可比的，而不是最优的。芯片实
+际报了什么，Device 面板会打出来。见 [android/README.md](android/README.md)。
+
 ## 进度
 
 | 能力 | 状态 |
@@ -154,6 +177,7 @@ checkout 放在仓库旁边（用 `LLAMA_SRC` 可以改位置），而且不会�
 | 对话持久化到设备 | 已完成 |
 | 本机推理（llama.cpp + GGUF） | HarmonyOS 上已可用，默认构建即包含 |
 | 本地个人数据存储 | 未开始 |
+| Android 测量台 | 架子已搭好，尚未在真机上跑过 |
 | Android app | 未开始 |
 | 工具 / MCP、附件、Markdown 渲染 | 未开始 |
 
