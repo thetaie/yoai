@@ -15,15 +15,26 @@ Qwen2.5-Omni on MNN: audio in, an answer out, spoken in the model's own voice.
 A second inference engine carried for one capability, and the first serious
 attempt at the thing `src/voice/qtts.*` now does.
 
-It lost on every axis, measured on the same phone:
+Measured on the same phone:
 
 | | omni | qtts |
 | --- | --- | --- |
-| Real time factor | 2.8×, at the coarsest sampler that still sounds like anything | 2.14× in the fast regime |
-| Has to think first | yes — the chain measured 1.4 s of silence | no, the text is llama.cpp's |
+| Real time factor | 3.70 at the shipped sampler, 2.8 at its coarsest — **Talker only** | 2.14 fast, 3.52 sustained, whole synthesis |
+| Has to think first | yes, and it is 17.2 s of the 46.2 s exchange | no, the text is llama.cpp's |
 | Size | 3.8 GB | 1.4 GB |
 | Voice | the model's own, with no control over it | written, and stable across passages |
 | Engine | a second framework, MNN | ggml, already here for two other lanes |
+
+**It did not lose on speed**, and an earlier version of this file said it did by
+putting omni's coarsest setting beside qtts's fast-regime number. Those measure
+different things: omni's excludes the thinker, and its Talker ran 37.5 s
+continuously, so most of it was past the clock step that qtts's 2.14 is entirely
+before. Against qtts's sustained 3.52, omni at 2.8 was the faster of the two —
+while producing audible artefacts, which is what spending its only lever costs.
+
+It lost on 3.8 GB against 1.4, on a second inference framework against the ggml
+already linked, on having to think before it can speak, and most of all on
+having no way to ask for a voice.
 
 Removing it from the build also retires the include-order workaround that kept
 two copies of rapidjson from colliding, which was the cause of one SIGSEGV that

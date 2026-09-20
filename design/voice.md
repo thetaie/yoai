@@ -27,6 +27,171 @@ post audio to an arbitrary OpenAI-compatible endpoint. With recognition outside,
 **voice works with every provider the user has configured**. And the C++ core's
 ABI already takes `messages_json`; transcription produces text.
 
+## Every Qwen3-TTS checkpoint, on this phone
+
+Seven configurations of one model family were run on the device. This table is
+the summary; the sections near the end of this file are where each number comes
+from, and they are worth reading before quoting any of these, because several
+replaced an earlier number that was wrong.
+
+All at four threads with a pinned seed and `qwen-tokenizer-12hz` as the codec.
+Real time factor is seconds of computation per second of audio; **above 1 it
+cannot speak as fast as it talks.**
+
+**The short utterances are not all the same text**, which bounds how finely this
+column can be read. They are a few seconds each, and a pinned seed does not give
+two checkpoints the same length anyway — the same seed through Q8 and Q4 of one
+model produced 41 frames and 48. Differences of a tenth here are real; a
+hundredth is not. The per-stage breakdowns later in this file are where the
+like-for-like comparisons live.
+
+| checkpoint | size | the voice is fixed by | RTF, short | RTF, fast / sustained | `调暗` | by ear |
+| --- | --- | --- | --- | --- | --- | --- |
+| **1.7B VoiceDesign Q4_K_M** | **1.4 GB** | **a written description** | **2.29–2.35** | **2.14 / 3.52** | correct | **the best here** |
+| 1.7B VoiceDesign Q8_0 | 2.2 GB | a written description | 2.60–2.92 | — | correct | same voice |
+| 0.6B CustomVoice Q4_K_M | 0.8 GB | one of nine named speakers, plus an optional written style | 1.88–2.04 | 1.94 / 3.30 | correct | audibly worse |
+| 0.6B base Q4_K_M | 0.8 GB | a 22.4 s reference recording and its transcript | 6.60, 7.97 | — | **wrong** | timbre fine |
+| 0.6B base Q8_0 | 1.2 GB | same | 8.32 | — | correct | — |
+| 1.7B base Q4_K_M | 1.4 GB | same | 11.53 | — | correct | better than 0.6B |
+| 1.7B base Q8_0 | 2.2 GB | same | 11.64 | — | correct | — |
+
+**The four cloning rows are not four times slower at generating.** Their
+per-frame cost is close to the others; what they carry is a fixed setup —
+encoding the reference through the codec and prefilling it through the talker —
+of about 24 s at 0.6B and 40 s at 1.7B, paid per utterance whatever its length.
+First audio lands at 29.8 s and 43.8 s. That is why Q4 barely helps there:
+1.7B goes 11.64 → 11.53, because the talker is not where the bill is.
+
+**"Short" and "fast / sustained" measure different things.** The short column is
+four to eight seconds of audio, which never leaves the device's fast clock — for
+the cloning rows it is barely more than the setup. The pair is the rate before
+and after the clock steps down, which happens about 30 seconds into continuous
+generation from cold and 17 seconds when the device is already warm. A real
+passage spends most of itself in the second number: 30 seconds of audio took 88
+to 97 s.
+
+For scale, the same 1.7B VoiceDesign on a Core Ultra 9 185H laptop measures
+**1.40 at Q8 and 1.13 at Q4** — uniformly 1.9× faster per stage, and still
+above 1.
+
+### On a PC's integrated GPU: 0.60×, and the floor is not a floor
+
+The first number below 1 in this whole file, and it is worth stating what makes
+it matter: **below 1, the pre-buffer a stream needs is zero.** Above it, playback
+has to wait `duration × (RTF − 1)` before starting or it runs dry; below it,
+generation outruns playback from the first chunk. That is the difference between
+prepared playback and speaking as you go, and it is a threshold rather than a
+slope.
+
+Measured with ggml's Vulkan backend on the same laptop, same 1.7B VoiceDesign
+Q4, same passage. The device is an **Intel Arc Pro Graphics** — integrated,
+sharing the CPU's memory, `uma: 1`, `fp16: 1`, and **`matrix cores: none`**.
+
+| stage | CPU, 11 threads | Arc iGPU | |
+| --- | --- | --- | --- |
+| Talker decode | 26.67 ms/frame | 18.14 | 1.46× |
+| Code predictor | 22.84 | 20.86 | 1.09× |
+| **Codec decode** | **38.6** | **8.72** | **4.4×** |
+| Prefill | 653 ms | 159 | 4.1× |
+| per frame | 88.1 ms | **47.7** | |
+| **RTF** | **1.13** | **0.60** | |
+| first audio | ~683 ms | **196 ms** | |
+
+**The codec is the stage that moves, and it was the immovable one.** Five
+attempts on the phone left it at 73.5 ms a frame — streaming, buffering, two
+quantizations, a third-size talker, and the GPU that never ran. It is 45% of the
+bill there and the reason the ceiling looked structural. On a GPU it is 4.4×
+faster and drops to 18% of a much smaller bill. A convolutional decoder with 21
+conv contexts was the part expected to fall back to the CPU for lack of op
+coverage; it is the part that gained most.
+
+Four things a PC client would need to know:
+
+- **Shader compilation is a one-off per process**, and it is not small: the
+  first run measured 0.863 against 0.60 warm, with prefill at 3652 ms instead of
+  165 and prompt build at 894 instead of 8.5. A resident client pays it once at
+  startup. A client that spawns a process per utterance pays it every time and
+  never sees 0.60.
+- **The GPU's timings are far steadier than the CPU's.** Across three seeds:
+  0.558, 0.583, 0.612 on the GPU against 1.018, 1.112, 1.300 on the CPU. The
+  spread on the CPU side is the laptop's own clock, the same throttle the phone
+  has in a milder form — a GPU run is short enough not to provoke it.
+- **Different numerics are different takes.** The same seed and text gave 471
+  frames on the GPU and 299 on the CPU. Not a defect: at seeds 7 and 42 the GPU
+  produced 287 and 305 against the CPU's 337 and 316, so neither backend speaks
+  systematically slower. But a seed chosen for how it sounds on one backend is
+  not the same utterance on the other, and a client that pins seeds has to pin
+  them per backend.
+- **HarmonyOS's `GPU_LEAK_KILL` does not appear here.** The desktop backend
+  loaded about 1.37 GB of tensors, which is the model, and nothing objected.
+  That was a platform policy, not something ggml does everywhere, and it should
+  not be carried forward as a reason to avoid the GPU on a PC.
+
+**This is a floor for PC hardware, not a ceiling.** It is an integrated GPU with
+no matrix cores, sharing bandwidth and thermal budget with the CPU that is
+feeding it. Anything discrete would start from here.
+
+### The engine this replaced, on the same phone
+
+Qwen2.5-Omni-3B on MNN was the first attempt and is a different shape: one model
+that listens, thinks and speaks, where the rows above only speak. Its code is in
+`src/voice/attic/`.
+
+| `dit_steps` | DiT forwards per chunk | RTF, Talker only | by ear |
+| --- | --- | --- | --- |
+| 5, the model's own config | 4 | 3.70 | — |
+| 3 | 2 | 3.0 | acceptable |
+| 2 | 1 | 2.8 | audible artefacts |
+
+3.8 GB, 7.9 s to load, and the voice is the model's own with nothing to steer
+it. A whole exchange — 4.8 s of recorded audio in, a spoken answer out — took
+46.2 s, of which 17.2 was the thinker and 37.5 the Talker.
+
+**Two things make the ratios above look closer to Qwen3-TTS than they are, and
+one makes them look further.**
+
+- **They exclude the thinker.** 3.70 covers `generateWavform()` alone. Qwen3-TTS
+  numbers are the whole synthesis, and its text comes from a lane that was
+  already paid for.
+- **They were taken before the device's two clocks were understood.** That
+  Talker ran 37.5 s continuously, so most of it was past the step down. The
+  honest comparison is against Qwen3-TTS's **sustained** 3.52, not its fast
+  2.14 — and on that footing 2.8 against 3.52 says omni's coarsest setting was
+  the faster of the two.
+- **Against that, the coarsest setting is the one with audible artefacts**, and
+  the diffusion sampler is the only lever it has; spending it spends exactly
+  what the engine was carried for.
+
+So **omni did not lose on speed, and this file used to imply it did.** It lost
+on 3.8 GB against 1.4, on a second inference framework against the ggml already
+linked, on needing to think before it can speak — and most of all on having no
+way to ask for a voice. A model that sounds however it sounds is not a voice you
+can design an app around.
+
+### What that adds up to
+
+**1.7B VoiceDesign at Q4_K_M, for prepared playback.** It is the only row that
+is both the best-sounding and affordable, and the three ways of fixing a voice
+are not equal:
+
+- **A written description** holds across passages, costs nothing, and is the
+  only one that lets pace, energy, microphone distance and breath be asked for
+  in words.
+- **A named speaker** is a stronger guarantee of identity — it is an enumeration
+  rather than a description holding steady — and can still take a written style
+  on top. It exists only at sizes and checkpoints that sound worse.
+- **A reference recording** is the only one that can copy a specific voice, and
+  it costs half a minute before the first sample. The lever there is the
+  reference's length, which nobody has tried shortening.
+
+The polyphone row is the one to carry forward as a rule rather than a fact:
+grapheme-to-phoneme is **per checkpoint, and quantization can take it away**.
+Only `0.6B base Q4_K_M` reads `调暗` as `diào`; the same checkpoint at Q8 and the
+same quantization at 1.7B both read it correctly, so neither variable explains
+it alone. It does not carry across a model swap or a requantization, and there
+is no way to correct it from the API — nothing in the runtime takes pinyin or
+phonemes.
+
 ## Where each axis gets its numbers
 
 The rest of this file is the argument. This is the answer:
@@ -2490,7 +2655,7 @@ fallback, where affinity is a no-op, and the flag became unnecessary. The patch
 lives in [harmony/patches/](../harmony/patches/) because the checkout is
 upstream's.
 
-### Thirteen misses, and the four shapes they came in
+### Fourteen misses, and the four shapes they came in
 
 Every claim these sections made from arithmetic or from a failed attempt was
 wrong, in four recurring shapes, so the pattern is worth more than the numbers:
@@ -2510,6 +2675,7 @@ wrong, in four recurring shapes, so the pattern is worth more than the numbers:
 | "`调` is wrong because it is the base checkpoint" | 1.7B base reads it correctly | that two configurations differing in three things cannot name which one did it |
 | "completing the 2×2 is a test with no payoff" | it cleared Q4 on the model this lane ships | that a test's value is what it rules IN elsewhere, not only what it settles about the thing being tested |
 | "the codec is the stage that did not scale, at **2.45×**" | 1.90×, same as the other two | that the phone column was Q4 and the laptop column Q8, and the codec is the one row a talker quantization does not move |
+| "omni lost to qtts on speed" | omni's coarsest setting beats qtts sustained | that 2.8× was the Talker alone past the clock step, and 2.14× the whole synthesis before it |
 
 Row three is worth a second look before the shapes. **3.6× was the prediction and
 3.52× is the sustained answer**, so the number was very nearly right — and it was
