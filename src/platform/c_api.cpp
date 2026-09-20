@@ -19,7 +19,7 @@
 #include "platform/bundle.hpp"
 #include "platform/log.hpp"
 #include "platform/membw.hpp"
-#include "voice/omni.hpp"
+// #include "voice/omni.hpp"   // retired, see src/voice/attic/
 #include "voice/prosody.hpp"
 #include "voice/qtts.hpp"
 #include "voice/sensevoice.hpp"
@@ -891,131 +891,138 @@ extern "C" const char* bodyclock_voice_analyze(const short* pcm,
 }
 
 //------------------------------------------------------------------------------
-// Omni (MNN)
+// Omni (MNN) -- RETIRED
 //------------------------------------------------------------------------------
-
-namespace {
-
-// One engine for the process, guarded, for the same two reasons the recognizer
-// is: the weights are gigabytes, and one instance owns compute buffers that a
-// call writes through.
-std::mutex& omni_mutex() {
-    static std::mutex m;
-    return m;
-}
-
-bodyclock::voice::Omni& omni() {
-    static bodyclock::voice::Omni engine;
-    return engine;
-}
-
-std::string& omni_buffer() {
-    static thread_local std::string buf;
-    return buf;
-}
-
-// Carries the host's C callback across the C++ sink signature. A struct rather
-// than two globals because a sink is per-call and the engine is not.
-struct OmniSinkBridge {
-    bodyclock_omni_audio_handler handler;
-    void*                   user_data;
-};
-
-bool omni_sink(const float* pcm, size_t n_samples, bool last, void* user_data) {
-    OmniSinkBridge* bridge = static_cast<OmniSinkBridge*>(user_data);
-    if (!bridge || !bridge->handler) {
-        return true;
-    }
-    return bridge->handler(pcm, static_cast<int>(n_samples), last ? 1 : 0,
-                           bridge->user_data) != 0;
-}
-
-}  // namespace
-
-extern "C" int bodyclock_omni_available(void) {
-    return bodyclock::voice::Omni::available() ? 1 : 0;
-}
-
-extern "C" int bodyclock_omni_load(const char* model_dir) {
-    if (blank(model_dir)) {
-        bodyclock::platform::log_warn("bodyclock_omni_load: model_dir is required");
-        return 1;
-    }
-    std::lock_guard<std::mutex> guard(omni_mutex());
-    return omni().load(model_dir) ? 0 : 1;
-}
-
-extern "C" int bodyclock_omni_loaded(void) {
-    std::lock_guard<std::mutex> guard(omni_mutex());
-    return omni().loaded() ? 1 : 0;
-}
-
-extern "C" int bodyclock_omni_set_dit_steps(int steps) {
-    std::lock_guard<std::mutex> guard(omni_mutex());
-    return omni().set_dit_steps(steps) ? 0 : 1;
-}
-
-extern "C" void bodyclock_omni_unload(void) {
-    // Nothing to release explicitly: the engine drops its weights when another
-    // load replaces them or the process ends. Kept for symmetry with the other
-    // lanes, and so a host has one place to say "I am done with this".
-    bodyclock::platform::log_info("bodyclock_omni_unload: weights stay until replaced");
-}
-
-extern "C" const char* bodyclock_omni_ask(const short* pcm,
-                                     int n_samples,
-                                     const char* prompt,
-                                     bodyclock_omni_audio_handler on_audio,
-                                     void* user_data) {
-    if (pcm == nullptr || n_samples <= 0 || blank(prompt)) {
-        bodyclock::platform::log_warn("bodyclock_omni_ask: pcm, n_samples and prompt are required");
-        return nullptr;
-    }
-
-    std::vector<float> samples(static_cast<size_t>(n_samples));
-    for (int i = 0; i < n_samples; ++i) {
-        samples[i] = pcm[i] / 32768.0f;
-    }
-
-    std::lock_guard<std::mutex> guard(omni_mutex());
-
-    OmniSinkBridge bridge;
-    bridge.handler   = on_audio;
-    bridge.user_data = user_data;
-
-    bodyclock::voice::OmniReply reply;
-    const bool ok = omni().ask(&samples[0], samples.size(), prompt,
-                               on_audio ? omni_sink : 0,
-                               on_audio ? &bridge : 0, &reply);
-    if (!ok) {
-        return nullptr;
-    }
-
-    rapidjson::StringBuffer buf;
-    rapidjson::Writer<rapidjson::StringBuffer> w(buf);
-    w.StartObject();
-    w.Key("text");
-    w.String(reply.text.data(), static_cast<rapidjson::SizeType>(reply.text.size()));
-    w.Key("audioSeconds");  w.Double(static_cast<double>(n_samples) / 16000.0);
-    w.Key("seconds");       w.Double(reply.seconds);
-    w.Key("thinkerSeconds"); w.Double(reply.thinker_seconds);
-    w.Key("speechSeconds"); w.Double(reply.speech_seconds);
-    w.Key("speechElapsed"); w.Double(reply.speech_elapsed);
-    // What a person actually waits before hearing anything, and how many blocks
-    // it arrived in. speechRealtime below is the cost of the WHOLE reply; these
-    // two say whether that cost is ever experienced.
-    w.Key("firstAudioSeconds"); w.Double(reply.first_audio_seconds);
-    w.Key("audioBlocks");       w.Int(reply.audio_blocks);
-    // The ratio the whole lane turns on: how many seconds of computation buy one
-    // second of speech. Above 1 the model cannot talk in real time.
-    w.Key("speechRealtime");
-    w.Double(reply.speech_seconds > 0.0f ? reply.speech_elapsed / reply.speech_seconds : 0.0);
-    w.EndObject();
-
-    omni_buffer().assign(buf.GetString(), buf.GetSize());
-    return omni_buffer().c_str();
-}
-
+//
+// src/voice/omni.cpp moved to src/voice/attic/ and is in no target, so nothing
+// here can link. Commented rather than deleted so the shape of the lane stays
+// next to the one that replaced it, immediately below: same sink bridge, same
+// one-engine-per-process mutex, same JSON of timings. What differed was what
+// the timings said -- src/voice/attic/README.md has the table.
+//
+//
+// namespace {
+//
+// // One engine for the process, guarded, for the same two reasons the recognizer
+// // is: the weights are gigabytes, and one instance owns compute buffers that a
+// // call writes through.
+// std::mutex& omni_mutex() {
+//     static std::mutex m;
+//     return m;
+// }
+//
+// bodyclock::voice::Omni& omni() {
+//     static bodyclock::voice::Omni engine;
+//     return engine;
+// }
+//
+// std::string& omni_buffer() {
+//     static thread_local std::string buf;
+//     return buf;
+// }
+//
+// // Carries the host's C callback across the C++ sink signature. A struct rather
+// // than two globals because a sink is per-call and the engine is not.
+// struct OmniSinkBridge {
+//     bodyclock_omni_audio_handler handler;
+//     void*                   user_data;
+// };
+//
+// bool omni_sink(const float* pcm, size_t n_samples, bool last, void* user_data) {
+//     OmniSinkBridge* bridge = static_cast<OmniSinkBridge*>(user_data);
+//     if (!bridge || !bridge->handler) {
+//         return true;
+//     }
+//     return bridge->handler(pcm, static_cast<int>(n_samples), last ? 1 : 0,
+//                            bridge->user_data) != 0;
+// }
+//
+// }  // namespace
+//
+// extern "C" int bodyclock_omni_available(void) {
+//     return bodyclock::voice::Omni::available() ? 1 : 0;
+// }
+//
+// extern "C" int bodyclock_omni_load(const char* model_dir) {
+//     if (blank(model_dir)) {
+//         bodyclock::platform::log_warn("bodyclock_omni_load: model_dir is required");
+//         return 1;
+//     }
+//     std::lock_guard<std::mutex> guard(omni_mutex());
+//     return omni().load(model_dir) ? 0 : 1;
+// }
+//
+// extern "C" int bodyclock_omni_loaded(void) {
+//     std::lock_guard<std::mutex> guard(omni_mutex());
+//     return omni().loaded() ? 1 : 0;
+// }
+//
+// extern "C" int bodyclock_omni_set_dit_steps(int steps) {
+//     std::lock_guard<std::mutex> guard(omni_mutex());
+//     return omni().set_dit_steps(steps) ? 0 : 1;
+// }
+//
+// extern "C" void bodyclock_omni_unload(void) {
+//     // Nothing to release explicitly: the engine drops its weights when another
+//     // load replaces them or the process ends. Kept for symmetry with the other
+//     // lanes, and so a host has one place to say "I am done with this".
+//     bodyclock::platform::log_info("bodyclock_omni_unload: weights stay until replaced");
+// }
+//
+// extern "C" const char* bodyclock_omni_ask(const short* pcm,
+//                                      int n_samples,
+//                                      const char* prompt,
+//                                      bodyclock_omni_audio_handler on_audio,
+//                                      void* user_data) {
+//     if (pcm == nullptr || n_samples <= 0 || blank(prompt)) {
+//         bodyclock::platform::log_warn("bodyclock_omni_ask: pcm, n_samples and prompt are required");
+//         return nullptr;
+//     }
+//
+//     std::vector<float> samples(static_cast<size_t>(n_samples));
+//     for (int i = 0; i < n_samples; ++i) {
+//         samples[i] = pcm[i] / 32768.0f;
+//     }
+//
+//     std::lock_guard<std::mutex> guard(omni_mutex());
+//
+//     OmniSinkBridge bridge;
+//     bridge.handler   = on_audio;
+//     bridge.user_data = user_data;
+//
+//     bodyclock::voice::OmniReply reply;
+//     const bool ok = omni().ask(&samples[0], samples.size(), prompt,
+//                                on_audio ? omni_sink : 0,
+//                                on_audio ? &bridge : 0, &reply);
+//     if (!ok) {
+//         return nullptr;
+//     }
+//
+//     rapidjson::StringBuffer buf;
+//     rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+//     w.StartObject();
+//     w.Key("text");
+//     w.String(reply.text.data(), static_cast<rapidjson::SizeType>(reply.text.size()));
+//     w.Key("audioSeconds");  w.Double(static_cast<double>(n_samples) / 16000.0);
+//     w.Key("seconds");       w.Double(reply.seconds);
+//     w.Key("thinkerSeconds"); w.Double(reply.thinker_seconds);
+//     w.Key("speechSeconds"); w.Double(reply.speech_seconds);
+//     w.Key("speechElapsed"); w.Double(reply.speech_elapsed);
+//     // What a person actually waits before hearing anything, and how many blocks
+//     // it arrived in. speechRealtime below is the cost of the WHOLE reply; these
+//     // two say whether that cost is ever experienced.
+//     w.Key("firstAudioSeconds"); w.Double(reply.first_audio_seconds);
+//     w.Key("audioBlocks");       w.Int(reply.audio_blocks);
+//     // The ratio the whole lane turns on: how many seconds of computation buy one
+//     // second of speech. Above 1 the model cannot talk in real time.
+//     w.Key("speechRealtime");
+//     w.Double(reply.speech_seconds > 0.0f ? reply.speech_elapsed / reply.speech_seconds : 0.0);
+//     w.EndObject();
+//
+//     omni_buffer().assign(buf.GetString(), buf.GetSize());
+//     return omni_buffer().c_str();
+// }
+//
 //------------------------------------------------------------------------------
 // Speech output (qwentts.cpp)
 //------------------------------------------------------------------------------

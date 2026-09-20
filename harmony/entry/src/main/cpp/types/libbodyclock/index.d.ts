@@ -250,95 +250,102 @@ export const nativeVoiceAnalyze: (
 ) => void;
 
 //------------------------------------------------------------------------------
-// Omni (MNN)
+// Omni (MNN) -- RETIRED
 //------------------------------------------------------------------------------
-
-/**
- * Whether this build has the MNN engine compiled in.
- *
- * This is the second engine, and it is here for exactly one capability: the
- * model answering in its OWN voice. llama.cpp has no Talker in GGUF, so on that
- * lane a reply can only be read aloud by the platform's text-to-speech.
- *
- * Nothing else routes through it. Recognition stays with SenseVoice, the text
- * axes stay with the chat model and its grammar, arousal stays signal
- * processing. See design/voice.md.
- */
-export const nativeOmniAvailable: () => boolean;
-
-/**
- * Read an MNN omni model. Runs off the ArkTS thread; calls back once with
- * ('ok', dir) or ('error', reason).
- *
- * `modelDir` is a DIRECTORY, not a file — config.json plus a dozen graphs and
- * their weights, about 3.8 GB. That is the difference from the GGUF lanes: a
- * single-file picker cannot express it.
- */
-export const nativeOmniLoad: (
-  modelDir: string,
-  onDone: (type: string, content: string) => void
-) => void;
-
-/** Whether an omni model is resident right now. */
-export const nativeOmniLoaded: () => boolean;
-
-/**
- * Solver steps for the diffusion vocoder. Returns 0 on success; needs a loaded
- * model, and refuses anything below 2. Takes effect on the next ask without
- * dropping the weights, so a sweep compares step counts and not page caches.
- *
- * The only lever on this lane's 3.7× that does not need a different model. MNN
- * runs `steps - 1` DiT forwards per chunk, so the shipped 5 is four forwards and
- * 2 is one. The talker's autoregressive half is affordable on arithmetic — 50
- * codec tokens a second against 0.392 GB of weights is 19.6 GB/s, inside what
- * this device reads — so the diffusion is where the excess is.
- *
- * It trades the thing being bought: a coarser sampler is a less natural voice,
- * which is the only reason this engine is a candidate. The number to find is not
- * the fastest, it is the fewest steps still better than the platform voice.
- */
-export const nativeOmniSetDitSteps: (steps: number) => number;
-
-/**
- * Ask the model about one recording, optionally aloud.
- *
- * Calls back once with ('result', json) or ('error', reason). The JSON carries
- * `text`, `audioSeconds`, `seconds`, `thinkerSeconds`, `speechSeconds`,
- * `speechElapsed`, `speechRealtime`, `firstAudioSeconds` and `audioBlocks`.
- *
- * `speechRealtime` is seconds of computation per second of speech, and it
- * covers the TALKER ALONE — `seconds` minus `thinkerSeconds` is its numerator.
- * Above 1 the model cannot talk as fast as it speaks.
- *
- * `firstAudioSeconds` is the wait before the first block of PCM, measured from
- * the start of the exchange; `audioBlocks` is how many blocks there were, and 1
- * means nothing streamed. They were added to ask whether playing the reply as
- * it arrives rescues the ratio, and the answer measured here is no: nine blocks
- * carried 10.34 s of speech over 38.5 s, one every 4.3 s holding 1.15 s, so
- * playback drains each in 1.15 s and then waits 3.2 s — 27% speech, 73%
- * silence, which is 1 / 3.7.
- *
- * @param pcm    16-bit signed mono at 16000 Hz, copied synchronously.
- * @param speak  false for a text answer only. true asks the Talker to speak the
- *               reply, which is most of the cost.
- *
- * Audio longer than about 28 seconds is REFUSED, not attempted: MNN segfaults
- * inside its audio front end past roughly 30 s. Chunk before calling.
- */
-export const nativeOmniAsk: (
-  pcm: ArrayBuffer,
-  prompt: string,
-  speak: boolean,
-  onDone: (type: string, content: string) => void
-) => void;
-
-/**
- * The waveform the Talker produced for the last `nativeOmniAsk(..., true, ...)`,
- * as 16-bit signed mono at **24000 Hz** — not the 16 kHz of the input side.
- * Empty when the last call did not ask for speech.
- */
-export const nativeOmniLastSpeech: () => ArrayBuffer;
-
+//
+// None of these are exported any more: src/voice/omni.cpp moved to
+// src/voice/attic/ and the NAPI bindings are commented out with it. A
+// declaration file that promises a function the module does not export turns a
+// build-time error into a runtime one, which is the wrong trade, so these are
+// commented rather than left standing.
+//
+//
+// /**
+//  * Whether this build has the MNN engine compiled in.
+//  *
+//  * This is the second engine, and it is here for exactly one capability: the
+//  * model answering in its OWN voice. llama.cpp has no Talker in GGUF, so on that
+//  * lane a reply can only be read aloud by the platform's text-to-speech.
+//  *
+//  * Nothing else routes through it. Recognition stays with SenseVoice, the text
+//  * axes stay with the chat model and its grammar, arousal stays signal
+//  * processing. See design/voice.md.
+//  */
+// export const nativeOmniAvailable: () => boolean;
+//
+// /**
+//  * Read an MNN omni model. Runs off the ArkTS thread; calls back once with
+//  * ('ok', dir) or ('error', reason).
+//  *
+//  * `modelDir` is a DIRECTORY, not a file — config.json plus a dozen graphs and
+//  * their weights, about 3.8 GB. That is the difference from the GGUF lanes: a
+//  * single-file picker cannot express it.
+//  */
+// export const nativeOmniLoad: (
+//   modelDir: string,
+//   onDone: (type: string, content: string) => void
+// ) => void;
+//
+// /** Whether an omni model is resident right now. */
+// export const nativeOmniLoaded: () => boolean;
+//
+// /**
+//  * Solver steps for the diffusion vocoder. Returns 0 on success; needs a loaded
+//  * model, and refuses anything below 2. Takes effect on the next ask without
+//  * dropping the weights, so a sweep compares step counts and not page caches.
+//  *
+//  * The only lever on this lane's 3.7× that does not need a different model. MNN
+//  * runs `steps - 1` DiT forwards per chunk, so the shipped 5 is four forwards and
+//  * 2 is one. The talker's autoregressive half is affordable on arithmetic — 50
+//  * codec tokens a second against 0.392 GB of weights is 19.6 GB/s, inside what
+//  * this device reads — so the diffusion is where the excess is.
+//  *
+//  * It trades the thing being bought: a coarser sampler is a less natural voice,
+//  * which is the only reason this engine is a candidate. The number to find is not
+//  * the fastest, it is the fewest steps still better than the platform voice.
+//  */
+// export const nativeOmniSetDitSteps: (steps: number) => number;
+//
+// /**
+//  * Ask the model about one recording, optionally aloud.
+//  *
+//  * Calls back once with ('result', json) or ('error', reason). The JSON carries
+//  * `text`, `audioSeconds`, `seconds`, `thinkerSeconds`, `speechSeconds`,
+//  * `speechElapsed`, `speechRealtime`, `firstAudioSeconds` and `audioBlocks`.
+//  *
+//  * `speechRealtime` is seconds of computation per second of speech, and it
+//  * covers the TALKER ALONE — `seconds` minus `thinkerSeconds` is its numerator.
+//  * Above 1 the model cannot talk as fast as it speaks.
+//  *
+//  * `firstAudioSeconds` is the wait before the first block of PCM, measured from
+//  * the start of the exchange; `audioBlocks` is how many blocks there were, and 1
+//  * means nothing streamed. They were added to ask whether playing the reply as
+//  * it arrives rescues the ratio, and the answer measured here is no: nine blocks
+//  * carried 10.34 s of speech over 38.5 s, one every 4.3 s holding 1.15 s, so
+//  * playback drains each in 1.15 s and then waits 3.2 s — 27% speech, 73%
+//  * silence, which is 1 / 3.7.
+//  *
+//  * @param pcm    16-bit signed mono at 16000 Hz, copied synchronously.
+//  * @param speak  false for a text answer only. true asks the Talker to speak the
+//  *               reply, which is most of the cost.
+//  *
+//  * Audio longer than about 28 seconds is REFUSED, not attempted: MNN segfaults
+//  * inside its audio front end past roughly 30 s. Chunk before calling.
+//  */
+// export const nativeOmniAsk: (
+//   pcm: ArrayBuffer,
+//   prompt: string,
+//   speak: boolean,
+//   onDone: (type: string, content: string) => void
+// ) => void;
+//
+// /**
+//  * The waveform the Talker produced for the last `nativeOmniAsk(..., true, ...)`,
+//  * as 16-bit signed mono at **24000 Hz** — not the 16 kHz of the input side.
+//  * Empty when the last call did not ask for speech.
+//  */
+// export const nativeOmniLastSpeech: () => ArrayBuffer;
+//
 //------------------------------------------------------------------------------
 // Speech output (qwentts.cpp + Qwen3-TTS VoiceDesign)
 //------------------------------------------------------------------------------

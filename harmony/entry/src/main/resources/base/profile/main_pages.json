@@ -5,7 +5,6 @@
     "pages/SettingsModels",
     "pages/SettingsInterface",
     "pages/VoiceDebug",
-    "pages/OmniDebug",
     "pages/TtsDebug"
   ]
 }

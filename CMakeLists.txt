@@ -191,8 +191,10 @@ add_library(bodyclock_core STATIC
     src/voice/prosody.cpp
     src/voice/sensevoice.cpp
     # A SECOND engine, for the one thing ggml cannot do here: speak in the
-    # model's own voice. Stubs out without BODYCLOCK_MNN.
-    src/voice/omni.cpp
+    # model's own voice. It lost to the third on every axis and now lives in
+    # src/voice/attic/ -- kept for the measurements, listed by no target. Its
+    # README has the table.
+    #   src/voice/omni.cpp
     # A THIRD, for the same thing at a third of the cost, on text somebody else
     # wrote. Stubs out without BODYCLOCK_QTTS.
     src/voice/qtts.cpp

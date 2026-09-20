@@ -556,180 +556,186 @@ napi_value NativeVoiceAnalyze(napi_env env, napi_callback_info info) {
 }
 
 //------------------------------------------------------------------------------
-// Omni (MNN)
+// Omni (MNN) -- RETIRED
 //------------------------------------------------------------------------------
 //
-// Same shape as the voice lane: the two calls that block run on a detached
-// thread and report through one threadsafe function.
+// The C entry points these wrap are commented out in src/bodyclock.h, because
+// src/voice/omni.cpp moved to src/voice/attic/ and is in no target. Kept here in
+// comment beside the lane that replaced it: the shapes are nearly identical, and
+// what separated them was measured rather than argued.
 //
-// The generated speech is NOT streamed to ArkTS. The C ABI streams it -- that is
-// the general shape -- but a debug page wants the whole waveform to play back,
-// not chunks, so the worker accumulates it here and nativeOmniLastSpeech() hands
-// it over afterwards. One buffer, no per-chunk thread crossings, and the page
-// decides whether it wants the audio at all.
-
-std::mutex g_omni_speech_mutex;
-std::vector<float> g_omni_speech;   // 24 kHz mono, the last reply the Talker spoke
-
-// Runs OFF the ArkTS thread, once per chunk, on the engine's own thread.
-int OmniCollect(const float* pcm, int n_samples, int last, void* user_data) {
-    auto* into = static_cast<std::vector<float>*>(user_data);
-    if (into && pcm && n_samples > 0) {
-        into->insert(into->end(), pcm, pcm + n_samples);
-    }
-    (void)last;
-    return 1;   // never abort: the page asked for the whole reply
-}
-
-void OmniLoadWorker(std::string dir, napi_threadsafe_function tsfn) {
-    const int rc = bodyclock_omni_load(dir.c_str());
-    auto* ev = new StreamEvent{rc == 0 ? "ok" : "error",
-                               rc == 0 ? dir : std::string("could not load ") + dir};
-    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
-    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
-}
-
-// Takes the samples BY VALUE -- the ArrayBuffer they came from belongs to the JS
-// heap and nothing stops it being collected while this runs.
-void OmniAskWorker(std::vector<std::int16_t> pcm, std::string prompt, bool speak,
-                   napi_threadsafe_function tsfn) {
-    std::vector<float> speech;
-    const char* json = bodyclock_omni_ask(
-        pcm.empty() ? nullptr : reinterpret_cast<const short*>(&pcm[0]),
-        static_cast<int>(pcm.size()), prompt.c_str(),
-        speak ? OmniCollect : nullptr,
-        speak ? &speech : nullptr);
-
-    if (speak) {
-        std::lock_guard<std::mutex> lock(g_omni_speech_mutex);
-        g_omni_speech.swap(speech);
-    }
-
-    auto* ev = json ? new StreamEvent{"result", std::string(json)}
-                    : new StreamEvent{"error", "the engine refused or failed -- see the core log"};
-    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
-    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
-}
-
-// nativeOmniAvailable(): boolean
-napi_value NativeOmniAvailable(napi_env env, napi_callback_info) {
-    napi_value out = nullptr;
-    napi_get_boolean(env, bodyclock_omni_available() != 0, &out);
-    return out;
-}
-
-// nativeOmniLoaded(): boolean
-napi_value NativeOmniLoaded(napi_env env, napi_callback_info) {
-    napi_value out = nullptr;
-    napi_get_boolean(env, bodyclock_omni_loaded() != 0, &out);
-    return out;
-}
-
-// nativeOmniSetDitSteps(steps: number): number
+// //
+// // Same shape as the voice lane: the two calls that block run on a detached
+// // thread and report through one threadsafe function.
+// //
+// // The generated speech is NOT streamed to ArkTS. The C ABI streams it -- that is
+// // the general shape -- but a debug page wants the whole waveform to play back,
+// // not chunks, so the worker accumulates it here and nativeOmniLastSpeech() hands
+// // it over afterwards. One buffer, no per-chunk thread crossings, and the page
+// // decides whether it wants the audio at all.
 //
-// Synchronous and cheap -- MNN reads the value when it generates, so this sets
-// a field the next ask uses and does not touch the 3.8 GB of weights.
-napi_value NativeOmniSetDitSteps(napi_env env, napi_callback_info info) {
-    size_t argc = 1;
-    napi_value argv[1] = {nullptr};
-    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
-    std::int32_t n = 0;
-    if (argc >= 1) napi_get_value_int32(env, argv[0], &n);
-    return Int32(env, bodyclock_omni_set_dit_steps(n));
-}
-
-// nativeOmniLoad(modelDir, onDone: (type, content) => void): void
-napi_value NativeOmniLoad(napi_env env, napi_callback_info info) {
-    size_t argc = 2;
-    napi_value argv[2] = {nullptr, nullptr};
-    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
-    if (argc < 2) {
-        napi_throw_error(env, nullptr, "nativeOmniLoad(modelDir, onDone) needs two arguments");
-        return nullptr;
-    }
-
-    std::string dir = ToUtf8(env, argv[0]);
-
-    napi_value work_name = nullptr;
-    napi_create_string_utf8(env, "bodyclock_omni_load", NAPI_AUTO_LENGTH, &work_name);
-
-    napi_threadsafe_function tsfn = nullptr;
-    if (napi_create_threadsafe_function(env, argv[1], nullptr, work_name, 0, 1,
-                                        nullptr, nullptr, nullptr, CallJs, &tsfn) != napi_ok) {
-        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
-        return nullptr;
-    }
-
-    std::thread(OmniLoadWorker, std::move(dir), tsfn).detach();
-    return nullptr;
-}
-
-// nativeOmniAsk(pcm: ArrayBuffer, prompt: string, speak: boolean,
-//               onDone: (type, content) => void): void
-napi_value NativeOmniAsk(napi_env env, napi_callback_info info) {
-    size_t argc = 4;
-    napi_value argv[4] = {nullptr, nullptr, nullptr, nullptr};
-    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
-    if (argc < 4) {
-        napi_throw_error(env, nullptr,
-                         "nativeOmniAsk(pcm, prompt, speak, onDone) needs four arguments");
-        return nullptr;
-    }
-
-    void*  data  = nullptr;
-    size_t bytes = 0;
-    if (napi_get_arraybuffer_info(env, argv[0], &data, &bytes) != napi_ok || data == nullptr) {
-        napi_throw_error(env, nullptr, "nativeOmniAsk: pcm must be an ArrayBuffer");
-        return nullptr;
-    }
-
-    std::string prompt = ToUtf8(env, argv[1]);
-    bool speak = false;
-    napi_get_value_bool(env, argv[2], &speak);
-
-    // Copied here, on the ArkTS thread, while the buffer is certainly alive.
-    const size_t count = bytes / sizeof(std::int16_t);
-    std::vector<std::int16_t> pcm(count);
-    if (count) std::memcpy(&pcm[0], data, count * sizeof(std::int16_t));
-
-    napi_value work_name = nullptr;
-    napi_create_string_utf8(env, "bodyclock_omni_ask", NAPI_AUTO_LENGTH, &work_name);
-
-    napi_threadsafe_function tsfn = nullptr;
-    if (napi_create_threadsafe_function(env, argv[3], nullptr, work_name, 0, 1,
-                                        nullptr, nullptr, nullptr, CallJs, &tsfn) != napi_ok) {
-        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
-        return nullptr;
-    }
-
-    std::thread(OmniAskWorker, std::move(pcm), std::move(prompt), speak, tsfn).detach();
-    return nullptr;
-}
-
-// nativeOmniLastSpeech(): ArrayBuffer   (16-bit mono at 24 kHz, empty when none)
+// std::mutex g_omni_speech_mutex;
+// std::vector<float> g_omni_speech;   // 24 kHz mono, the last reply the Talker spoke
 //
-// Converted to 16-bit on the way out rather than handed over as float: it is
-// half the bytes, and it is what an AudioRenderer takes.
-napi_value NativeOmniLastSpeech(napi_env env, napi_callback_info) {
-    std::vector<float> speech;
-    {
-        std::lock_guard<std::mutex> lock(g_omni_speech_mutex);
-        speech = g_omni_speech;
-    }
-
-    void* data = nullptr;
-    napi_value out = nullptr;
-    napi_create_arraybuffer(env, speech.size() * sizeof(std::int16_t), &data, &out);
-    auto* pcm = static_cast<std::int16_t*>(data);
-    for (size_t i = 0; i < speech.size(); ++i) {
-        float v = speech[i] * 32768.0f;
-        if (v > 32767.0f)  v = 32767.0f;
-        if (v < -32768.0f) v = -32768.0f;
-        pcm[i] = static_cast<std::int16_t>(v);
-    }
-    return out;
-}
-
+// // Runs OFF the ArkTS thread, once per chunk, on the engine's own thread.
+// int OmniCollect(const float* pcm, int n_samples, int last, void* user_data) {
+//     auto* into = static_cast<std::vector<float>*>(user_data);
+//     if (into && pcm && n_samples > 0) {
+//         into->insert(into->end(), pcm, pcm + n_samples);
+//     }
+//     (void)last;
+//     return 1;   // never abort: the page asked for the whole reply
+// }
+//
+// void OmniLoadWorker(std::string dir, napi_threadsafe_function tsfn) {
+//     const int rc = bodyclock_omni_load(dir.c_str());
+//     auto* ev = new StreamEvent{rc == 0 ? "ok" : "error",
+//                                rc == 0 ? dir : std::string("could not load ") + dir};
+//     napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+//     napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+// }
+//
+// // Takes the samples BY VALUE -- the ArrayBuffer they came from belongs to the JS
+// // heap and nothing stops it being collected while this runs.
+// void OmniAskWorker(std::vector<std::int16_t> pcm, std::string prompt, bool speak,
+//                    napi_threadsafe_function tsfn) {
+//     std::vector<float> speech;
+//     const char* json = bodyclock_omni_ask(
+//         pcm.empty() ? nullptr : reinterpret_cast<const short*>(&pcm[0]),
+//         static_cast<int>(pcm.size()), prompt.c_str(),
+//         speak ? OmniCollect : nullptr,
+//         speak ? &speech : nullptr);
+//
+//     if (speak) {
+//         std::lock_guard<std::mutex> lock(g_omni_speech_mutex);
+//         g_omni_speech.swap(speech);
+//     }
+//
+//     auto* ev = json ? new StreamEvent{"result", std::string(json)}
+//                     : new StreamEvent{"error", "the engine refused or failed -- see the core log"};
+//     napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+//     napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+// }
+//
+// // nativeOmniAvailable(): boolean
+// napi_value NativeOmniAvailable(napi_env env, napi_callback_info) {
+//     napi_value out = nullptr;
+//     napi_get_boolean(env, bodyclock_omni_available() != 0, &out);
+//     return out;
+// }
+//
+// // nativeOmniLoaded(): boolean
+// napi_value NativeOmniLoaded(napi_env env, napi_callback_info) {
+//     napi_value out = nullptr;
+//     napi_get_boolean(env, bodyclock_omni_loaded() != 0, &out);
+//     return out;
+// }
+//
+// // nativeOmniSetDitSteps(steps: number): number
+// //
+// // Synchronous and cheap -- MNN reads the value when it generates, so this sets
+// // a field the next ask uses and does not touch the 3.8 GB of weights.
+// napi_value NativeOmniSetDitSteps(napi_env env, napi_callback_info info) {
+//     size_t argc = 1;
+//     napi_value argv[1] = {nullptr};
+//     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+//     std::int32_t n = 0;
+//     if (argc >= 1) napi_get_value_int32(env, argv[0], &n);
+//     return Int32(env, bodyclock_omni_set_dit_steps(n));
+// }
+//
+// // nativeOmniLoad(modelDir, onDone: (type, content) => void): void
+// napi_value NativeOmniLoad(napi_env env, napi_callback_info info) {
+//     size_t argc = 2;
+//     napi_value argv[2] = {nullptr, nullptr};
+//     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+//     if (argc < 2) {
+        // //         napi_throw_error(env, nullptr, "nativeOmniLoad(modelDir, onDone) needs two arguments");
+//         return nullptr;
+//     }
+//
+//     std::string dir = ToUtf8(env, argv[0]);
+//
+//     napi_value work_name = nullptr;
+//     napi_create_string_utf8(env, "bodyclock_omni_load", NAPI_AUTO_LENGTH, &work_name);
+//
+//     napi_threadsafe_function tsfn = nullptr;
+//     if (napi_create_threadsafe_function(env, argv[1], nullptr, work_name, 0, 1,
+//                                         nullptr, nullptr, nullptr, CallJs, &tsfn) != napi_ok) {
+//         napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+//         return nullptr;
+//     }
+//
+//     std::thread(OmniLoadWorker, std::move(dir), tsfn).detach();
+//     return nullptr;
+// }
+//
+// // nativeOmniAsk(pcm: ArrayBuffer, prompt: string, speak: boolean,
+// //               onDone: (type, content) => void): void
+// napi_value NativeOmniAsk(napi_env env, napi_callback_info info) {
+//     size_t argc = 4;
+//     napi_value argv[4] = {nullptr, nullptr, nullptr, nullptr};
+//     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+//     if (argc < 4) {
+//         napi_throw_error(env, nullptr,
+        // //                          "nativeOmniAsk(pcm, prompt, speak, onDone) needs four arguments");
+//         return nullptr;
+//     }
+//
+//     void*  data  = nullptr;
+//     size_t bytes = 0;
+//     if (napi_get_arraybuffer_info(env, argv[0], &data, &bytes) != napi_ok || data == nullptr) {
+        // //         napi_throw_error(env, nullptr, "nativeOmniAsk: pcm must be an ArrayBuffer");
+//         return nullptr;
+//     }
+//
+//     std::string prompt = ToUtf8(env, argv[1]);
+//     bool speak = false;
+//     napi_get_value_bool(env, argv[2], &speak);
+//
+//     // Copied here, on the ArkTS thread, while the buffer is certainly alive.
+//     const size_t count = bytes / sizeof(std::int16_t);
+//     std::vector<std::int16_t> pcm(count);
+//     if (count) std::memcpy(&pcm[0], data, count * sizeof(std::int16_t));
+//
+//     napi_value work_name = nullptr;
+//     napi_create_string_utf8(env, "bodyclock_omni_ask", NAPI_AUTO_LENGTH, &work_name);
+//
+//     napi_threadsafe_function tsfn = nullptr;
+//     if (napi_create_threadsafe_function(env, argv[3], nullptr, work_name, 0, 1,
+//                                         nullptr, nullptr, nullptr, CallJs, &tsfn) != napi_ok) {
+//         napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+//         return nullptr;
+//     }
+//
+//     std::thread(OmniAskWorker, std::move(pcm), std::move(prompt), speak, tsfn).detach();
+//     return nullptr;
+// }
+//
+// // nativeOmniLastSpeech(): ArrayBuffer   (16-bit mono at 24 kHz, empty when none)
+// //
+// // Converted to 16-bit on the way out rather than handed over as float: it is
+// // half the bytes, and it is what an AudioRenderer takes.
+// napi_value NativeOmniLastSpeech(napi_env env, napi_callback_info) {
+//     std::vector<float> speech;
+//     {
+//         std::lock_guard<std::mutex> lock(g_omni_speech_mutex);
+//         speech = g_omni_speech;
+//     }
+//
+//     void* data = nullptr;
+//     napi_value out = nullptr;
+//     napi_create_arraybuffer(env, speech.size() * sizeof(std::int16_t), &data, &out);
+//     auto* pcm = static_cast<std::int16_t*>(data);
+//     for (size_t i = 0; i < speech.size(); ++i) {
+//         float v = speech[i] * 32768.0f;
+//         if (v > 32767.0f)  v = 32767.0f;
+//         if (v < -32768.0f) v = -32768.0f;
+//         pcm[i] = static_cast<std::int16_t>(v);
+//     }
+//     return out;
+// }
+//
 //------------------------------------------------------------------------------
 // Speech output (qwentts.cpp)
 //------------------------------------------------------------------------------
@@ -1100,12 +1106,12 @@ napi_value Init(napi_env env, napi_value exports) {
         {"nativeVoiceSetItn",    nullptr, NativeVoiceSetItn,    nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeVoiceSetThreads", nullptr, NativeVoiceSetThreads, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeVoiceAnalyze",   nullptr, NativeVoiceAnalyze,   nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"nativeOmniAvailable",  nullptr, NativeOmniAvailable,  nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"nativeOmniLoad",       nullptr, NativeOmniLoad,       nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"nativeOmniLoaded",     nullptr, NativeOmniLoaded,     nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"nativeOmniAsk",        nullptr, NativeOmniAsk,        nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"nativeOmniLastSpeech", nullptr, NativeOmniLastSpeech, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"nativeOmniSetDitSteps", nullptr, NativeOmniSetDitSteps, nullptr, nullptr, nullptr, napi_default, nullptr},
+        // {"nativeOmniAvailable",  nullptr, NativeOmniAvailable,  nullptr, nullptr, nullptr, napi_default, nullptr},
+        // {"nativeOmniLoad",       nullptr, NativeOmniLoad,       nullptr, nullptr, nullptr, napi_default, nullptr},
+        // {"nativeOmniLoaded",     nullptr, NativeOmniLoaded,     nullptr, nullptr, nullptr, napi_default, nullptr},
+        // {"nativeOmniAsk",        nullptr, NativeOmniAsk,        nullptr, nullptr, nullptr, napi_default, nullptr},
+        // {"nativeOmniLastSpeech", nullptr, NativeOmniLastSpeech, nullptr, nullptr, nullptr, napi_default, nullptr},
+        // {"nativeOmniSetDitSteps", nullptr, NativeOmniSetDitSteps, nullptr, nullptr, nullptr, napi_default, nullptr},
 
         {"nativeTtsAvailable",   nullptr, NativeTtsAvailable,   nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsLoad",        nullptr, NativeTtsLoad,        nullptr, nullptr, nullptr, napi_default, nullptr},

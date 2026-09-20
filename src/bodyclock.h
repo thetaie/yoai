@@ -395,112 +395,121 @@ const char* bodyclock_voice_analyze(const short* pcm,
                                int sample_rate);
 
 //------------------------------------------------------------------------------
-// Omni (MNN)
+// Omni (MNN) -- RETIRED
 //------------------------------------------------------------------------------
 //
-// A SECOND engine, for the one thing the first cannot do: speak in the model's
-// own voice. llama.cpp has no Talker checkpoint in GGUF; MNN has the whole chain
-// -- thinker, talker, diffusion transformer, vocoder -- and it works. Measured
-// on a desktop: audio in, a spoken answer out, in one call.
+// Declarations for entry points that no longer exist: src/voice/omni.cpp moved
+// to src/voice/attic/ and is in no target. A header that promises a symbol the
+// library does not define is worse than a missing one -- it fails at link, in
+// somebody else's build -- so these are commented rather than left standing.
 //
-// It is NOT a replacement for anything. Recognition stays with SenseVoice, which
-// is cheap and uniquely supplies the 60 ms alignment the clause cut needs; text
-// stays with llama.cpp and its grammar; prosody is signal processing and needs no
-// engine at all. This lane buys exactly one thing, and design/voice.md argues
-// over whether that one thing is affordable. These entry points exist so the
-// question can be answered on a phone instead of a workstation.
+// The lane below replaced it and reads as a narrower version of the same shape.
+// src/voice/attic/README.md has the measurements that decided it.
 //
-// Threading and cost: everything here BLOCKS, and generating speech measured
-// about 3x slower than real time on a desktop CPU -- a fifteen-second reply is
-// most of a minute. Call it off the drawing thread and expect to wait.
-
-// Whether this build has the engine compiled in: 1 if yes, 0 if it was built
-// without MNN. When 0 everything below still links and answers truthfully.
-int bodyclock_omni_available(void);
-
-// Read a model. BLOCKS.
+// //
+// // A SECOND engine, for the one thing the first cannot do: speak in the model's
+// // own voice. llama.cpp has no Talker checkpoint in GGUF; MNN has the whole chain
+// // -- thinker, talker, diffusion transformer, vocoder -- and it works. Measured
+// // on a desktop: audio in, a spoken answer out, in one call.
+// //
+// // It is NOT a replacement for anything. Recognition stays with SenseVoice, which
+// // is cheap and uniquely supplies the 60 ms alignment the clause cut needs; text
+// // stays with llama.cpp and its grammar; prosody is signal processing and needs no
+// // engine at all. This lane buys exactly one thing, and design/voice.md argues
+// // over whether that one thing is affordable. These entry points exist so the
+// // question can be answered on a phone instead of a workstation.
+// //
+// // Threading and cost: everything here BLOCKS, and generating speech measured
+// // about 3x slower than real time on a desktop CPU -- a fifteen-second reply is
+// // most of a minute. Call it off the drawing thread and expect to wait.
 //
-// `model_dir` is a DIRECTORY, not a file -- and that is the difference from the
-// other two lanes. An MNN model is config.json plus a dozen .mnn graphs and
-// their weights (thinker, audio encoder, talker, predit, dit, bigvgan, speaker
-// dictionary), about 3.8 GB together. A host whose file picker hands back single
-// files has to pick the directory instead.
+// // Whether this build has the engine compiled in: 1 if yes, 0 if it was built
+// // without MNN. When 0 everything below still links and answers truthfully.
+// int bodyclock_omni_available(void);
 //
-// Returns 0 when the model is resident.
-int bodyclock_omni_load(const char* model_dir);
-
-int bodyclock_omni_loaded(void);
-
-// Drop the weights.
-void bodyclock_omni_unload(void);
-
-// How many solver steps the diffusion vocoder takes. Returns 0 on success, or
-// non-zero with no model loaded or for a count below 2.
+// // Read a model. BLOCKS.
+// //
+// // `model_dir` is a DIRECTORY, not a file -- and that is the difference from the
+// // other two lanes. An MNN model is config.json plus a dozen .mnn graphs and
+// // their weights (thinker, audio encoder, talker, predit, dit, bigvgan, speaker
+// // dictionary), about 3.8 GB together. A host whose file picker hands back single
+// // files has to pick the directory instead.
+// //
+// // Returns 0 when the model is resident.
+// int bodyclock_omni_load(const char* model_dir);
 //
-// **This is the one lever on the 3.7x that does not need a different model.**
-// The chain that makes sound is an autoregressive talker, then a diffusion
-// transformer, then a vocoder. The talker's half is affordable on arithmetic:
-// codec tokens run at 50 Hz and its weights are 0.392 GB, so one second of
-// audio needs 19.6 GB/s of reads -- inside what this device was measured to do.
-// The excess is the diffusion, and MNN runs `steps - 1` DiT forwards per chunk.
-// The shipped config says 5, which is four forwards; 2 is one.
+// int bodyclock_omni_loaded(void);
 //
-// Read at GENERATION time, not load time, so this takes effect on the next ask
-// and the model stays resident -- the same reason bodyclock_local_set_threads
-// exists, and it makes a sweep compare step counts rather than page caches.
+// // Drop the weights.
+// void bodyclock_omni_unload(void);
 //
-// It trades the thing being bought. Fewer steps is a coarser sampler, and what
-// it coarsens is naturalness, which is the whole reason this engine is being
-// considered. So the number to find is not the fastest one: it is the fewest
-// steps that still sound better than the platform voice.
-int bodyclock_omni_set_dit_steps(int steps);
-
-// Streaming callback for the generated voice, invoked as the waveform is
-// produced. `pcm` is mono float at 24000 Hz -- note that this is NOT the 16 kHz
-// the input side uses, so a host feeding it back to a speaker must say so.
+// // How many solver steps the diffusion vocoder takes. Returns 0 on success, or
+// // non-zero with no model loaded or for a count below 2.
+// //
+// // **This is the one lever on the 3.7x that does not need a different model.**
+// // The chain that makes sound is an autoregressive talker, then a diffusion
+// // transformer, then a vocoder. The talker's half is affordable on arithmetic:
+// // codec tokens run at 50 Hz and its weights are 0.392 GB, so one second of
+// // audio needs 19.6 GB/s of reads -- inside what this device was measured to do.
+// // The excess is the diffusion, and MNN runs `steps - 1` DiT forwards per chunk.
+// // The shipped config says 5, which is four forwards; 2 is one.
+// //
+// // Read at GENERATION time, not load time, so this takes effect on the next ask
+// // and the model stays resident -- the same reason bodyclock_local_set_threads
+// // exists, and it makes a sweep compare step counts rather than page caches.
+// //
+// // It trades the thing being bought. Fewer steps is a coarser sampler, and what
+// // it coarsens is naturalness, which is the whole reason this engine is being
+// // considered. So the number to find is not the fastest one: it is the fewest
+// // steps that still sound better than the platform voice.
+// int bodyclock_omni_set_dit_steps(int steps);
 //
-// Return non-zero to keep going, 0 to abort. `last` is 1 on the final chunk.
-typedef int (*bodyclock_omni_audio_handler)(const float* pcm,
-                                       int n_samples,
-                                       int last,
-                                       void* user_data);
-
-// Ask the model about one recording, and optionally have it answer aloud.
+// // Streaming callback for the generated voice, invoked as the waveform is
+// // produced. `pcm` is mono float at 24000 Hz -- note that this is NOT the 16 kHz
+// // the input side uses, so a host feeding it back to a speaker must say so.
+// //
+// // Return non-zero to keep going, 0 to abort. `last` is 1 on the final chunk.
+// typedef int (*bodyclock_omni_audio_handler)(const float* pcm,
+//                                        int n_samples,
+//                                        int last,
+//                                        void* user_data);
 //
-//   pcm, n_samples   16-bit signed mono at 16000 Hz, as with the voice lane.
-//   prompt           what to ask about the audio. Required.
-//   on_audio         NULL for a text-only answer. Non-NULL asks the Talker to
-//                    speak the reply, which is most of the cost.
+// // Ask the model about one recording, and optionally have it answer aloud.
+// //
+// //   pcm, n_samples   16-bit signed mono at 16000 Hz, as with the voice lane.
+// //   prompt           what to ask about the audio. Required.
+// //   on_audio         NULL for a text-only answer. Non-NULL asks the Talker to
+// //                    speak the reply, which is most of the cost.
+// //
+// // Returns a JSON object, owned by the core and valid until this thread's next
+// // call, or NULL on a bad argument or an engine failure. It carries the reply
+// // `text` and the timings the decision in design/voice.md turns on:
+// //
+// //   speechRealtime      seconds of computation per second of speech, for the
+// //                       TALKER alone. Above 1 it cannot talk as fast as it
+// //                       speaks. Measured 3.7 on a phone.
+// //   firstAudioSeconds   the wait before the first PCM arrives, from the start
+// //                       of the exchange.
+// //   audioBlocks         how many handovers that took. 1 means nothing streamed.
+// //
+// // Those two were added to ask whether playing the reply as it arrives rescues
+// // the ratio. Measured: no. Nine blocks carried 10.34 s of speech over 38.5 s --
+// // one every 4.3 s holding 1.15 s of audio, so playback drains each in 1.15 s
+// // and then waits 3.2 s. 27% speech, 73% silence, which is 1 / 3.7. Streaming
+// // moves the first word much earlier and cannot close the gaps.
+// //   thinkerSeconds      audio in to last text token; `seconds` is everything.
+// //
+// // **Audio over about 30 seconds is refused rather than attempted.** Measured:
+// // 28 s works, 31 s segfaults inside the audio front end. Thirty seconds is the
+// // window every Whisper-family encoder has, so the limit is expected -- crashing
+// // instead of saying so is not, and the check here is what keeps that upstream
+// // bug out of the app.
+// const char* bodyclock_omni_ask(const short* pcm,
+//                           int n_samples,
+//                           const char* prompt,
+//                           bodyclock_omni_audio_handler on_audio,
+//                           void* user_data);
 //
-// Returns a JSON object, owned by the core and valid until this thread's next
-// call, or NULL on a bad argument or an engine failure. It carries the reply
-// `text` and the timings the decision in design/voice.md turns on:
-//
-//   speechRealtime      seconds of computation per second of speech, for the
-//                       TALKER alone. Above 1 it cannot talk as fast as it
-//                       speaks. Measured 3.7 on a phone.
-//   firstAudioSeconds   the wait before the first PCM arrives, from the start
-//                       of the exchange.
-//   audioBlocks         how many handovers that took. 1 means nothing streamed.
-//
-// Those two were added to ask whether playing the reply as it arrives rescues
-// the ratio. Measured: no. Nine blocks carried 10.34 s of speech over 38.5 s --
-// one every 4.3 s holding 1.15 s of audio, so playback drains each in 1.15 s
-// and then waits 3.2 s. 27% speech, 73% silence, which is 1 / 3.7. Streaming
-// moves the first word much earlier and cannot close the gaps.
-//   thinkerSeconds      audio in to last text token; `seconds` is everything.
-//
-// **Audio over about 30 seconds is refused rather than attempted.** Measured:
-// 28 s works, 31 s segfaults inside the audio front end. Thirty seconds is the
-// window every Whisper-family encoder has, so the limit is expected -- crashing
-// instead of saying so is not, and the check here is what keeps that upstream
-// bug out of the app.
-const char* bodyclock_omni_ask(const short* pcm,
-                          int n_samples,
-                          const char* prompt,
-                          bodyclock_omni_audio_handler on_audio,
-                          void* user_data);
-
 //------------------------------------------------------------------------------
 // Speech output (qwentts.cpp + Qwen3-TTS VoiceDesign)
 //------------------------------------------------------------------------------

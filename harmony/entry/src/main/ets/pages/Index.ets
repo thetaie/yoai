@@ -138,10 +138,14 @@ struct Index {
       router.pushUrl({ url: 'pages/VoiceDebug' });
       return true;
     }
-    if (text === '/omni') {
-      router.pushUrl({ url: 'pages/OmniDebug' });
-      return true;
-    }
+    // Retired. The natives behind OmniDebug are commented out in napi_init.cpp,
+    // because src/voice/omni.cpp moved to src/voice/attic/ and is in no target.
+    // The page is still in the tree and still compiles; it just has nothing to
+    // call, so the route goes rather than leaving a command that crashes.
+    // if (text === '/omni') {
+    //   router.pushUrl({ url: 'pages/OmniDebug' });
+    //   return true;
+    // }
     if (text === '/tts') {
       router.pushUrl({ url: 'pages/TtsDebug' });
       return true;

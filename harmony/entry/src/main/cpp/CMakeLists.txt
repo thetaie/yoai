@@ -99,18 +99,23 @@ endif()
 # one stays off unless harmony/build.cmd mnn has been run -- it is 3.8 GB of
 # weights and a second quantization story bought for one capability whose cost
 # has not been measured on a phone. See design/voice.md.
-if(NOT DEFINED MNN_DIR)
-    set(_mnn_sdk "${BODYCLOCK_PREBUILT_ROOT}/mnn-sdk/${OHOS_ARCH}")
-    if(EXISTS "${_mnn_sdk}/include/llm/llm.hpp")
-        set(MNN_DIR "${_mnn_sdk}")
-    endif()
-endif()
-if(DEFINED MNN_DIR)
-    set(BODYCLOCK_MNN ON CACHE BOOL "" FORCE)
-    message(STATUS "bodyclock_napi: omni speech output from ${MNN_DIR}")
-else()
-    set(BODYCLOCK_MNN OFF CACHE BOOL "" FORCE)
-endif()
+# Retired. src/voice/omni.cpp moved to src/voice/attic/ and is in no target, so
+# an SDK found here would only change which rapidjson the JSON files compile
+# against and link a framework nothing calls. Turning the lane back on means
+# putting omni.cpp back in the root CMakeLists as well as uncommenting this.
+#
+# if(NOT DEFINED MNN_DIR)
+#     set(_mnn_sdk "${BODYCLOCK_PREBUILT_ROOT}/mnn-sdk/${OHOS_ARCH}")
+#     if(EXISTS "${_mnn_sdk}/include/llm/llm.hpp")
+#         set(MNN_DIR "${_mnn_sdk}")
+#     endif()
+# endif()
+# if(DEFINED MNN_DIR)
+#     set(BODYCLOCK_MNN ON CACHE BOOL "" FORCE)
+#     message(STATUS "bodyclock_napi: omni speech output from ${MNN_DIR}")
+# else()
+set(BODYCLOCK_MNN OFF CACHE BOOL "" FORCE)
+# endif()
 
 # Speech output, the third engine, discovered exactly like llama: the SDK's
 # presence is the switch, and `harmony/build.cmd <abi> qtts` is what creates it.
