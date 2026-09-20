@@ -36,7 +36,12 @@ function log(msg: string): void {
  */
 export interface SpeakTiming {
   startedMs: number;    // reply start to the first sound. The wait that is felt.
-  totalMs: number;      // reply start to the last synthesis finishing
+  /**
+   * Reply start to the last sentence finishing -- speaking on a device that
+   * reports CompleteResponse.type 1, synthesis on one that only reports 0.
+   * Which it was is in the log; see the onComplete in drain().
+   */
+  totalMs: number;
   chars: number;
 }
 
@@ -109,6 +114,12 @@ export class SystemTts {
   private static ended: boolean = false;
   /** Set by stop(), cleared by beginStream(). Makes an interruption stick. */
   private static cancelled: boolean = false;
+  /**
+   * Whether this device has ever reported CompleteResponse.type 1, speech
+   * finished, as opposed to 0, synthesis finished. Sticky for the process and
+   * never reset: it is a fact about the handset, not about a reply.
+   */
+  private static sawSpeechComplete: boolean = false;
   private static onDrained: ((v: SpeakTiming | undefined) => void) | undefined = undefined;
   private static spokenChars: number = 0;
   /** A creation already in flight, so concurrent callers share one engine. */
@@ -405,10 +416,13 @@ export class SystemTts {
   /**
    * No more sentences are coming. Resolves once the queue has been spoken.
    *
-   * `totalMs` here is time to the last SYNTHESIS finishing, not to the last
-   * sound leaving the speaker -- the engine reports completion when it has
-   * produced the audio and plays it on its own. `startedMs` is the number that
-   * matters anyway: it is how long the person sat in silence.
+   * Resolves after the last sentence has been SPOKEN, not merely synthesized,
+   * on any device that distinguishes the two -- see drain()'s onComplete. So
+   * an awaited endStream() runs as long as the reply takes to say.
+   *
+   * `startedMs` is the number that matters regardless: it is how long the
+   * person sat in silence, and everything after it is heard rather than
+   * waited through.
    */
   static endStream(): Promise<SpeakTiming | undefined> {
     return new Promise<SpeakTiming | undefined>(
@@ -454,7 +468,32 @@ export class SystemTts {
           SystemTts.firstSoundMs = Date.now() - SystemTts.streamT0;
         }
       },
-      onComplete: (_rid: string, _resp: textToSpeech.CompleteResponse) => {
+      /**
+       * Advance the queue when the sentence has been SPOKEN, not when it has
+       * been synthesized.
+       *
+       * `CompleteResponse.type` is 0 for "synthesis done" and 1 for "speech
+       * done", and this callback fires for both. Ignoring the response -- which
+       * this did -- advances on the first, so the next sentence is handed to
+       * the engine while the previous one is still coming out of the speaker.
+       * Synthesis is about 0.2 s and speaking a short sentence is several, so
+       * the whole reply would be poured in at once.
+       *
+       * It has never been heard, because the default prompt asks for one
+       * sentence under twenty characters and a queue of one cannot overlap.
+       *
+       * The fallback matters: a device that only ever reports type 0 would
+       * stall forever on a rule that waits for type 1. So type 1 is preferred
+       * once seen, and until one has been seen, type 0 advances as before.
+       */
+      onComplete: (_rid: string, resp: textToSpeech.CompleteResponse) => {
+        if (resp.type === 1) {
+          SystemTts.sawSpeechComplete = true;
+        } else if (SystemTts.sawSpeechComplete) {
+          return;   // synthesis only; the audio is still playing
+        } else {
+          log('tts: onComplete type=0 and no type=1 seen yet, advancing on it');
+        }
         SystemTts.speaking = false;
         SystemTts.drain();
       },
