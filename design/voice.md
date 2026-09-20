@@ -1890,6 +1890,25 @@ split:
 | Codec decode | 8.25 s |
 | **Total, 22.00 s of audio** | 25.52 s — **RTF 1.16** |
 
+**That figure does not reproduce, and what it teaches is about the machine.**
+Re-run later on the same laptop, same passage, same Q8 checkpoint, three times:
+**1.404, 1.399, 1.401**. Tight, and 21% slower than recorded. All three stages
+moved together — talker 32.0 → 37.8 ms a frame, code predictor 27.8 → 32.5,
+codec 30.0 → 39.2 — which is a clock difference rather than a configuration
+one. The host here is a **Core Ultra 9 185H**, a laptop part, and it throttles
+like the phone does; a single run of it is a reading of that day's power state,
+not a constant.
+
+**Q4_K_M on the same host: 1.250 cold, then 1.137 and 1.131.** So the
+quantization is worth 19% here against 22% on the phone, and per frame the two
+machines are in uniform proportion — talker 26.7 against the phone's 49.2, code
+predictor 22.8 against 43.5, codec 38.6 against 73.5, **each within 2% of a
+factor of 1.9**. Three stages agreeing that closely is the strongest evidence
+yet that nothing about the phone's arithmetic is unusual; it is the same work at
+half the clock, plus a throttle the laptop only hints at.
+
+Numbers here are Q4 unless said otherwise from this point.
+
 The fastest of them all, for 2.33 GB and a third runtime. **No stage is the
 `dit_steps` of this engine**: the three cost within 15% of each other, so there
 is nothing to switch off. The 0.6B talker exists only as base and customvoice —
@@ -1960,7 +1979,7 @@ rather than the model.
 **The GPU is not a lever, and the reason is a policy rather than a limit** —
 see "The GPU runs, and the platform kills it" below.
 
-### On the phone: 2.1× for half a minute, then 3.5×
+### On the phone: 2.1× for half a minute, then 3.5× — half a laptop's clock
 
 qwentts.cpp cross-compiles for HarmonyOS and the lane is wired end to end —
 [harmony/build.cmd](../harmony/build.cmd) `qtts` assembling
@@ -1979,18 +1998,27 @@ long enough to see both.
 Sprint figures, then. Per frame, four threads, seed pinned so every run of a
 configuration is the same utterance; a frame is 80 ms of audio at 12.5 Hz:
 
-| stage | desktop | phone, Q8 talker | phone, Q4 talker | desktop → phone |
+| stage | laptop, Q4 | phone, Q8 talker | phone, Q4 talker | laptop → phone |
 | --- | --- | --- | --- | --- |
-| Talker decode | 32.0 ms | 63.2 ms | **49.2 ms** | 1.54× |
-| Code predictor | 27.8 ms | 51.6 ms | **43.5 ms** | 1.56× |
-| **Codec decode** | 30.0 ms | **73.5 ms** | **73.5 ms** | **2.45×** |
-| Prefill | — | 0.80–0.96 s, fixed | 0.83–0.92 s | amortises |
+| Talker decode | 26.7 ms | 63.2 ms | **49.2 ms** | 1.84× |
+| Code predictor | 22.8 ms | 51.6 ms | **43.5 ms** | 1.91× |
+| **Codec decode** | 38.6 ms | **73.5 ms** | **73.5 ms** | **1.90×** |
+| Prefill | 0.65 s | 0.80–0.96 s, fixed | 0.83–0.92 s | amortises |
+
+An earlier version of this table compared the phone's Q4 against the laptop's
+**Q8** and read the codec as an outlier at 2.45× where the other two were about
+1.9. It was comparing two quantizations: the codec file is the same in both
+columns, so it was the only row where the mismatch showed. Like for like, all
+three are 1.9 and **there is no outlier at all** — the codec is simply the
+largest of three stages that scale together.
 
 **The codec is the floor, and it is the one number here that nothing has
-moved.** Three separate attempts left it at 73.5 ms per frame: streaming against
-buffered, a talker at half the weights, and its own quantization. 73.5 ms buys
-80 ms of audio, so **the codec alone is 0.92× real time** and everything else is
-on top of it.
+moved.** Five separate attempts left it at 73.5 ms per frame: streaming against
+buffered, a talker at half the weights, a talker a third the size, its own
+quantization, and the GPU. 73.5 ms buys 80 ms of audio, so **the codec alone is
+0.92× real time** and everything else is on top of it. That is a statement about
+its SIZE, not about it scaling oddly — against the laptop it is 1.90×, exactly
+like the other two.
 
 The two autoregressive stages do respond. Per frame they are now 45% of the
 bill together, against the codec's 45% and prefill's 10% on a 3.8-second
@@ -2038,7 +2066,10 @@ interval the drift lives on. It does mean a comparison run back to back is
 worth much more than one run of each, and it is why every later figure here
 comes from three consecutive runs of a configuration.
 
-So the codec is still the outlier at 2.45×, and streaming is not why. Nor is
+So streaming is not why the codec looked like an outlier, and — measured later,
+like for like against the laptop at the same quantization — **neither was
+anything else: it is not an outlier.** The whole investigation below chased a
+2.45× that was two quantizations being compared. Nor is
 quantization, and nor is the talker — see the next section for the other two
 attempts on it.
 
@@ -2459,7 +2490,7 @@ fallback, where affinity is a no-op, and the flag became unnecessary. The patch
 lives in [harmony/patches/](../harmony/patches/) because the checkout is
 upstream's.
 
-### Twelve misses, and the four shapes they came in
+### Thirteen misses, and the four shapes they came in
 
 Every claim these sections made from arithmetic or from a failed attempt was
 wrong, in four recurring shapes, so the pattern is worth more than the numbers:
@@ -2478,6 +2509,7 @@ wrong, in four recurring shapes, so the pattern is worth more than the numbers:
 | "the 0.6B is not worth running" | it is 14% a frame, and keeps the written voice | that "cannot reach real time" and "does not help" are different claims, and only the first had been shown |
 | "`调` is wrong because it is the base checkpoint" | 1.7B base reads it correctly | that two configurations differing in three things cannot name which one did it |
 | "completing the 2×2 is a test with no payoff" | it cleared Q4 on the model this lane ships | that a test's value is what it rules IN elsewhere, not only what it settles about the thing being tested |
+| "the codec is the stage that did not scale, at **2.45×**" | 1.90×, same as the other two | that the phone column was Q4 and the laptop column Q8, and the codec is the one row a talker quantization does not move |
 
 Row three is worth a second look before the shapes. **3.6× was the prediction and
 3.52× is the sustained answer**, so the number was very nearly right — and it was
@@ -2533,8 +2565,9 @@ measured prefill and decode flat from four threads up. Every clause true, none
 of them implying a penalty, and there is not one — 4, 6 and 8 land within 2%,
 which is less than the 9% five consecutive runs drift as the phone warms.
 
-The streaming one is worse, because it had a number. The codec was the outlier
-at 2.45×, the streaming path really does re-decode its left context per chunk,
+The streaming one is worse, because it had a number. The codec looked like an
+outlier at 2.45×, the streaming path really does re-decode its left context per
+chunk,
 and two runs put 8 chunks at 76.1 ms/frame against 13 chunks' 79.4 — a rate
 that should not rise with length. Seven runs on a pinned seed then showed the
 codec's spread on *identical input* is 3013 to 3997 ms, ±14%, while the two
