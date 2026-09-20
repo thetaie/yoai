@@ -74,7 +74,7 @@ For scale, the same 1.7B VoiceDesign on a Core Ultra 9 185H laptop measures
 **1.40 at Q8 and 1.13 at Q4** — uniformly 1.9× faster per stage, and still
 above 1.
 
-### On a PC's integrated GPU: 0.60×, and the floor is not a floor
+### On a PC's integrated GPU: RTF 0.60, and the floor is not a floor
 
 The first number below 1 in this whole file, and it is worth stating what makes
 it matter: **below 1, the pre-buffer a stream needs is zero.** Above it, playback
@@ -520,9 +520,10 @@ utterance boundaries, F0 to a tenth of a hertz, all three deviations and the
 arousal to two decimals, the same baseline of 123.5 Hz and sd 11.1. The columns
 that matter are scale-invariant, so the two agree exactly or they do not.
 
-It runs in **0.07 s**, against 5.4 s for the Python: 535× real time, and 77×
-what the prototype did. The earlier note here that 5.4 s was "already 7× real
-time" undersold the headroom by two orders of magnitude.
+It runs in **0.07 s**, against 5.4 s for the Python: RTF 0.0019 against 0.14 on
+the 37.4-second monologue, and 77× what the prototype did. The earlier note
+here that 5.4 s was "already 7× real time" undersold the headroom by two orders
+of magnitude.
 
 Two things are deliberately *not* in it. **Voice quality** — jitter, shimmer,
 HNR — is not ported, because it does not work yet (see below). And the
@@ -685,7 +686,7 @@ where that does damage.
 measured and awkward: **the same switch also removes all punctuation**, and the
 segmentation section wants punctuation as a boundary source. So the two uses pull
 opposite ways — analysis wants it off, boundaries and display want it on — and
-the choice is either two passes at 20x real time each or a syllable count that
+the choice is either two passes at RTF 0.05 each or a syllable count that
 expands digits back out per language. Not yet decided; what is decided is that
 counting characters off an ITN transcript is not an option.
 
@@ -957,13 +958,13 @@ Two things fall out of writing it rather than calling it:
   it.
 
 **Measured on the desktop CPU, at `q8`:** 0.41 s for an 8.8-second clip, 1.79 s
-for 32 seconds, 2.02 s for 38 — about **20× real time** on four threads, with
-the reference at 1.50 s for the same 32 seconds on eight.
+for 32 seconds, 2.02 s for 38 — about **RTF 0.05** on four threads, with the
+reference at 1.50 s for the same 32 seconds on eight.
 
-An earlier note here claimed 32× to 53×. That was wrong, and the reason is worth
-keeping: the clips are 24 kHz, their durations had been computed as though they
-were 16 kHz, and every one came out 1.5× too long. The times were real; the
-speed-ups derived from them were not.
+An earlier note here claimed "32× to 53× real time" — RTF 0.031 to 0.019. That
+was wrong, and the reason is worth keeping: the clips are 24 kHz, their
+durations had been computed as though they were 16 kHz, and every one came out
+1.5× too long. The times were real; the speed-ups derived from them were not.
 
 ### On the device: one call, and a page to read it with
 
@@ -1005,23 +1006,32 @@ for the bundle name that predates `8dcabe5 rename: YoAI becomes Body Clock` —
 has been reissued, and the page has been driven through recordings on a Kirin
 9020.
 
-**Encoder speed, measured**, seconds of compute per second of clip, swept with
-`bodyclock_voice_set_threads` without reloading the weights:
+**Speed in this file is RTF — compute time divided by audio duration, so under
+1 is faster than the audio and over 1 is slower.** One figure, one direction,
+because this file used to carry two. "5.8× real time" for recognition meant fast
+and "3.7× real time" for the omni Talker meant slow, both written with an ×,
+four hundred lines apart. So an × here is always a ratio between two
+measurements — one device against another, one stage against itself — and never
+a speed on its own. Tools print the reciprocal too: `llama-tts` reports "audio
+time = 3.82x process time", which is RTF 0.26. Where a raw tool figure is quoted
+it is marked as one.
+
+**Encoder speed, measured**, swept with `bodyclock_voice_set_threads` without
+reloading the weights:
 
 | threads | 1 | 2 | 4 | 6 | 8 |
 |---|---|---|---|---|---|
-| s per s of clip | 0.392 | 0.259 | **0.173** | 0.163 | 0.161 |
-| × real time | 2.55 | 3.87 | **5.77** | 6.14 | 6.24 |
+| RTF | 0.392 | 0.259 | **0.173** | 0.163 | 0.161 |
 | against one thread | 1.0 | 1.51 | 2.27 | 2.40 | 2.43 |
 
-**5.8× real time at four threads**, and four is where it stops paying: eight
-buys 7%, which is 0.07 s on a four-second clip, against two more cores taken
-from the UI. The default stays at 4.
+**RTF 0.17 at four threads**, and four is where it stops paying: eight buys 7%,
+which is 0.07 s on a four-second clip, against two more cores taken from the
+UI. The default stays at 4.
 
 **So recognition is not the term to attack.** A ten-second note costs 1.7 s.
 That matters because the chain's own comment had it at "1.6× real time, already
-known" — unmeasured, wrong by 3.6×, and wrong in the direction that would have
-aimed the first optimisation at the cheapest stage.
+known" — RTF 0.63, unmeasured, wrong by 3.6×, and wrong in the direction that
+would have aimed the first optimisation at the cheapest stage.
 
 Microphone gain and room noise are still unmeasured.
 
@@ -1030,8 +1040,8 @@ Microphone gain and room noise are still unmeasured.
 Recognition, an on-device answer, and the platform voice — end to end on the
 Kirin. **The only number is the silence**: from the moment the person stops
 talking to the first sound coming back. Everything after that first sound is
-heard rather than waited through, because the platform voice speaks at 1× while
-the model is still writing the next sentence.
+heard rather than waited through, because the platform voice speaks at RTF 1
+while the model is still writing the next sentence.
 
 | | first exchange, cold | second in a row | first exchange, warmed |
 | --- | --- | --- | --- |
@@ -1069,9 +1079,10 @@ of that exchange, and it became 37% the moment prefill collapsed. A share is a
 statement about the other terms as much as its own.
 
 **Against the omni lane, for the same job**: 1.37 s of silence here against
-14.3 s before omni's first block of audio, and this one then speaks at 1× while
-omni streams at 3.7×. Three engines that each do one thing beat one that does
-all three, by an order of magnitude, on the only number a person experiences.
+14.3 s before omni's first block of audio, and this one then speaks at RTF 1
+while omni streams at 3.7. Three engines that each do one thing beat one that
+does all three, by an order of magnitude, on the only number a person
+experiences.
 
 ## The platforms do not offer the same thing
 
@@ -1169,12 +1180,12 @@ invites. The 36 s is a whole exchange, encoder and prefill and generation; the
 1.5 s is transcription with no language model in it at all.
 
 **The encoders are close. It is what they emit that differs.** Both measured on
-the Kirin, per second of clip:
+the Kirin:
 
-| | encoder | × real time |
-| --- | --- | --- |
-| SenseVoice, 4 threads | 0.173 s | 5.8 |
-| Qwen2.5-Omni's audio encoder in MNN | ~0.31 s | ~3.2 |
+| | encoder RTF |
+| --- | --- |
+| SenseVoice, 4 threads | **0.173** |
+| Qwen2.5-Omni's audio encoder in MNN | ~0.31 |
 
 Under two times apart. And the omni thinker's 9.3 s splits **audio 1.57 s,
 prefill 5.68 s, decode 2.01 s** — the encoder is 17% of it and the prefill is
@@ -1526,16 +1537,16 @@ file already plans `fsmn-vad` chunking. **Segfaulting instead of saying so is
 the defect.**
 
 **Not a defect: the cost.** **Measured**: about 43 s of compute for 14.4 s of
-speech — roughly **3× slower than real time** on a desktop CPU.
+speech — roughly **RTF 3** on a desktop CPU.
 
 **That desktop ratio has not been re-derived with a wall clock**, and it is
 written as "seconds of compute" — which is what `clock()` returns, summed across
 threads. The phone's first figure was inflated five times for exactly that
 reason. If this one carries the same defect it reads **high**, the desktop is
-faster than 3×, and the phone is not "barely worse" but several times worse.
+faster than RTF 3, and the phone is not "barely worse" but several times worse.
 Every comparison below that leans on 3.0 against 3.7 rests on this.
 
-#### On the phone: 3.7× real time
+#### On the phone: RTF 3.7
 
 This is the number the file had been missing, and the one the decision below was
 explicitly waiting on. **Measured** on the target device, Qwen2.5-Omni-3B in
@@ -1545,7 +1556,7 @@ MNN, four threads, the model's own `config.json`:
 | --- | --- |
 | Load, from app storage | 7.9 s |
 | Thinker, 194 prompt tokens → 16 generated | 17.2 s |
-| Talker, 10.1 s of speech | 37.5 s — **3.70× real time** |
+| Talker, 10.1 s of speech | 37.5 s — **RTF 3.70** |
 | Whole exchange, for 4.8 s of recorded audio | 46.2 s |
 
 **The ratio covers the Talker alone**, which is the half that was ever in
@@ -1561,7 +1572,7 @@ two — MNN's own counters, read off the public `LlmContext`:
 | — audio encoder | 1.57 s |
 | — prefill, 182 tokens | 5.68 s (**32.0 tok/s**) |
 | — decode, 32 tokens | 2.01 s (**15.9 tok/s**) |
-| Talker, 10.34 s of speech | 38.5 s — **3.7×** |
+| Talker, 10.34 s of speech | 38.5 s — **RTF 3.7** |
 | First block of PCM, from the start | 14.7 s |
 | Blocks | 9 |
 | Whole exchange | 47.7 s |
@@ -1576,7 +1587,7 @@ against 182 in 9.3 s. The slow one was the first call after a load, so some of
 that gap is cold cache rather than the model.
 
 **The Talker ratio is stable across every run and the block count is not.** Four
-exchanges gave 3.5× to 3.7× with no attempt to control for anything, which is
+exchanges gave RTF 3.5 to 3.7 with no attempt to control for anything, which is
 what makes it worth deciding on. Blocks were logged on two of them: 2 and 9, for
 replies of 2.26 s and 10.34 s — so MNN's chunking tracks the reply's length
 rather than being a fixed cadence, and the short run's two blocks made streaming
@@ -1705,7 +1716,7 @@ counter, so it was verified against wall-clock differences between runs instead:
 
 **The desktop extrapolation was right in direction**, and how far is not
 settled. "On a phone it can only be worse" is how the paragraph above ends, and
-3.0× became 3.7× — but the 3.0 may be a `clock()` figure, in which case the gap
+3.0 became 3.7 — but the 3.0 may be a `clock()` figure, in which case the gap
 is wider than it looks. What the thinker measurements do say cleanly, both taken
 with a wall clock: prefill is 2.5× slower on the device and decode only 1.2×.
 
@@ -1721,7 +1732,7 @@ person waits through nearly all of it — see the streaming paragraph in the
 decision.
 
 **A caution about how this number is obtained.** The first phone run reported
-**17.0×**, and that figure was wrong by a factor of five. The timings used
+**RTF 17.0**, and that figure was wrong by a factor of five. The timings used
 `clock()`, which on POSIX is processor time summed across threads; the engine
 runs four. The error was caught by comparing the printed durations against the
 log's own timestamps — 87.9 s printed, 18.2 s elapsed. Anything multithreaded
@@ -1769,7 +1780,7 @@ the model's own voice out, and that works today.
 **Its voice is reported to sound more natural than the platform's.** That is an
 observation from listening to both, not a measurement, and it is recorded
 because everything else here prices only the cost side. A decision that weighs
-3.7× against "one capability" has quietly assumed the capability is
+RTF 3.7 against "one capability" has quietly assumed the capability is
 interchangeable with the free one — and if it is not, the trade is a product
 judgement rather than arithmetic.
 
@@ -1811,12 +1822,12 @@ size argument though not the speed one. The parts that make sound are talker
 391 MB, DiT 348 MB, vocoder 116 MB, predit 17 MB and the talker embeddings
 34 MB — about **0.9 GB**, against 3.8 for the bundle. The 3B thinker is the
 freight, and it is exactly the part a text-driven TTS does not need. But the
-3.7× was measured on `generateWavform()` alone, so removing the thinker does not
-move it.
+RTF 3.7 was measured on `generateWavform()` alone, so removing the thinker does
+not move it.
 
 **What the ratio actually rules out is conversation, not playback.** Everything
 above assumes somebody is waiting to be answered. An app reading back something
-it prepared — a day's recap — spends 3.7× in the background and nothing in
+it prepared — a day's recap — spends RTF 3.7 in the background and nothing in
 front of the person. That is a different product, and this file has never
 costed it.
 
@@ -1847,7 +1858,7 @@ keeps one definition, and the newer `MemoryPoolAllocator` holds a `SharedData*`
 where 1.1.0 holds `chunkHead_`. The result was a segfault at 0x10 on MNN's first
 JSON parse. Not a defect in either library — a cost of carrying two.
 
-**And the one thing it buys costs 3.7× real time on the phone.** Measured, in
+**And the one thing it buys runs at RTF 3.7 on the phone.** Measured, in
 the table above: ten seconds of spoken reply for thirty-seven seconds of the
 device's whole attention. That is the number to argue with, and it is not an
 implementation detail that improves with familiarity.
@@ -1855,9 +1866,9 @@ implementation detail that improves with familiarity.
 **So: not yet — and now on a measurement rather than an extrapolation.** The
 engine works on the device, end to end, audio in and the model's own voice out.
 What the phone figure says is that a spoken reply cannot be waited for. Below
-about 1× it would be a feature; at 3.7× it is a demo.
+about RTF 1 it would be a feature; at 3.7 it is a demo.
 
-**What would change the answer**: Talker throughput near real time, and nothing
+**What would change the answer**: Talker throughput near RTF 1, and nothing
 else. The capability is proven and the remaining crashes are ours or fixable, so
 the ratio is the whole question — and the obvious way around it does not work.
 
@@ -1875,15 +1886,15 @@ per second, so it drains each block in 1.15 s and then waits 3.2 s for the next:
 being spelled out.
 
 The duty cycle *is* the ratio — 1 ÷ 3.7 — and that is the general form. **Above
-1× the listener always outruns the generator**, so streaming can only ever move
-the first word earlier; it can never close the gaps. Below 1× it would close
+RTF 1 the listener always outruns the generator**, so streaming can only ever
+move the first word earlier; it can never close the gaps. Below 1 it would close
 them for free.
 
 So chunking, `n_window`, and MNN's interleaved mode are all the same idea and
 all bounded by the same number. They are worth building **after** the ratio goes
 below 1, not instead of getting it there.
 
-#### The diffusion steps were the one free lever, and they are worth 0.9×
+#### The diffusion steps were the one free lever, and they are worth 0.9 RTF
 
 `dit_steps` is a plain config value MNN reads at generation time, so
 `bodyclock_omni_set_dit_steps` changes it without dropping the weights. MNN runs
@@ -1891,19 +1902,19 @@ below 1, not instead of getting it there.
 
 | `dit_steps` | DiT forwards | RTF | by ear |
 | --- | --- | --- | --- |
-| 5 (the model's own config) | 4 | 3.7× | — |
-| 3 | 2 | **3.0×** | acceptable |
-| 2 | 1 | 2.8× | audible artefacts |
+| 5 (the model's own config) | 4 | 3.7 | — |
+| 3 | 2 | **3.0** | acceptable |
+| 2 | 1 | 2.8 | audible artefacts |
 
-**About 0.3× per forward, so the diffusion is a third of the bill and the
-talker plus vocoder are the other 2.5×.** Extrapolated to free diffusion the
+**About 0.3 RTF per forward, so the diffusion is a third of the bill and the
+talker plus vocoder are the other 2.5.** Extrapolated to free diffusion the
 ratio still sits near 2.5, and there is no knob on the rest. The lever is real
 and it is spent.
 
-It was predicted at 1.5×, on the reasoning that the talker's autoregression
-costs about 1× — 50 codec tokens a second against 0.392 GB is 19.6 GB/s, inside
+It was predicted at RTF 1.5, on the reasoning that the talker's autoregression
+costs about 1 — 50 codec tokens a second against 0.392 GB is 19.6 GB/s, inside
 what this device reads — and that the remainder was diffusion. The first half
-held; the second did not. `predit` and BigVGAN are ~1.4× between them and have
+held; the second did not. `predit` and BigVGAN are ~1.4 RTF between them and have
 no equivalent setting.
 
 What is left that could move it: the NPU backend, a smaller Talker, or accepting
@@ -1933,16 +1944,48 @@ build currently skips.
 | Size | 3.8 GB | **1.47 GB** (Q4_K_M + Q8_0 mmproj) |
 | Engine | a second one, MNN | **the one already built** |
 | Driven by | thinker hidden states | **text**, and a reference wav for the voice |
-| Measured RTF | 3.0 on the phone | 1.64 short / **1.41 long**, on a desktop |
+| Measured RTF | 3.0 on the phone | desktop: **1.65** short / **1.41** long, all-CPU with a Q8_0 mmproj; **0.24** on a 3090 with a bf16 one |
 
 **Quality: acceptable, judged by ear on both a short and a long Chinese
 passage.** That is the bar every cheap TTS had failed — VITS-class models
 (Piper, MeloTTS, what sherpa-onnx ships) sound like the broadcast voice, which
 is the thing being replaced.
 
+### The CPU figures stand, and `-ngl 0` is not a CPU run
+
+A re-measurement claimed this section was three times pessimistic and that
+Qwen3-TTS runs at RTF 0.5 on a desktop CPU. It does not. `-ngl 0` moves the
+language model and nothing else: **`--mmproj-offload` is a separate flag and
+defaults to enabled**, so the projector was on a 3090 the whole time.
+
+**Measured**, same utterance, bf16 mmproj, eight threads, b11037:
+
+| | RTF |
+| --- | --- |
+| `-ngl 0`, projector left on the GPU | 0.50 |
+| `-ngl 0 --no-mmproj-offload`, genuinely all CPU | **1.82** |
+| `-ngl 99` | 0.24 |
+
+1.82 against the 1.65 below, with the mmproj this section measures as ~30%
+slower. The original numbers were right.
+
+**The useful part is what the middle row costs**, because it is the section
+above arriving from another direction: moving *only the projector* to the GPU
+takes 1.82 to 0.50, a factor of 3.6, and moving the backbone as well buys
+another 2.1. The projector is worth more than the model it serves — which is
+what "the mmproj runs inside the autoregressive loop" predicts, and is now
+measured rather than inferred.
+
+**The error is worth more than the numbers, and it is this file's usual one.**
+"I passed `-ngl 0`, therefore this is the CPU" is an assumption wearing a
+measurement's clothes. It was checkable in one run — the one that produced the
+1.82 — and the check was skipped because the result agreed with what was hoped
+for. A number three times better than the file's own is the moment to look for
+the mistake, not to write the correction.
+
 ### Its cost is a constant plus a rate, and the mmproj is in the inner loop
 
-**Measured** on the desktop, eight threads, Q8_0 mmproj:
+**Measured** on the desktop, eight threads, Q8_0 mmproj, all on the CPU:
 
 | | audio | generation | final stage | total | RTF |
 | --- | --- | --- | --- | --- | --- |
@@ -2006,6 +2049,27 @@ vector. Prosody is the time-varying part, so there is nothing left of it to
 transfer. `mtmd_helper_gen_audio_inp` also has no field for a reference
 transcript, so the in-context path the same weights support elsewhere cannot be
 expressed through this API at all.
+
+**"Holds identity" has a number now, and one sample that does not fit.** Pitch
+of the generated takes, all the same sentence, measured with this repo's own
+`bodyclock-prosody-test` rather than by ear — which is the point, since the
+tool that judges the app's recordings can judge its output too:
+
+| | baseline F0 |
+| --- | --- |
+| the reference wav | 245.7 Hz |
+| free-running, two draws | 141.1, 198.4 Hz |
+| cloned, five draws | 223.0, 233.9, 235.1, 235.6, **278.1** Hz |
+
+Free-running moves 57 Hz between draws, which is the gender change the bullets
+above describe. Cloned sits inside 12 Hz across four of five and each take's own
+spread collapses from 16.6 to about 1.0 — flat pitch, which is the flattened
+prosody stated another way, arrived at from a different direction.
+
+**The 278 is unexplained and left standing.** Same text, same speaker file, 43 Hz
+above its neighbours. Either the clone is not as pinned as three samples
+suggested, or pitch moved without identity moving. F0 cannot tell those apart
+and an ear can; the takes are in `D:\Models\wav` for whoever does that.
 
 So llama.cpp gives a stable voice with flattened prosody, and that is the
 ceiling of its interface rather than of the model.
@@ -2122,12 +2186,12 @@ something specific:
 | 1.7B VoiceDesign Q8_0 | same voice, 22% slower per frame, 0.8 GB larger |
 | 0.6B CustomVoice | 14% faster a frame, and **audibly worse** — as is 0.6B base, so it is the size that loses on voice and not one checkpoint |
 | 0.6B base, in-context clone | ~24 s of setup per utterance, first audio at 29.8 s, and it **mispronounces** |
-| 1.7B base, in-context clone | reads correctly, and costs **11.76×** with first audio at 43.8 s |
+| 1.7B base, in-context clone | reads correctly, and costs **RTF 11.76** with first audio at 43.8 s |
 | 1.7B CustomVoice | untried; CustomVoice already lost on voice at 0.6B |
 | a shorter reference for cloning | untried, and only worth it if cloning were otherwise viable |
 
-**What it costs is the one thing nothing fixed.** 2.14× for the first half
-minute and 3.52× after. Six levers were tried on that number — streaming against
+**What it costs is the one thing nothing fixed.** RTF 2.14 for the first half
+minute and 3.52 after. Six levers were tried on that number — streaming against
 buffered, the thread count, the talker's quantization, the codec's, the talker's
 size, and the utterance's length — and two moved it: quantizing the talker, by
 22% a frame, and shrinking it, by another 14% at a cost in voice that was not
@@ -2144,7 +2208,7 @@ rather than the model.
 **The GPU is not a lever, and the reason is a policy rather than a limit** —
 see "The GPU runs, and the platform kills it" below.
 
-### On the phone: 2.1× for half a minute, then 3.5× — half a laptop's clock
+### On the phone: RTF 2.1 for half a minute, then 3.5 — half a laptop's clock
 
 qwentts.cpp cross-compiles for HarmonyOS and the lane is wired end to end —
 [harmony/build.cmd](../harmony/build.cmd) `qtts` assembling
@@ -2181,18 +2245,18 @@ largest of three stages that scale together.
 moved.** Five separate attempts left it at 73.5 ms per frame: streaming against
 buffered, a talker at half the weights, a talker a third the size, its own
 quantization, and the GPU. 73.5 ms buys 80 ms of audio, so **the codec alone is
-0.92× real time** and everything else is on top of it. That is a statement about
+RTF 0.92** and everything else is on top of it. That is a statement about
 its SIZE, not about it scaling oddly — against the laptop it is 1.90×, exactly
 like the other two.
 
 The two autoregressive stages do respond. Per frame they are now 45% of the
 bill together, against the codec's 45% and prefill's 10% on a 3.8-second
 utterance; the arithmetic closes — 49.2 + 43.5 + 73.5 = 166 ms per 80 ms frame
-is 2.08×, plus prefill amortised over that length is 0.22×, and 2.30 is what the
-page shows. All of that is the fast regime.
+is RTF 2.08, plus prefill amortised over that length is 0.22, and 2.30 is what
+the page shows. All of that is the fast regime.
 
 **Nothing reaches 1 from here**, and after three levers it is worth saying why
-rather than hoping. The codec is 0.92× on its own, it is a separate model from
+rather than hoping. The codec is RTF 0.92 on its own, it is a separate model from
 the talker, and it does not care what the talker is. So this lane stays where
 the desktop section already put it: prepared playback, not conversation.
 
@@ -2240,10 +2304,10 @@ attempts on it.
 
 **Streaming stays on.** It moves the first audio from the end of the run to
 about 1.0 s — 930 to 1109 ms across four runs, against 8.5 to 9.6 s buffered —
-and now costs nothing. That does not make playback smooth: above 1× the listener
-drains each chunk faster than the next arrives, 43% speech and 57% silence at
-2.3×, the same arithmetic that settled the question for omni. It makes the first
-word early, which is worth having in a flow that generates ahead.
+and now costs nothing. That does not make playback smooth: above RTF 1 the
+listener drains each chunk faster than the next arrives, 43% speech and 57%
+silence at 2.3, the same arithmetic that settled the question for omni. It makes
+the first word early, which is worth having in a flow that generates ahead.
 
 #### Q4 moves the talker by a fifth and the codec not at all
 
@@ -2339,9 +2403,9 @@ rather than a total. The first pass, frames 8 to 368:
 
 | frames | seconds per 8 | ms/frame | RTF |
 | --- | --- | --- | --- |
-| 8 → 176 | 1.29–1.43, mean 1.37 | **171** | 2.14× |
+| 8 → 176 | 1.29–1.43, mean 1.37 | **171** | 2.14 |
 | 176 → 184 | 2.05 | — | the step |
-| 184 → 368 | 2.22–2.27, mean 2.26 | **282** | 3.52× |
+| 184 → 368 | 2.22–2.27, mean 2.26 | **282** | 3.52 |
 
 **Flat, a cliff, flat.** Twenty-one blocks at 171 ms a frame, one transition
 block, then twenty-three blocks at 282 — varying by under 2% on either side of
@@ -2359,10 +2423,10 @@ So the honest pair of numbers for this lane, for each talker:
 
 | | ms/frame | RTF | what it is |
 | --- | --- | --- | --- |
-| 1.7B fast | 171 | **2.14×** | the first ~30 s from cold, and every other measurement in this section |
-| 1.7B sustained | 282 | **3.52×** | anything longer |
-| 0.6B fast | 155 | **1.94×** | |
-| 0.6B sustained | 264 | **3.30×** | |
+| 1.7B fast | 171 | **2.14** | the first ~30 s from cold, and every other measurement in this section |
+| 1.7B sustained | 282 | **3.52** | anything longer |
+| 0.6B fast | 155 | **1.94** | |
+| 0.6B sustained | 264 | **3.30** | |
 
 **This is the wrong way round for what the lane is for.** Prepared playback
 means long text, and long text is exactly what runs in the slow regime: a
@@ -2400,7 +2464,7 @@ that is the measurement to make before designing anything around it.
 #### The 0.6B was worth trying after all, and it buys about a tenth — but loses on voice
 
 This section used to argue from the floor that the small talker should not be
-run: the codec is 0.92× by itself, so even a free talker leaves more than 1×.
+run: the codec is RTF 0.92 by itself, so even a free talker leaves more than 1.
 The arithmetic was right and the conclusion was too strong — it answered
 "can this reach real time" when the question worth asking was "how much does it
 move", and those have different answers. It was run. Measured, `0.6b-customvoice`
@@ -2422,8 +2486,8 @@ codec is a separate model — the fourth attempt on it, and it has still never
 moved.
 
 So **the floor is higher than the codec alone**. Two of the three stages are
-indifferent to talker size, and together they are 116 ms a frame: **1.45× with a
-talker costing nothing**, and about 2.47× once the clock steps down.
+indifferent to talker size, and together they are 116 ms a frame: **RTF 1.45
+with a talker costing nothing**, and about 2.47 once the clock steps down.
 
 In the long-passage runs the difference is smaller than the short-utterance
 table suggests — 155 ms a frame against the 1.7B's 171 in the fast regime, 264
@@ -2494,7 +2558,7 @@ scale with how long the recording is, and nobody has tried a short one at either
 end. A five-second reference would cost a fifth of the setup and a fifth of the
 added attention per frame — whether it still carries the voice is the question.
 
-**At 1.7B and Q8 the same clone costs 11.76× and 43.8 s to first audio** —
+**At 1.7B and Q8 the same clone costs RTF 11.76 and 43.8 s to first audio** —
 prefill alone is 14.7 s against the 0.6B's 3.5, because the reference's 280
 frames go through a talker three times the size. Both cloning runs are far
 outside anything usable, and the second one confirms the first was not an
@@ -2544,7 +2608,7 @@ the 0.6B, as though CustomVoice were something only the small model offered.
 quantization the VoiceDesign checkpoint is, and it has never been run here.
 
 Folding the two together hid that they are different questions. At 1.7B the
-speed is already known: same parameter count, same codec, so the same 2.29×,
+speed is already known: same parameter count, same codec, so the same RTF 2.29,
 give or take a shorter prompt. **Nothing about CustomVoice is a speed
 proposal.** What is open is the voice, and there the interface is not the one
 this file assumed:
@@ -2662,24 +2726,24 @@ wrong, in four recurring shapes, so the pattern is worth more than the numbers:
 
 | claimed | measured | what was left out |
 | --- | --- | --- |
-| omni at 1 DiT forward: **1.5×** | 2.8× | the DiT was only a third of the cost |
-| Qwen3-TTS: **0.7×** | 2.15× | the codec stage entirely, and the AR half was assumed to reach peak bandwidth |
-| Qwen3-TTS on the phone: **3.6×** | 2.14× sprinting, 3.52× sustained | — |
+| omni at 1 DiT forward: **RTF 1.5** | 2.8 | the DiT was only a third of the cost |
+| Qwen3-TTS: **RTF 0.7** | 2.15 | the codec stage entirely, and the AR half was assumed to reach peak bandwidth |
+| Qwen3-TTS on the phone: **RTF 3.6** | 2.14 sprinting, 3.52 sustained | — |
 | "Qwen3-TTS cannot hold a voice" | it holds one whenever it is given a reference | `-Base` is the name of the cloning checkpoint, so running it without one was using it wrong |
 | "cloning flattens prosody" | true of a speaker encoder, false of in-context cloning | the same weights clone well through a different interface |
 | "four threads take ~85% of the bus" | the chip gives up 24.4 GB/s; decode uses 73–75% | that a plateau at four cores is a compute limit |
 | "six threads is the wrong count for a phone" | 4, 6 and 8 within 2% | that true premises about a heuristic do not make its output wrong |
 | "streaming re-decode is why the codec is the outlier" | buffered is not faster | that the codec's own run-to-run spread is ±14%, three times the difference being read |
-| "a longer utterance amortises prefill, so **2.12×**" | 2.95 and 3.22 | that thirty seconds of continuous compute costs 65% of the clock, which dwarfs the 0.2× being chased |
+| "a longer utterance amortises prefill, so **RTF 2.12**" | 2.95 and 3.22 | that thirty seconds of continuous compute costs 65% of the clock, which dwarfs the 0.2 being chased |
 | "the 0.6B is not worth running" | it is 14% a frame, and keeps the written voice | that "cannot reach real time" and "does not help" are different claims, and only the first had been shown |
 | "`调` is wrong because it is the base checkpoint" | 1.7B base reads it correctly | that two configurations differing in three things cannot name which one did it |
 | "completing the 2×2 is a test with no payoff" | it cleared Q4 on the model this lane ships | that a test's value is what it rules IN elsewhere, not only what it settles about the thing being tested |
 | "the codec is the stage that did not scale, at **2.45×**" | 1.90×, same as the other two | that the phone column was Q4 and the laptop column Q8, and the codec is the one row a talker quantization does not move |
-| "omni lost to qtts on speed" | omni's coarsest setting beats qtts sustained | that 2.8× was the Talker alone past the clock step, and 2.14× the whole synthesis before it |
+| "omni lost to qtts on speed" | omni's coarsest setting beats qtts sustained | that RTF 2.8 was the Talker alone past the clock step, and 2.14 the whole synthesis before it |
 
-Row three is worth a second look before the shapes. **3.6× was the prediction and
-3.52× is the sustained answer**, so the number was very nearly right — and it was
-arrived at by leaving the codec stage out of the arithmetic entirely and then
+Row three is worth a second look before the shapes. **RTF 3.6 was the prediction
+and 3.52 is the sustained answer**, so the number was very nearly right — and it
+was arrived at by leaving the codec stage out of the arithmetic entirely and then
 assuming the rest hit peak bandwidth. Two errors of opposite sign landed on a
 right answer, and it stayed wrong for the two hours it took to also discover the
 throttle: measured against the sprint figure it was out by 60%. **A method that
