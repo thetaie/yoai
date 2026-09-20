@@ -1813,56 +1813,62 @@ short by design.** The measured chain answers in 12 to 18 characters, about
 three seconds of speech — the end where 2.65 s of fixed cost is most of the
 bill.
 
-### And it cannot hold a voice, which disqualifies it
+### What llama.cpp's clone path loses, and what it does not
 
-**Base means no speakers.** The GGUF carries no chat template and no speaker
-list; its metadata is a bare architecture plus the model's own recommended
-sampling (`temp 0.9, top_k 50, top_p 1.0` — not the `top_k 40, top_p 0.95`
-llama.cpp defaults this was measured with). Free-running, it draws a speaker and
-a recording style per utterance, and the draw is not pinned by anything
-available:
+**`-Base` is the cloning checkpoint, so running it with no reference is using it
+wrong.** The GGUF carries no chat template and no speaker list, and free-running
+it draws a speaker and a recording style per utterance — the same seed gives a
+male voice on one text and a female one on another. That was recorded here as
+"the model cannot hold a voice". It was a statement about a model being driven
+without the input it exists to take, and it is withdrawn.
 
-- **The same seed gives different speakers on different texts** — judged by ear,
-  one male and one female. Not a subtle drift; the person changes.
-- `top_k` moves quality, not identity. 1 collapses outright (160 s of audio for a
-  20 s passage, running to the frame cap — the same greedy collapse MNN's own
-  talker config warns about), 5 is too tight, 20 beats 5, and 40 with a lucky
-  seed beat both.
-- The good draws were the good ones: *very clear, close-miked, slight breath,
-  strong prosody*. That is a recording style the model imagines, not a quality
-  setting, and it arrived by lottery.
+What survives from those runs is about sampling, not identity: `top_k` 1
+collapses outright (160 s of audio for a 20 s passage, running to the frame cap
+— the same greedy collapse MNN's talker config warns about), 5 is too tight, 20
+beats 5, 40 with a lucky seed beat both. And the good draws had a character
+worth naming — *very clear, close-miked, slight breath, strong prosody* — which
+is a recording style the model imagines, not a setting.
 
-**The one mechanism that does pin it destroys what made it worth having.**
-`--tts-speaker-file` holds identity and pace, and flattens the prosody — the
-pauses between sentences come out identical and mechanical. Confirmed across
-three samples, two mmproj quantisations and two sampling configs, including
-cloning a take that had been judged good: the clone of it was not. A speaker
-encoder compresses a voice into one global embedding, and the time-varying part
-is what gets left behind.
+**Given a reference, identity holds and the prosody flattens.** Sentence pauses
+come out identical and mechanical, across three samples, two mmproj
+quantisations and two sampling configs, including cloning a take that had been
+judged good.
 
-So: a voice that changes between sentences, or a voice that sounds mechanical.
-**For an assistant that speaks every day, the first is worse than the second and
-neither ships.**
+**That one is not a misconfiguration either, and the reason is in the graph.**
+`qwen3tts-spkenc.cpp` ends in attentive statistics pooling, `[1536, T] → [3072,
+1]`: the time axis is pooled away and the reference becomes a fixed-length
+vector. Prosody is the time-varying part, so there is nothing left of it to
+transfer. `mtmd_helper_gen_audio_inp` also has no field for a reference
+transcript, so the in-context path the same weights support elsewhere cannot be
+expressed through this API at all.
+
+So llama.cpp gives a stable voice with flattened prosody, and that is the
+ceiling of its interface rather than of the model.
 
 ### The variant that solves it is on a third runtime
 
 The family has more than the Base checkpoint, and llama.cpp supports only Base.
 
-| variant | identity | prosody | runtime |
-| --- | --- | --- | --- |
-| Base, free-running | **changes, including gender** | good | llama.cpp |
-| Base, cloned | stable | **flattened** | llama.cpp |
-| CustomVoice, 9 named speakers | stable | untested | CrispASR |
-| **VoiceDesign**, text attributes | **stable** | **good** | qwentts.cpp |
+| variant | identity | prosody | RTF, long | runtime |
+| --- | --- | --- | --- | --- |
+| Base, free-running | **changes, including gender** | good | 1.41 | llama.cpp |
+| Base, cloned through a speaker encoder | stable | **flattened** | 1.41 | llama.cpp |
+| Base, cloned in context | **stable** | **good** | 1.97 | qwentts.cpp |
+| **VoiceDesign**, text attributes | **stable** | **good** | **1.16** | qwentts.cpp |
+| CustomVoice, 9 named speakers + optional style | stable by construction | **worse than VoiceDesign** | 1.89 at 0.6B on the phone | qwentts.cpp |
 
-`mtmd_helper_gen_audio_inp` has no speaker id or name — `prompt`, `speaker_ref`,
-`lang`, `top_k`, `top_p`, `seed`, `out_type`, and that is all. The named and
-described voices live in ports that carry their own codec GGUF instead of an
-mmproj, so adopting either means a third engine.
+**The same checkpoint is in the top three rows.** What separates them is the
+interface: `mtmd_helper_gen_audio_inp` carries `prompt`, `speaker_ref`, `lang`,
+`top_k`, `top_p`, `seed`, `out_type` and nothing else — no speaker id, no
+reference transcript — while `qwen-tts` takes `--ref-wav` **and** `--ref-text`
+and admits the reference as 280 frames of context. Cloning did not stop
+flattening prosody because the model changed; it stopped because the reference
+stopped being pooled.
 
-**VoiceDesign was built and measured, and it clears every quality bar Base
-failed.** `qwentts.cpp`, a C++17 ggml port with a C ABI and a termux build
-script — much narrower than MNN, which was a whole inference framework.
+**Both qwentts.cpp modes were built and measured, and both clear every bar
+llama.cpp's interface could not.** It is a C++17 ggml port with a C ABI and a
+termux build script — much narrower than MNN, which was a whole inference
+framework.
 
 - **Identity holds across texts.** The same instruction, two different passages,
   judged the same voice. This is the requirement Base failed.
@@ -1884,26 +1890,604 @@ split:
 | Codec decode | 8.25 s |
 | **Total, 22.00 s of audio** | 25.52 s — **RTF 1.16** |
 
-The fastest of the three, the only one that holds a voice, for 2.33 GB and a
-third runtime. **There is no cheap lever left**: the three stages cost within 15%
-of each other, so nothing here is the `dit_steps` of this engine, and the 0.6B
-talker exists only as base and customvoice — VoiceDesign is 1.7B or nothing.
+The fastest of them all, for 2.33 GB and a third runtime. **No stage is the
+`dit_steps` of this engine**: the three cost within 15% of each other, so there
+is nothing to switch off. The 0.6B talker exists only as base and customvoice —
+VoiceDesign is 1.7B or nothing.
 
-**It is still above 1, and the phone will be worse.** So this belongs to
+An earlier version of this paragraph went on to say there was no cheap lever
+left at all. There was one: quantizing the talker to Q4_K_M took 22% off it on
+the phone, and it was not tried here because these runs were all at Q8. The
+lever it is NOT is one that touches the codec, which is what the phone section
+below turns out to need.
+
+**In-context cloning also works, and costs 70% more.** Same runtime, the Base
+checkpoint, `--ref-wav` plus `--ref-text`:
+
+| | short, 11.0 s | long, 19.5 s |
+| --- | --- | --- |
+| Prefill | 2.54 s | 2.35 s |
+| Codec decode | 9.32 s | 17.48 s |
+| AR per frame | 69.6 ms | 68.0 ms |
+| **RTF** | **2.16** | **1.97** |
+
+Prefill is the fixed part and amortises; the codec decode does not — it tracks
+the audio. The reference sits in context for the whole generation, so every
+frame is dearer than VoiceDesign's 59.9 ms as well.
+
+**So the choice inside qwentts.cpp is how a voice gets specified**, not whether
+it holds. VoiceDesign describes one in English and runs at 1.16; cloning names
+an exact recording and runs at 1.97. The first is the one to port, because a
+phone will be slower and 1.16 has room where 1.97 does not — and because a
+described voice needs no reference file shipped or recorded. Cloning is what a
+later "use my own voice" feature would be built on, and it should wait until the
+ratio is known on the device.
+
+**All of it is still above 1, and the phone will be worse.** So this belongs to
 prepared playback, not to conversation. Conversation already has its answer, and
 that answer is 1.37 s of silence with the platform voice.
 
-### Four predictions, four misses, and what they had in common
+### The answer: 1.7B VoiceDesign at Q4_K_M, for prepared playback only
 
-The arithmetic in these two sections was wrong every time it was used, in two
-recurring shapes, so the pattern is worth more than the numbers:
+Four checkpoints were run on the device and the first one tried is the one that
+stays. It is not a default that went unexamined — each of the others lost on
+something specific:
 
-| predicted | measured | what was left out |
+| | why not |
+| --- | --- |
+| 1.7B VoiceDesign Q8_0 | same voice, 22% slower per frame, 0.8 GB larger |
+| 0.6B CustomVoice | 14% faster a frame, and **audibly worse** — as is 0.6B base, so it is the size that loses on voice and not one checkpoint |
+| 0.6B base, in-context clone | ~24 s of setup per utterance, first audio at 29.8 s, and it **mispronounces** |
+| 1.7B base, in-context clone | reads correctly, and costs **11.76×** with first audio at 43.8 s |
+| 1.7B CustomVoice | untried; CustomVoice already lost on voice at 0.6B |
+| a shorter reference for cloning | untried, and only worth it if cloning were otherwise viable |
+
+**What it costs is the one thing nothing fixed.** 2.14× for the first half
+minute and 3.52× after. Six levers were tried on that number — streaming against
+buffered, the thread count, the talker's quantization, the codec's, the talker's
+size, and the utterance's length — and two moved it: quantizing the talker, by
+22% a frame, and shrinking it, by another 14% at a cost in voice that was not
+worth paying. So the lane is for **prepared playback**: generate while nobody is
+waiting, play later. Conversation keeps the platform voice and its 1.37 s of
+silence.
+
+**One lever is left and it is not a small one.** The gap between the two speeds
+is 40%, larger than anything else found here, and the fast regime is bought with
+idle time. Whether a passage split into sentences with pauses stays in it is
+unmeasured, and it is the only remaining thing that could change the number
+rather than the model.
+
+**The GPU is not a lever, and the reason is a policy rather than a limit** —
+see "The GPU runs, and the platform kills it" below.
+
+### On the phone: 2.1× for half a minute, then 3.5×
+
+qwentts.cpp cross-compiles for HarmonyOS and the lane is wired end to end —
+[harmony/build.cmd](../harmony/build.cmd) `qtts` assembling
+`harmony/prebuilt/qtts-sdk/<abi>/`, `src/voice/qtts.*` behind a
+`bodyclock_tts_*` C ABI, NAPI bindings, and `/tts` to drive it.
+
+**The device has two speeds and every subsection but the last measured only the
+first.** It holds one rate for the first twenty to thirty seconds of continuous
+generation and then steps down to about 60% of it. Everything short enough to
+finish inside that window — which is every comparison below, because they were
+all run on a 3.8-second utterance — is a sprint figure, and comparisons between
+sprint figures are still valid. A single ratio quoted out of them is not what an
+utterance costs. "Two speeds" at the end of this section is the one that ran
+long enough to see both.
+
+Sprint figures, then. Per frame, four threads, seed pinned so every run of a
+configuration is the same utterance; a frame is 80 ms of audio at 12.5 Hz:
+
+| stage | desktop | phone, Q8 talker | phone, Q4 talker | desktop → phone |
+| --- | --- | --- | --- | --- |
+| Talker decode | 32.0 ms | 63.2 ms | **49.2 ms** | 1.54× |
+| Code predictor | 27.8 ms | 51.6 ms | **43.5 ms** | 1.56× |
+| **Codec decode** | 30.0 ms | **73.5 ms** | **73.5 ms** | **2.45×** |
+| Prefill | — | 0.80–0.96 s, fixed | 0.83–0.92 s | amortises |
+
+**The codec is the floor, and it is the one number here that nothing has
+moved.** Three separate attempts left it at 73.5 ms per frame: streaming against
+buffered, a talker at half the weights, and its own quantization. 73.5 ms buys
+80 ms of audio, so **the codec alone is 0.92× real time** and everything else is
+on top of it.
+
+The two autoregressive stages do respond. Per frame they are now 45% of the
+bill together, against the codec's 45% and prefill's 10% on a 3.8-second
+utterance; the arithmetic closes — 49.2 + 43.5 + 73.5 = 166 ms per 80 ms frame
+is 2.08×, plus prefill amortised over that length is 0.22×, and 2.30 is what the
+page shows. All of that is the fast regime.
+
+**Nothing reaches 1 from here**, and after three levers it is worth saying why
+rather than hoping. The codec is 0.92× on its own, it is a separate model from
+the talker, and it does not care what the talker is. So this lane stays where
+the desktop section already put it: prepared playback, not conversation.
+
+#### Streaming is free, and the reason it looked expensive was noise
+
+The desktop decoded 275 frames in one codec pass; the phone streamed, in chunks
+that ramp from one frame to eight, and the streaming path re-decodes the codec's
+left context per chunk. That is a real mechanism, the codec was the outlier, and
+two phone runs seemed to show it: 8 chunks gave 76.1 ms/frame against 13 chunks'
+79.4, and a per-frame rate should not rise with length.
+
+`bodyclock_tts_set_streaming` was added to settle it, with a pinned seed so both
+modes generate the identical 41 frames. Seven runs, four threads, alternating,
+over two minutes:
+
+| stage | spread across all seven | streamed | buffered |
+| --- | --- | --- | --- |
+| Talker decode | 2532–2664 ms | — | — |
+| Code predictor | 2081–2199 ms | — | — |
+| Prefill | 803–964 ms | — | — |
+| **Codec decode** | **3013–3997 ms** | 3013, 3013, 3440, 3280 | 3073, 3997, 3547 |
+
+**Buffered is not faster.** Its best run is 3073 ms against streaming's 3013,
+and its worst is the worst of the seven. The re-decode costs nothing measurable.
+
+**What the table actually shows is that the codec stage wanders**: 3013 to 3997
+on identical input, ±14%, where the two autoregressive stages hold ±2.5%. The
+76.1-against-79.4 that motivated this was 4% — under a third of that, read off
+two runs, as a trend.
+
+**It wanders between periods, not within one.** Five back-to-back runs of a
+fixed configuration later held the codec inside 3530–3598 ms, under ±1%, so the
+±14% is drift across two minutes rather than scatter. That does not rescue the
+76.1-against-79.4: those two runs were minutes apart, which is exactly the
+interval the drift lives on. It does mean a comparison run back to back is
+worth much more than one run of each, and it is why every later figure here
+comes from three consecutive runs of a configuration.
+
+So the codec is still the outlier at 2.45×, and streaming is not why. Nor is
+quantization, and nor is the talker — see the next section for the other two
+attempts on it.
+
+**Streaming stays on.** It moves the first audio from the end of the run to
+about 1.0 s — 930 to 1109 ms across four runs, against 8.5 to 9.6 s buffered —
+and now costs nothing. That does not make playback smooth: above 1× the listener
+drains each chunk faster than the next arrives, 43% speech and 57% silence at
+2.3×, the same arithmetic that settled the question for omni. It makes the first
+word early, which is worth having in a flow that generates ahead.
+
+#### Q4 moves the talker by a fifth and the codec not at all
+
+Two predictions, made before the files were downloaded, and one of each:
+
+- **The talker at Q4_K_M would help**, because 1.9 GB of Q8 weights read 12.5
+  times a second is most of what this chip's 24.4 GB/s can give.
+- **The codec at Q4_K_M would not**, because it reads at most 0.27 GB per frame
+  in 73.5 ms — under 4 GB/s, nowhere near the ceiling — so it is not waiting on
+  memory. A convolutional decoder with 21 conv contexts and a 128-deep KV ring
+  does a great deal of arithmetic per byte of weight.
+
+Measured, four threads, seed pinned, three consecutive runs of each:
+
+| | Talker | Code predictor | Codec | RTF |
+| --- | --- | --- | --- | --- |
+| Q8 talker, Q8 codec | 63.2 ms | 51.6 ms | 73.5 ms | 2.60 |
+| **Q4 talker**, Q8 codec | **49.2** | **43.5** | 73.5 | **2.29** |
+| Q4 talker, **Q4 codec** | 49.2 | 43.5 | 73.5 | 2.31 |
+
+**The talker gained 22% and the code predictor 16%; the codec gained nothing**
+(3587 ms against 3545 over 48 frames, a 1% difference inside two overlapping
+ranges). The second prediction holds. So does the first, but only halfway:
+Q4_K_M is 58% of Q8's bytes and bought 22%, not 42%, so that stage is part
+bandwidth and part arithmetic too.
+
+**The codec reading 73.5 ms/frame in all three rows is the useful part.** It is
+the same number the streaming comparison produced, from a different talker, at a
+different quantization, on a different day. Three independent attempts on one
+stage and it has not moved once.
+
+**Q4_K_M is what this lane runs at.** The pair goes from 2.2 GB to 1.4, RTF from
+2.60 to 2.29, and the voice holds — judged by ear, which was a real question
+rather than a formality: on the desktop Q8 and bf16 were audibly different in
+pace, so this quantization step could have cost the thing being bought and did
+not.
+
+#### The thread count is not a lever, and the phone getting warm is
+
+Swept on the device at 2 / 4 / 6 / 8 and back to the engine's own choice, same
+text each time, per-frame so the differing lengths do not matter:
+
+| threads | Talker | Code predictor | Codec | AR frame | RTF |
+| --- | --- | --- | --- | --- | --- |
+| 2 | 72.5 ms | 60.6 ms | 126.1 ms | 133.2 ms | 3.66 |
+| 4 | **62.1** | **51.8** | **73.2** | **114.0** | **2.56** |
+| 6 | 64.4 | 54.9 | 78.9 | 119.4 | 2.66 |
+| 8 | 65.2 | 56.1 | 73.3 | 121.3 | 2.63 |
+| 6, again | 66.1 | 56.3 | 83.5 | 122.4 | 2.79 |
+| 6, again | 67.6 | 57.2 | 88.2 | 124.8 | 2.87 |
+
+**Four, six and eight are within about 2% of each other. Two is 12% worse.**
+
+The last two rows are the reason the middle three cannot be separated. They are
+the same count as row three, run five and ten minutes later, and they get
+monotonically slower: 119.4 → 122.4 → 124.8 ms per frame, **about 9% across the
+sweep**. Every number in this table carries however much of that its position
+earned, and 2% is less than one run's worth. Four ran second and six ran third,
+so four's lead is roughly the drift between them.
+
+This was added expecting the opposite. The argument was clean — the engine picks
+`hardware_concurrency() / 2` reasoning about hyperthreads, this phone has none,
+and the llama lane on the same device measured prefill and decode flat from four
+threads up — and every clause of it is true. None of them implied a penalty, and
+there is not one. `QWEN_N_THREADS` stays because the next device is not this
+one.
+
+**The drift is the finding worth keeping.** A phone speaking for a few minutes
+loses about a tenth of its speed, which is larger than anything the thread count
+was going to buy, and it is not visible in a single measurement. Prefill also
+scales with threads and then stops — 1305 ms at two, 814 at four, 855 at six,
+798 at eight — the same shape the llama lane has.
+
+That 9% turned out to be the shallow end of something much bigger. Each run here
+was about ten seconds of compute with gaps between, so the sweep never left the
+fast regime and only saw the chip warming inside it. Run one long passage
+instead and the same mechanism takes 40% — see "Two speeds" below. Every
+±2%-versus-drift argument in this subsection survives, because every point in it
+was measured under the same conditions; what does not survive is reading any of
+these RTFs as what the lane costs.
+
+#### Two speeds, and the one that matters is the slow one
+
+The 3.8-second utterance was measured to death and none of it says what a real
+one costs. A 30-second passage — the same text the desktop's 22-second figure
+came from, run at Q4, four threads, seed pinned — came out at **RTF 2.95 and
+3.22**, against 2.29 short. **The ratio got worse with length**, and the
+prefill-amortisation arithmetic that predicted 2.12 had the sign right on the
+wrong term.
+
+The engine logs a line every eight frames, so the run can be read as a rate
+rather than a total. The first pass, frames 8 to 368:
+
+| frames | seconds per 8 | ms/frame | RTF |
+| --- | --- | --- | --- |
+| 8 → 176 | 1.29–1.43, mean 1.37 | **171** | 2.14× |
+| 176 → 184 | 2.05 | — | the step |
+| 184 → 368 | 2.22–2.27, mean 2.26 | **282** | 3.52× |
+
+**Flat, a cliff, flat.** Twenty-one blocks at 171 ms a frame, one transition
+block, then twenty-three blocks at 282 — varying by under 2% on either side of
+a 65% jump. That is a clock step, not an algorithm: attention over a growing KV
+cache gets dearer gradually and never flattens, and the codec, which has no
+growing state at all, slowed by the same proportion.
+
+**It is heat, not a fixed boost window**, and the two runs discriminate. The
+first began after fourteen idle minutes and held the fast rate for 29.9 s. The
+second began 44 s after the first ended and held it for 16.4 s, then stepped
+down in stages — 169, 228, 260, 282 — rather than in one. A timer would have
+given both runs the same window; a warm chip gives the second one less.
+
+So the honest pair of numbers for this lane, for each talker:
+
+| | ms/frame | RTF | what it is |
+| --- | --- | --- | --- |
+| 1.7B fast | 171 | **2.14×** | the first ~30 s from cold, and every other measurement in this section |
+| 1.7B sustained | 282 | **3.52×** | anything longer |
+| 0.6B fast | 155 | **1.94×** | |
+| 0.6B sustained | 264 | **3.30×** | |
+
+**This is the wrong way round for what the lane is for.** Prepared playback
+means long text, and long text is exactly what runs in the slow regime: a
+30-second passage takes 88 to 97 seconds, most of it throttled.
+
+**The window is wall clock, not work.** That was a prediction before the 0.6B
+was run — the chip is pinned at four threads either way, so heat should track
+time under load rather than frames produced — and the small model agrees with
+it. Every long run to date, by when the clock first steps:
+
+| talker | idle before | fast until |
+| --- | --- | --- |
+| 1.7B | 14 minutes | t+29.9 s |
+| 0.6B | ~90 s of short runs | t+28.3 s |
+| 1.7B | 44 s, after 88 s of full load | t+16.4 s |
+| 0.6B | 40 s, after 59 s of full load | t+17.4 s |
+
+**Model size does not move the step; thermal history does.** A talker 46%
+cheaper per frame gets the same half-minute, and spends it on more audio. That
+is the whole of what a smaller model buys on a long passage — the fast regime is
+a fixed amount of TIME, so the only way to get more out of it is to produce more
+audio per second, and 0.6B produces about a tenth more.
+
+The ladder is not always one step. The 0.6B's second run went 157 → 201 → 264 ms
+a frame, pausing at an intermediate clock for eleven seconds before dropping the
+rest of the way; the 1.7B's first run went straight from 171 to 282.
+
+**One untested mitigation, and it is cheap to try.** If the fast regime is bought
+with idle time, a long passage split into sentences with pauses between them
+might stay in it. It would pay prefill per sentence — 0.39 s at 0.6B, 0.87 at
+1.7B, against one longer prefill — and lose whatever prosody crosses a sentence
+boundary. Whether the pauses need to be seconds or minutes is not known, and
+that is the measurement to make before designing anything around it.
+
+#### The 0.6B was worth trying after all, and it buys about a tenth — but loses on voice
+
+This section used to argue from the floor that the small talker should not be
+run: the codec is 0.92× by itself, so even a free talker leaves more than 1×.
+The arithmetic was right and the conclusion was too strong — it answered
+"can this reach real time" when the question worth asking was "how much does it
+move", and those have different answers. It was run. Measured, `0.6b-customvoice`
+at Q4 against `1.7b-voicedesign` at Q4, four threads, seed pinned:
+
+| stage | 1.7B | 0.6B | |
+| --- | --- | --- | --- |
+| Talker decode | 49.2 ms | **26.8 ms** | −46% |
+| Code predictor | 43.5 ms | 42.5 ms | **−2%** |
+| Codec decode | 73.5 ms | 73.7 ms | **unchanged** |
+| Prefill, short prompt | 870 ms | 386 ms | −56% |
+| per frame | 166 ms | **143 ms** | −14% |
+| RTF, short utterance | 2.31 | **1.89** | |
+
+**The talker is the only stage that shrank.** The code predictor did not, which
+is the surprise: it is the MTP head, sized by the sixteen codebooks rather than
+by the LM's depth, so a third of the parameters buys nothing there. And the
+codec is a separate model — the fourth attempt on it, and it has still never
+moved.
+
+So **the floor is higher than the codec alone**. Two of the three stages are
+indifferent to talker size, and together they are 116 ms a frame: **1.45× with a
+talker costing nothing**, and about 2.47× once the clock steps down.
+
+In the long-passage runs the difference is smaller than the short-utterance
+table suggests — 155 ms a frame against the 1.7B's 171 in the fast regime, 264
+against 282 in the slow one. **About a tenth in each**, because the stage that
+shrank is the smaller share of the bill.
+
+**What it does not cost is the written voice.** CustomVoice takes a speaker AND
+an optional style instruction, so identity comes from the table and delivery is
+still written. Removing the instruction entirely from one run changed prefill by
+226 ms and the per-frame rate not at all — **the description is nearly free
+here**, which is the opposite of the trade this file assumed when it wrote
+CustomVoice off.
+
+**But it sounds worse than VoiceDesign**, judged by ear on the same passage.
+That settles the trade against it: a tenth of a frame and half the disk are not
+worth a voice that is audibly second best, when the whole reason this engine was
+chosen over three others was how it sounds. The speaker table is read from the
+file rather than taken from the model card — `qt_n_speakers` and
+`qt_speaker_name`, logged at load — so the nine are real; they are just not as
+good as a described one.
+
+So the lane stays on **1.7B VoiceDesign at Q4_K_M**, and the 0.6B's value turned
+out to be a measurement rather than a candidate: it is what showed that two of
+the three stages do not care about talker size, which is the floor argument that
+makes the whole family's ceiling structural.
+
+#### In-context cloning costs a fixed half-minute, whatever it says
+
+The one configuration of this family that has never run on the phone, and the
+only one left that could sound BETTER than VoiceDesign rather than merely
+cheaper: on the desktop it was the other row scoring stable identity and good
+prosody, and the recording it would clone is the one judged best of everything
+generated here.
+
+`bodyclock_tts_set_reference` now takes a WAV and its transcript, and
+`src/voice/qtts.cpp` carries a RIFF reader strict enough to refuse anything that
+is not mono 16-bit at exactly 24 kHz — the same no-resampler rule the
+recognition lane states at 16 kHz, for the same reason. The page shows the
+reference controls only for a `base` checkpoint and nothing else for it, because
+that checkpoint refuses a description and a named speaker both.
+
+**Measured: RTF 6.70, and almost all of it is a fixed charge.** 0.6B base at
+Q4, cloning the 22.4-second `long_zh.wav`, six seconds of output:
+
+| | | |
+| --- | --- | --- |
+| Prefill | 3.53 s | the reference's text and audio |
+| Codec, 280 reference frames | ~20.6 s | encoding the recording |
+| Talker decode | 39.3 ms/frame | 26.8 without a reference — **+47%**, the attention over 280 extra frames |
+| Code predictor | 44.4 ms/frame | unchanged |
+| Codec decode | ~70 ms/frame | unchanged |
+| First audio | **29.8 s** | nothing can be emitted until the reference is encoded |
+
+The engine bills the reference encode inside `CodecDecode`, which is why that
+line reads 26.1 s for 79 frames; subtract the 280 reference frames at the rate
+every other measurement here found and the remainder is 69.5 ms a frame, the
+usual number again. **The codec has now survived a fifth attempt.**
+
+So in-context cloning is **about 24 seconds of setup plus roughly the
+per-frame cost of a described voice** — 154 ms against VoiceDesign's 143 at the
+same size, the difference being the talker's larger context. On six seconds of
+output that setup is the whole bill. On a long passage it amortises, and the
+70% the desktop measured was a figure for one passage length rather than a
+property.
+
+**The lever is the reference, not the model.** Both halves of the fixed cost
+scale with how long the recording is, and nobody has tried a short one at either
+end. A five-second reference would cost a fifth of the setup and a fifth of the
+added attention per frame — whether it still carries the voice is the question.
+
+**At 1.7B and Q8 the same clone costs 11.76× and 43.8 s to first audio** —
+prefill alone is 14.7 s against the 0.6B's 3.5, because the reference's 280
+frames go through a talker three times the size. Both cloning runs are far
+outside anything usable, and the second one confirms the first was not an
+artefact of the small model.
+
+#### A polyphone, and the one cell of a 2×2 that fails
+
+Given `先把灯调暗一点吧`, `调暗` needs `tiáo`. Six configurations read it, and
+one says `diào`:
+
+| checkpoint | Q4_K_M | Q8_0 |
+| --- | --- | --- |
+| 0.6B base | **wrong** (twice) | correct |
+| 1.7B base | correct | correct |
+| 0.6B CustomVoice | correct | — |
+| 1.7B VoiceDesign | correct | — |
+
+**Neither variable alone explains it.** Q4 does not, since three Q4 rows are
+fine. The 0.6B does not, since the same checkpoint at Q8 is fine. The base kind
+does not, and neither does the cloning context — both base rows carry the same
+22.4-second reference. It takes **small AND Q4 together**, on the base
+checkpoint, and the reading is the ordinary one: a 0.6B has less redundancy to
+spend, so a quantization the 1.7B absorbs costs it a capability.
+
+An earlier version of this section called completing that square **"a test with
+no payoff"**, because the failing configuration was already out on cost. That
+was wrong about where the payoff was. The square does not exonerate the
+0.6B — it clears **this lane's own quantization**, which is Q4, on a model
+large enough to carry it, and `1.7B base Q4_K_M` reading correctly is the direct
+evidence for that. A negative result about a discarded configuration was worth
+nothing; the same experiment's evidence about the shipping one was worth having.
+**Asking what a test rules OUT is not the same as asking what it rules in.**
+
+Still one sentence, so it bounds nothing about Chinese generally. What it does
+establish is that **grapheme-to-phoneme is per-checkpoint and quantization can
+take it away**, so it does not carry across a model swap or a requantization and
+has to be re-checked after either. **And it cannot be corrected from here**:
+`qt_tts_params` carries text, a language name and sampling knobs, and nothing in
+the runtime accepts pinyin or phonemes. For a lane that speaks whatever an LLM
+wrote, rewording is not a remedy either.
+
+#### CustomVoice was never a speed question, and it lost on the other one
+
+The paragraph above used to fold the nine named speakers into the case against
+the 0.6B, as though CustomVoice were something only the small model offered.
+**It is not** — `qwen-talker-1.7b-customvoice` is published at every
+quantization the VoiceDesign checkpoint is, and it has never been run here.
+
+Folding the two together hid that they are different questions. At 1.7B the
+speed is already known: same parameter count, same codec, so the same 2.29×,
+give or take a shorter prompt. **Nothing about CustomVoice is a speed
+proposal.** What is open is the voice, and there the interface is not the one
+this file assumed:
+
+> `instruct` is the style instruction string; required for voice_design,
+> optional for custom_voice, rejected for base. `speaker` is the named speaker
+> for custom_voice models, rejected for the other two modes.
+
+So CustomVoice is **a speaker table plus an optional style instruction**, not a
+preset list instead of one. Identity comes from an enumerated speaker rather
+than from a description holding steady across passages, and the writable part of
+VoiceDesign — pace, energy, mic distance, breath — appears to survive. That is
+a strictly stronger guarantee on the axis Base failed, with the same control on
+top, and it was passed over on a misreading rather than a measurement.
+
+**Since written, the speaker parameter exists and the 0.6B CustomVoice has been
+run**; its cost is in "The 0.6B was worth trying after all" below, and the
+reading above held — the style instruction does apply, and costs 226 ms of
+prefill. How the nine speakers sound is still open, and the 1.7B CustomVoice is
+still untouched.
+
+#### The GPU runs, and the platform kills it
+
+The phone has a Maleoon 920 and the codec stage is compute-bound — it reads at
+most 0.27 GB a frame in 73.5 ms, under 4 GB/s against a chip measured at 24.4 —
+which is the profile a GPU helps. So ggml's Vulkan backend was cross-compiled
+for OHOS and linked in.
+
+**It builds and it runs.** `harmony/build.cmd <abi> vulkan` assembles it, the
+driver initialises (`<HM_GPU> # Device init`), ggml selects it, and the engine
+reports `[Load] Talker backend: Vulkan0`. Four build obstacles, all in the
+toolchain and none in the model:
+
+| | |
+| --- | --- |
+| `SPIRV-Headers` not found | the OHOS toolchain re-roots package searches into the sysroot, so ggml's own `list(APPEND CMAKE_PREFIX_PATH $ENV{VULKAN_SDK})` is ignored |
+| "unable to find a build program corresponding to Ninja" | the nested host build — 151 shaders compiled by a `vulkan-shaders-gen` built for the host — inherits the generator but not `CMAKE_MAKE_PROGRAM` |
+| `vulkan/vulkan.hpp` not found | the sysroot ships the C headers only; the C++ bindings come from the host SDK, and compiling against those while linking the phone's loader is fine |
+| `libggml-vulkan.a` not linked | the app finds ggml archives by name, and it has to go ahead of them because it references the rest |
+
+**And then HarmonyOS kills the process**, with `GPU_LEAK_KILL`, seconds after the
+first compute submission and before any audio. It is a platform policy about one
+number, not a crash and not ordinary OOM — the app is billed for GPU buffers and
+there is a ceiling.
+
+The number did not move:
+
+| setting | GPU buffers at the kill |
+| --- | --- |
+| defaults | 8.57 GB |
+| `GGML_VK_PREFER_HOST_MEMORY=1` | 8.03 GB |
+| plus `GGML_VK_SUBALLOCATION_BLOCK_SIZE=64 MB` | 8.31 GB |
+
+For a model of **1.1 GB**. The second setting matches the hardware — a phone has
+no separate video memory to prefer — and the third matched the number, because
+ggml batches allocations into 1 GB blocks by default and 8 GB is the shape of a
+few buffers each rounded up to one. **That hypothesis was written down with its
+own refutation attached**: if the total stayed near 8 GB, the memory was being
+used rather than reserved. It stayed at 8.31.
+
+So three allocation strategies produce the same total, which is what "no
+allocation knob will help" looks like. qwentts.cpp has no `n_gpu_layers`, so
+there is no partial offload to fall back to either.
+
+**What stays**: the build path, because it is one command and the next driver or
+the next ggml may behave differently, and because the finding is about a policy
+rather than about arithmetic. **What does not**: the SDK ships CPU-only, which
+is what `harmony/build.cmd <abi> qtts` assembles.
+
+**What was not reached**: whether the GPU would be faster at all. The codec is a
+convolutional decoder with 21 conv contexts and it is 45% of the bill; if
+ggml-vulkan does not cover those ops they fall back to the CPU and the question
+answers itself. That is now unmeasurable here, and it was always the second
+question.
+
+#### Two things the port itself settled
+
+**Two ggml, and only one of them can be in the library.** The llama SDK and the
+qwentts SDK each ship `libggml{,-cpu,-base}.a`, built from commits two weeks
+apart. Linking both is the rapidjson mistake in a bigger form: the linker
+resolves each symbol from whichever archive it scans first, so one build's
+compiled code would run against the other's implementation. Three measurements
+decided it rather than a preference:
+
+| | needs | the other's ggml is missing |
+| --- | --- | --- |
+| `libqwen-core.a` | 134 ggml/gguf symbols | 1 — `ggml_prec_set_acc` |
+| `libllama.a` | 287 | **0** |
+
+The public headers differ in two files and not one struct: `ggml.h` gains a prec
+enum and its two setters, `ggml-backend.h` loses a function neither library
+calls. So the newer one supersets the older, and the qwentts copy is what goes
+in. It is built from the same `-march` flags by the same script, so nothing is
+given up for it. **This fails loudly if it stops being true** — C symbols are
+strong, so a real collision is a duplicate-definition error at link, not a
+silent wrong-layout read like rapidjson's.
+
+**One word for the whole HarmonyOS build.** `ggml-cpu.c` guards its
+thread-affinity code with `__gnu_linux__` in five places and `__linux__` in one.
+OHOS is Linux on musl: it defines the second and not the first, so it took that
+one branch alone, into `pthread_setaffinity_np` — which the sysroot does not
+declare and `libc.so` does not export, only `sched_setaffinity`. The first fix
+tried, `-D_GNU_SOURCE`, treated the symptom: it silenced `cpu_set_t` and
+`CPU_ZERO`, which musl does have under that macro, and the next error was then
+the function that does not exist at all. Matching the
+guard to the other five drops OHOS into the file's own "unsupported platforms"
+fallback, where affinity is a no-op, and the flag became unnecessary. The patch
+lives in [harmony/patches/](../harmony/patches/) because the checkout is
+upstream's.
+
+### Twelve misses, and the four shapes they came in
+
+Every claim these sections made from arithmetic or from a failed attempt was
+wrong, in four recurring shapes, so the pattern is worth more than the numbers:
+
+| claimed | measured | what was left out |
 | --- | --- | --- |
 | omni at 1 DiT forward: **1.5×** | 2.8× | the DiT was only a third of the cost |
 | Qwen3-TTS: **0.7×** | 2.15× | the codec stage entirely, and the AR half was assumed to reach peak bandwidth |
-| Qwen3-TTS on the phone: **3.6×** | still unmeasured | — |
-| "Qwen3-TTS cannot hold a voice" | it can, on another runtime | the family has three checkpoints and Base is the cloning one |
+| Qwen3-TTS on the phone: **3.6×** | 2.14× sprinting, 3.52× sustained | — |
+| "Qwen3-TTS cannot hold a voice" | it holds one whenever it is given a reference | `-Base` is the name of the cloning checkpoint, so running it without one was using it wrong |
+| "cloning flattens prosody" | true of a speaker encoder, false of in-context cloning | the same weights clone well through a different interface |
+| "four threads take ~85% of the bus" | the chip gives up 24.4 GB/s; decode uses 73–75% | that a plateau at four cores is a compute limit |
+| "six threads is the wrong count for a phone" | 4, 6 and 8 within 2% | that true premises about a heuristic do not make its output wrong |
+| "streaming re-decode is why the codec is the outlier" | buffered is not faster | that the codec's own run-to-run spread is ±14%, three times the difference being read |
+| "a longer utterance amortises prefill, so **2.12×**" | 2.95 and 3.22 | that thirty seconds of continuous compute costs 65% of the clock, which dwarfs the 0.2× being chased |
+| "the 0.6B is not worth running" | it is 14% a frame, and keeps the written voice | that "cannot reach real time" and "does not help" are different claims, and only the first had been shown |
+| "`调` is wrong because it is the base checkpoint" | 1.7B base reads it correctly | that two configurations differing in three things cannot name which one did it |
+| "completing the 2×2 is a test with no payoff" | it cleared Q4 on the model this lane ships | that a test's value is what it rules IN elsewhere, not only what it settles about the thing being tested |
+
+Row three is worth a second look before the shapes. **3.6× was the prediction and
+3.52× is the sustained answer**, so the number was very nearly right — and it was
+arrived at by leaving the codec stage out of the arithmetic entirely and then
+assuming the rest hit peak bandwidth. Two errors of opposite sign landed on a
+right answer, and it stayed wrong for the two hours it took to also discover the
+throttle: measured against the sprint figure it was out by 60%. **A method that
+produces a correct number by cancellation is not confirmed by that number**,
+which is the whole reason these rows record what was left out rather than only
+how far off the total was.
 
 **Shape one: count the autoregressive half, assume it saturates the bus.** It
 does not — 12 frames a second against 1.04 GB is 12.5 GB/s and the measurement
@@ -1918,6 +2502,54 @@ VoiceDesign were one lookup away, and VoiceDesign is both faster and stable.
 The correction came from being asked whether a TTS with no way to fix its voice
 was plausible — which is the question that should have been asked first, exactly
 as with MNN's silence.
+
+**Shape three: a question with the answer missing from it.**
+`bodyclock_local_set_threads` was added to settle whether decode is
+bandwidth-bound, and framed as two outcomes — a flat curve meaning the wall is
+per-chip, a rising one meaning it is per-core. The curve rose to four threads
+and then flattened, and that was read as the first outcome.
+
+It was neither. Four is this SoC's performance-core count, so the plateau says
+the cores ran out and nothing at all about the bus. That reading was not on the
+ballot, so the measurement could not return it, and the wrong one was picked by
+elimination. No thread sweep of a language model can separate the two, because
+every point on it is one engine's kernels as much as the hardware — which is why
+`bodyclock_memory_bandwidth` had to exist.
+
+The 0.6B row is the same shape with the ballot narrowed by one question instead
+of one option. "Can the small talker reach real time" was answered correctly —
+no, the codec alone forbids it — and then used to answer "is it worth running",
+which nobody had asked. It is worth running: 14% a frame, half the prefill, half
+the disk, and the written voice kept. **A proof about the ceiling says nothing
+about the slope.**
+
+**Shape four: predicting a difference, and never asking how big a difference
+the measurement can see.** Both of the last two rows are this, and both were
+built out of true statements.
+
+The thread one: qwentts.cpp picks `hardware_concurrency() / 2` reasoning about
+hyperthreads, this phone has none, and the llama lane on the same device had
+measured prefill and decode flat from four threads up. Every clause true, none
+of them implying a penalty, and there is not one — 4, 6 and 8 land within 2%,
+which is less than the 9% five consecutive runs drift as the phone warms.
+
+The streaming one is worse, because it had a number. The codec was the outlier
+at 2.45×, the streaming path really does re-decode its left context per chunk,
+and two runs put 8 chunks at 76.1 ms/frame against 13 chunks' 79.4 — a rate
+that should not rise with length. Seven runs on a pinned seed then showed the
+codec's spread on *identical input* is 3013 to 3997 ms, ±14%, while the two
+autoregressive stages hold ±2.5%. The trend was a quarter of the noise.
+
+**The shared error is the missing denominator.** In both cases the effect was
+argued for and then looked for, and in neither was the instrument's own
+variance measured first. A pinned seed and a repeat of the same condition cost
+one extra run each and are what turned both of these from a story into a number.
+Shape three says an option missing from the question cannot be returned by the
+answer; this one says a difference smaller than the scatter cannot be either.
+
+The first two shapes are errors in arithmetic and in reading. This one is an
+error in the experiment: **an option left out of the question cannot be chosen
+by the answer.**
 
 ## What llama.cpp can do now
 
