@@ -1,15 +1,16 @@
 # Build trees
-/build
-/build-*
-/vcpkg_installed
-/out
+build
+build-*
+vcpkg_installed
+out
 .mnn-build
+.qtts-build
 
 # Editor / tooling
-/.vscode
-/.idea
+.vscode
+.idea
 compile_commands.json
 
 # Python bytecode from the design scripts
-__pycache__/
+__pycache__
 *.pyc

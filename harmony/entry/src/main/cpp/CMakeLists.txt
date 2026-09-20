@@ -112,6 +112,29 @@ else()
     set(BODYCLOCK_MNN OFF CACHE BOOL "" FORCE)
 endif()
 
+# Speech output, the third engine, discovered exactly like llama: the SDK's
+# presence is the switch, and `harmony/build.cmd <abi> qtts` is what creates it.
+#
+# It also decides WHICH ggml the library links, because it ships one of its own
+# and the root CMakeLists refuses to link two. That is settled there, not here.
+if(NOT DEFINED QTTS_DIR)
+    set(_qtts_sdk "${BODYCLOCK_PREBUILT_ROOT}/qtts-sdk/${OHOS_ARCH}")
+    # Same reason as the llama probe: without this, deleting the SDK leaves a
+    # build.ninja still naming libqwen-core.a as a link input.
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                 "${BODYCLOCK_PREBUILT_ROOT}/qtts-sdk"
+                 "${_qtts_sdk}/include/qwen.h")
+    if(EXISTS "${_qtts_sdk}/include/qwen.h")
+        set(QTTS_DIR "${_qtts_sdk}")
+    endif()
+endif()
+if(DEFINED QTTS_DIR)
+    set(BODYCLOCK_QTTS ON CACHE BOOL "" FORCE)
+    message(STATUS "bodyclock_napi: speech output from ${QTTS_DIR}")
+else()
+    set(BODYCLOCK_QTTS OFF CACHE BOOL "" FORCE)
+endif()
+
 add_subdirectory("${BODYCLOCK_REPO_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/bodyclock-core")
 
 # The target is bodyclock_napi but the artifact must be libbodyclock.so: it has to match

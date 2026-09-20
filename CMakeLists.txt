@@ -193,6 +193,9 @@ add_library(bodyclock_core STATIC
     # A SECOND engine, for the one thing ggml cannot do here: speak in the
     # model's own voice. Stubs out without BODYCLOCK_MNN.
     src/voice/omni.cpp
+    # A THIRD, for the same thing at a third of the cost, on text somebody else
+    # wrote. Stubs out without BODYCLOCK_QTTS.
+    src/voice/qtts.cpp
 )
 
 target_include_directories(bodyclock_core PUBLIC src)
@@ -226,10 +229,10 @@ elseif(OHOS OR CMAKE_SYSTEM_NAME STREQUAL "OHOS")
 endif()
 
 #-------------------------------------------------------------------------------
-# ggml, shared by the two on-device lanes
+# ggml, shared by the three on-device lanes
 #-------------------------------------------------------------------------------
 #
-# Two things here run on ggml and they need different amounts of it:
+# Three things here run on ggml and they need different amounts of it:
 #
 #   - The on-device LLM (src/llm/local.cpp) needs libllama on top.
 #   - Speech recognition (src/voice/sensevoice.cpp) does NOT. SenseVoice is an
@@ -238,52 +241,157 @@ endif()
 #     itself, and why it costs a fraction of what an audio-capable LLM would --
 #     see design/voice.md. The rest of src/voice/ needs neither: the filterbank
 #     and the prosody measurements are arithmetic over a sample buffer.
+#   - Speech OUTPUT (src/voice/qtts.cpp) needs libqwen-core on top, and that
+#     comes with a ggml of its own.
 #
-# Both read the SAME SDK directory, because harmony/build.cmd assembles exactly
-# one per ABI and it carries the repo's tuned -march flags. LLAMA_CPP_DIR points
-# at it: include/ plus lib/. Both layouts work -- a shared build (one libllama)
-# and a static build (libllama plus the ggml archives), which is what a HAP
-# needs since there is nowhere to put a companion .so.
+# **Exactly one ggml goes into the library**, and that last lane is why this is
+# worth a paragraph. The llama SDK and the qwentts SDK each ship
+# libggml{,-cpu,-base}.a, built from different commits two weeks apart. Linking
+# both is the rapidjson mistake again in a bigger form: the linker resolves each
+# ggml symbol from whichever archive it scans first, so one build's compiled code
+# would run against the other's implementation.
 #
-# On HarmonyOS nobody sets the variable by hand: `harmony/build.cmd <abi> llama`
-# (or .sh) assembles the SDK at harmony/prebuilt/llama-sdk/<abi> and the app's
-# CMakeLists finds it there. Building the SDK IS turning the lanes on.
+# Measured rather than guessed, because the answer decides whether the third lane
+# is affordable at all:
+#
+#   - libqwen-core.a needs 134 ggml/gguf symbols. llama's ggml is missing ONE,
+#     ggml_prec_set_acc -- the replacement for ggml_mul_mat_set_prec, added
+#     between the two commits.
+#   - libllama.a needs 287. qwentts's ggml is missing NONE.
+#   - The public headers differ in two files and not one struct: ggml.h gains the
+#     new prec enum and its two setters, ggml-backend.h loses one function
+#     neither library calls. No layout changed, so code compiled against either
+#     header runs against either implementation.
+#
+# So the newer one supersets the older, and the qwentts SDK's ggml is the one
+# that goes in whenever that lane is on. It is built from the same -march flags
+# by the same script, so nothing is given up for it.
+#
+# If that stops being true, it will surface here as a missing symbol at link
+# time rather than as a crash, because C symbols are strong: a genuine collision
+# is a duplicate-definition error, not a silent wrong-layout read.
+#
+# On HarmonyOS nobody sets these variables by hand: `harmony/build.cmd <abi>
+# llama` and `... qtts` assemble the SDKs under harmony/prebuilt/ and the app's
+# CMakeLists finds them there. Building an SDK IS turning its lane on.
 
-# Resolves the ggml archives out of LLAMA_CPP_DIR into BODYCLOCK_GGML_LIBS, and
-# fails with the reason rather than with a link error two minutes later.
-# `_why` names the option that asked, so the message says which switch to look at.
+# Resolves the ggml archives into BODYCLOCK_GGML_LIBS, and fails with the reason
+# rather than with a link error two minutes later. `_why` names the option that
+# asked, so the message says which switch to look at.
 macro(bodyclock_require_ggml _why)
-    if(NOT DEFINED LLAMA_CPP_DIR)
+    # Which SDK's copy, per the paragraph above. The qtts one wins when that
+    # lane is on, and it can stand alone: src/voice/qtts.cpp includes qwen.h and
+    # no ggml header, so a build with only that lane needs no llama SDK.
+    if(BODYCLOCK_QTTS AND DEFINED QTTS_DIR)
+        set(_ggml_dir "${QTTS_DIR}/lib")
+    elseif(DEFINED LLAMA_CPP_DIR)
+        set(_ggml_dir "${LLAMA_CPP_DIR}/lib")
+    else()
         message(FATAL_ERROR
             "${_why}=ON requires -DLLAMA_CPP_DIR=<llama.cpp SDK dir (include/, lib/)>")
     endif()
-    if(NOT EXISTS "${LLAMA_CPP_DIR}/include/ggml.h")
+
+    # The headers, which only the lanes that call ggml directly need -- the LLM
+    # through llama.h, recognition through ggml.h. Checked whenever the llama SDK
+    # is the one in play so a half-assembled SDK fails here and not at compile.
+    if(DEFINED LLAMA_CPP_DIR AND NOT EXISTS "${LLAMA_CPP_DIR}/include/ggml.h")
         message(FATAL_ERROR "ggml.h not found under ${LLAMA_CPP_DIR}/include.")
     endif()
 
-    # find_library caches, so without clearing it a changed LLAMA_CPP_DIR
-    # (switching target ABI) would silently keep linking the previously found libs.
-    foreach(_v GGML_LIB GGML_CPU_LIB GGML_BASE_LIB)
+    # find_library caches, so without clearing it a changed directory (switching
+    # target ABI, or the qtts lane appearing) would silently keep linking the
+    # previously found libs.
+    foreach(_v GGML_LIB GGML_CPU_LIB GGML_BASE_LIB GGML_VULKAN_LIB)
         unset(${_v} CACHE)
     endforeach()
 
     # NO_CMAKE_FIND_ROOT_PATH is required for the cross build: the OHOS toolchain
     # sets CMAKE_FIND_ROOT_PATH_MODE_LIBRARY to ONLY, which re-roots PATHS under
     # the sysroot and makes an absolute SDK dir unfindable.
-    set(_ggml_find PATHS "${LLAMA_CPP_DIR}/lib" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
-    find_library(GGML_LIB      NAMES ggml      ${_ggml_find})
-    find_library(GGML_CPU_LIB  NAMES ggml-cpu  ${_ggml_find})
-    find_library(GGML_BASE_LIB NAMES ggml-base ${_ggml_find})
+    set(_ggml_find PATHS "${_ggml_dir}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+    find_library(GGML_LIB        NAMES ggml        ${_ggml_find})
+    find_library(GGML_CPU_LIB    NAMES ggml-cpu    ${_ggml_find})
+    find_library(GGML_BASE_LIB   NAMES ggml-base   ${_ggml_find})
+    # Optional, and present only when the SDK was built with `vulkan`. Found by
+    # name like the others rather than inferred from a switch, so the archive
+    # that exists is the one that gets linked -- the SDK's contents are the
+    # record of how it was built.
+    find_library(GGML_VULKAN_LIB NAMES ggml-vulkan ${_ggml_find})
 
     # A shared llama build puts all of ggml inside libllama, so finding none of
     # these is only an error when nothing else supplies them.
+    #
+    # ggml-vulkan goes FIRST: it references the rest of ggml and, with static
+    # archives, the linker resolves left to right.
     set(BODYCLOCK_GGML_LIBS "")
-    foreach(_lib GGML_LIB GGML_CPU_LIB GGML_BASE_LIB)
+    foreach(_lib GGML_VULKAN_LIB GGML_LIB GGML_CPU_LIB GGML_BASE_LIB)
         if(${_lib})
             list(APPEND BODYCLOCK_GGML_LIBS "${${_lib}}")
         endif()
     endforeach()
+
+    # The loader, which is the phone's and not the SDK's. Only when the backend
+    # is actually in, so a CPU-only build does not pull a graphics dependency
+    # into a library that has no use for one.
+    if(GGML_VULKAN_LIB)
+        list(APPEND BODYCLOCK_GGML_LIBS vulkan)
+        # So src/voice/qtts.cpp can set the backend's environment before the
+        # engine initialises it. There is no runtime way to ask ggml whether the
+        # Vulkan backend was compiled in early enough to matter.
+        target_compile_definitions(bodyclock_core PRIVATE BODYCLOCK_QTTS_VULKAN)
+        message(STATUS "bodyclock_core: ggml Vulkan backend ON -> ${GGML_VULKAN_LIB}")
+    endif()
 endmacro()
+
+#-------------------------------------------------------------------------------
+# Speech output (qwentts.cpp + Qwen3-TTS VoiceDesign)
+#-------------------------------------------------------------------------------
+
+# A third engine, and the cheapest of the three: one static archive on top of the
+# ggml already here, against MNN's whole inference framework. It speaks text the
+# LLM lane produced, in a voice described in English rather than cloned, and it
+# measured 1.16x against omni's 3.0x for the same job on a desktop. See
+# src/voice/qtts.hpp for what the description buys and design/voice.md for the
+# five checkpoints that were tried before this one.
+#
+# **Declared BEFORE the LLM lane on purpose**, and the reason is the link line
+# rather than taste. Static archives resolve left to right, so libqwen-core.a has
+# to appear ahead of the ggml archives that satisfy it; putting this section
+# after the llama one would append it behind them and every ggml symbol it needs
+# would come back undefined.
+#
+# OFF by default like the others. QTTS_DIR points at an SDK dir shaped like the
+# llama one: include/ + lib/. harmony/build.cmd qtts assembles it at
+# harmony/prebuilt/qtts-sdk/<abi>.
+option(BODYCLOCK_QTTS "Build speech output (qwentts.cpp + Qwen3-TTS)" OFF)
+
+if(BODYCLOCK_QTTS)
+    if(NOT DEFINED QTTS_DIR)
+        message(FATAL_ERROR
+            "BODYCLOCK_QTTS=ON requires -DQTTS_DIR=<qwentts SDK dir (include/, lib/)>")
+    endif()
+    if(NOT EXISTS "${QTTS_DIR}/include/qwen.h")
+        message(FATAL_ERROR "qwen.h not found under ${QTTS_DIR}/include.")
+    endif()
+
+    unset(QWEN_CORE_LIB CACHE)
+    find_library(QWEN_CORE_LIB NAMES qwen-core
+        PATHS "${QTTS_DIR}/lib" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+    if(NOT QWEN_CORE_LIB)
+        message(FATAL_ERROR "no qwen-core library under ${QTTS_DIR}/lib.")
+    endif()
+
+    # The ggml that goes with it -- resolved here rather than left to whichever
+    # lane happens to ask first, because this lane is the one that decides which
+    # copy wins and the decision has to be made before anything links.
+    bodyclock_require_ggml(BODYCLOCK_QTTS)
+
+    target_compile_definitions(bodyclock_core PRIVATE BODYCLOCK_QTTS)
+    target_include_directories(bodyclock_core PRIVATE "${QTTS_DIR}/include")
+    target_link_libraries(bodyclock_core PUBLIC "${QWEN_CORE_LIB}")
+
+    message(STATUS "bodyclock_core: speech output ON -> ${QWEN_CORE_LIB}")
+endif()
 
 #-------------------------------------------------------------------------------
 # On-device LLM (llama.cpp + GGUF)
@@ -333,10 +441,10 @@ if(BODYCLOCK_ONDEVICE_LLM)
     target_compile_definitions(bodyclock_core PUBLIC BODYCLOCK_ONDEVICE_LLM)
     target_include_directories(bodyclock_core PRIVATE "${LLAMA_CPP_DIR}/include")
 
-    # llama first: with static archives the linker resolves left to right, and
-    # llama references ggml, not the other way round.
+    # llama only. ggml goes on the end of the link line for every lane at once,
+    # below -- with static archives the linker resolves left to right, and llama
+    # references ggml, not the other way round.
     target_link_libraries(bodyclock_core PUBLIC "${LLAMA_LIB}")
-    target_link_libraries(bodyclock_core PUBLIC ${BODYCLOCK_GGML_LIBS})
 
     message(STATUS "bodyclock_core: on-device LLM ON -> ${LLAMA_LIB}")
 endif()
@@ -365,9 +473,20 @@ if(BODYCLOCK_ASR)
     # runtime, so the same declarations link either way.
     target_compile_definitions(bodyclock_core PRIVATE BODYCLOCK_ASR)
     target_include_directories(bodyclock_core PRIVATE "${LLAMA_CPP_DIR}/include")
-    target_link_libraries(bodyclock_core PUBLIC ${BODYCLOCK_GGML_LIBS})
 
     message(STATUS "bodyclock_core: speech recognition ON -> ${LLAMA_CPP_DIR}")
+endif()
+
+# ggml LAST, and once for all three lanes.
+#
+# Static archives resolve left to right, so every archive that references ggml --
+# libqwen-core.a, libllama.a and our own sensevoice objects -- has to be ahead of
+# it on the line. Each lane used to append this itself, which worked only because
+# the two lanes that did were adjacent; a third one declared earlier would have
+# pulled ggml up in front of llama and left llama's every ggml symbol undefined.
+# One line here cannot get that wrong.
+if(BODYCLOCK_GGML_LIBS)
+    target_link_libraries(bodyclock_core PUBLIC ${BODYCLOCK_GGML_LIBS})
 endif()
 
 #-------------------------------------------------------------------------------

@@ -502,6 +502,212 @@ const char* bodyclock_omni_ask(const short* pcm,
                           void* user_data);
 
 //------------------------------------------------------------------------------
+// Speech output (qwentts.cpp + Qwen3-TTS VoiceDesign)
+//------------------------------------------------------------------------------
+//
+// The THIRD engine, and it exists because the second one's answer was no. The
+// omni lane above buys a natural voice at about 3x slower than real time even
+// with the diffusion sampler at its coarsest, and that cost is paid on top of
+// thinking. This lane speaks text something else produced -- llama.cpp's, at
+// 14 tok/s -- and measured 1.16x on a desktop for the same sentences.
+//
+// **The voice is written, not cloned.** bodyclock_tts_set_voice takes an English
+// description and the same description yields the same speaker across different
+// passages. Five other ways of getting a fixed voice out of this model family
+// were tried first and design/voice.md records why each failed; the short form
+// is that the cloning checkpoint either changed speaker between texts or held
+// the speaker and flattened the prosody.
+//
+// Two GGUF files: the 1.7B VoiceDesign pair is 1.4 GB at Q4_K_M, the 0.6B
+// CustomVoice pair 0.8 GB and about a tenth faster. CustomVoice keeps a written
+// delivery -- see bodyclock_tts_set_speaker.
+//
+// **On the phone it has TWO speeds: 2.14x for the first twenty to thirty
+// seconds of continuous generation, then 3.52x (1.94x and 3.30x on the 0.6B).**
+// The step is a clock step, it comes sooner when the device is already warm, and
+// model size does not move it. Anything measured on a short utterance is a
+// sprint figure; a 30-second passage takes 60 to 97 seconds, and that is the
+// case this lane is actually for.
+//
+// Of the fast regime, 1.45x is there with a talker costing nothing: the codec
+// alone is 0.92x -- 73.5 ms per 80 ms frame, unmoved by buffering instead of
+// streaming, by its own quantization, or by a talker a third the size -- and the
+// code predictor is sized by the codebook count rather than by the LM. The
+// talker does respond to its own quantization (22% from Q8 to Q4); the thread
+// count responds to nothing. So this lane is for PREPARED PLAYBACK: generate
+// while nobody is waiting, play later. Conversation has its answer already, and
+// it is the platform voice.
+//
+// Threading and cost: everything here BLOCKS.
+
+// Whether this build has the engine compiled in: 1 if yes, 0 if it was built
+// without qwentts.cpp. When 0 everything below still links and answers
+// truthfully.
+int bodyclock_tts_available(void);
+
+// Read the two models. BLOCKS.
+//
+// `talker_path` is the LM and code predictor, `codec_path` the 12 Hz audio
+// tokenizer. Two files rather than a directory, which is the difference from the
+// omni lane -- these are GGUF and self-describing, so nothing has to resolve
+// siblings relative to a config.
+//
+// Returns 0 when both are resident. On failure the reason is in
+// bodyclock_tts_last_error(), and it is worth showing: the commonest one is a
+// talker of the wrong kind, which is a file name mistake and not a broken model.
+int bodyclock_tts_load(const char* talker_path, const char* codec_path);
+
+int bodyclock_tts_loaded(void);
+
+// Drop the weights.
+void bodyclock_tts_unload(void);
+
+// What the loaded talker is: "voice_design", "base" or "custom_voice", or ""
+// with nothing loaded. Owned by the core.
+//
+// Worth surfacing because the three take DIFFERENT parameters -- a voice
+// description is required by one and refused by another -- so a host that lets
+// someone pick a file has to be able to say which one they picked.
+const char* bodyclock_tts_model_type(void);
+
+// The named speakers a custom_voice checkpoint carries, as a JSON array of
+// strings -- `[]` for the other two kinds and before a load. Owned by the core
+// and valid until this thread's next call.
+//
+// Read from the model rather than hard-coded. "Nine named speakers" is
+// something this repo took from a model card and never checked, and a list that
+// came out of the file cannot be stale.
+const char* bodyclock_tts_speakers(void);
+
+// Which of them speaks. Takes effect on the next say().
+//
+// **Only legal on a custom_voice checkpoint**, and the core sends it only
+// there, so a name left over from an earlier model cannot break a VoiceDesign
+// run. "" asks the engine for its own default, which on this checkpoint is a
+// speaker rather than silence.
+void bodyclock_tts_set_speaker(const char* name);
+
+// The voice, described in English: "breathy, unhurried but not slow".
+//
+// A real control surface rather than a preset list. Written `gentle, speaks
+// slowly` the result was audibly listless -- the words land. Pace, energy,
+// microphone distance and breath are all writable.
+//
+// Required by voice_design, OPTIONAL on custom_voice -- where it combines with
+// the speaker, who fixes identity while this describes delivery -- and refused
+// outright by base.
+//
+// Takes effect on the next say(); the weights stay resident, so a sweep compares
+// descriptions rather than page caches.
+void bodyclock_tts_set_voice(const char* instruct);
+
+// Sampling. -1 draws a fresh seed per call.
+//
+// Safe to expose here where on the cloning checkpoint it would have been a trap:
+// there the seed WAS the speaker, and two seeds gave a man and a woman reading
+// the same sentence. The description pins the identity, so this only varies the
+// delivery.
+void bodyclock_tts_set_seed(long long seed);
+
+// <= 0 leaves the engine's own default (50) alone.
+void bodyclock_tts_set_top_k(int top_k);
+
+// A recording to sound like, and what is said in it. For a `base` checkpoint,
+// which is the cloning one and takes neither a description nor a named speaker.
+//
+// Returns 0 when the reference is held. **The WAV must be mono, 16-bit, exactly
+// 24000 Hz**, and one that is not is refused rather than converted -- the same
+// rule bodyclock_voice_analyze states at 16 kHz, for the same reason. On failure
+// the reason is in bodyclock_tts_last_error().
+//
+// The transcript is what makes this IN-CONTEXT cloning rather than a
+// speaker-embedding copy, and design/voice.md records why that distinction
+// decides the result: pinning a voice through the speaker encoder held the
+// identity and flattened the prosody; carrying the audio and its text in
+// context held both.
+//
+// **It is not free.** The whole reference stays in the talker's context for
+// every frame, so a 22-second clip adds 280 frames of attention to each step.
+// On the desktop that measured 70% dearer than a described voice. A shorter
+// reference is cheaper and has not been tried.
+//
+// Pass NULL or "" for both to drop it.
+int bodyclock_tts_set_reference(const char* wav_path, const char* transcript);
+
+// Seconds of reference currently held; 0 when none.
+float bodyclock_tts_reference_seconds(void);
+
+// Whether audio is emitted as it is generated. Non-zero (the default) streams
+// it; 0 decodes the whole utterance in one pass and hands it over once.
+//
+// **Measured, and streaming costs nothing.** It moves the first audio from the
+// end of the run to about a second, and seven alternating runs on a pinned seed
+// put buffered's best codec pass at 3073 ms against streaming's 3013 -- no
+// faster, despite streaming re-decoding the codec's left context per chunk.
+//
+// The switch stays because that measurement found something else: the codec
+// stage varies by +-14% on identical input, where the two autoregressive stages
+// hold +-2.5%. Any future claim about that stage has to hold this fixed first.
+//
+// **Pin the seed before comparing anything here**, or the model generates a
+// different number of frames each time and only the per-frame rates survive.
+void bodyclock_tts_set_streaming(int on);
+
+// Worker threads for the NEXT bodyclock_tts_load(). <= 0 restores the engine's
+// own choice.
+//
+// **Swept on the phone, and the count is not a lever**: four, six and eight sit
+// within about 2% of each other, which is inside the ~9% a five-run sweep drifts
+// from heat, and only two threads is clearly worse (12%). The engine's own
+// choice of six costs nothing. It was added expecting the opposite.
+//
+// **Unlike bodyclock_local_set_threads, this one needs a reload**, because
+// qwen.h has no thread parameter and the count is consumed once inside qt_init.
+// After the first load that is about a second from page cache, and what is being
+// compared is generation, which the reload does not touch.
+void bodyclock_tts_set_threads(int threads);
+
+// Streaming callback for the generated voice. `pcm` is mono float at 24000 Hz,
+// the same rate the omni lane produces and not the 16 kHz of the input side.
+//
+// Return non-zero to keep going, 0 to abort. **`last` arrives on a call of its
+// own with `n_samples` 0**, which differs from the omni handler: the engine's
+// chunk callback carries no end marker, and giving it one would have meant
+// holding each chunk back until the next proved it was not the last, delaying
+// the first chunk. The first chunk arriving early is what the streaming path is
+// for.
+typedef int (*bodyclock_tts_audio_handler)(const float* pcm,
+                                      int n_samples,
+                                      int last,
+                                      void* user_data);
+
+// Speak `text`. BLOCKS until the whole utterance is generated.
+//
+// `on_audio` NULL generates and discards, which is a measurement mode rather
+// than an oversight -- the difference between the two is the cost of the
+// handover, not of the engine, and nothing here keeps a copy of the audio.
+//
+// Returns a JSON object, owned by the core and valid until this thread's next
+// call, or NULL on failure (see bodyclock_tts_last_error()):
+//
+//   speechSeconds       seconds of audio produced.
+//   seconds             seconds of computation.
+//   realtime            the ratio, and the reason this lane exists. Above 1 it
+//                       cannot talk as fast as it speaks. 1.16 on a desktop.
+//   firstAudioSeconds   the wait before the first PCM arrives. 0 when buffered,
+//                       where nothing arrived early at all.
+//   chunks              handovers. 1 means nothing streamed.
+//   streamed            which path this run took, which is not the same as what
+//                       bodyclock_tts_set_streaming asked for: with no handler
+//                       there is nobody to stream to.
+const char* bodyclock_tts_say(const char* text,
+                         bodyclock_tts_audio_handler on_audio,
+                         void* user_data);
+
+// Why the last load or say failed. "" after a success. Owned by the core.
+const char* bodyclock_tts_last_error(void);
+
+//------------------------------------------------------------------------------
 // Model bundles
 //------------------------------------------------------------------------------
 //

@@ -1,0 +1,45 @@
+A knob for the CPU thread count, so it can be measured instead of assumed.
+
+qwentts.cpp fixes the count at hardware_concurrency() / 2 and exposes no
+parameter. The reasoning is an SMT desktop: GEMM shares SIMD units between
+hyperthreads, so one thread per physical core is best.
+
+The target device is a big.LITTLE phone. There is no second thread per core to
+halve away, and the cores left in are not equal. The runtime reports twelve
+logical CPUs there, so the heuristic picks six; the llama lane on the same
+device measured both prefill and decode flat from four threads up, which is
+what running out of fast cores looks like.
+
+That argument turned out to predict a difference that is not there. Swept on the
+phone, four, six and eight land within about 2% of each other, inside the drift
+five consecutive runs accumulate from heat, and only two threads is clearly
+worse. Upstream's choice costs nothing here. The patch stays because the next
+device is not this one, and because the alternative is trusting the argument
+again.
+
+QWEN_N_THREADS, read at qt_init only, because that is where the count is
+consumed -- backend_init calls this once and hands the value to
+ggml_backend_set_n_threads on a backend that then lives for the handle. A sweep
+therefore reloads, unlike the llama one. Unset or unparseable leaves upstream's
+heuristic exactly as it was.
+
+--- a/src/backend.h
++++ b/src/backend.h
+@@ -26,7 +26,17 @@
+ // Physical core count heuristic (logical / 2 for HT/SMT).
+ // Used for GGML CPU thread count: GEMM shares SIMD units across hyperthreads,
+ // so one thread per physical core is optimal.
++//
++// QWEN_N_THREADS overrides it. The heuristic assumes SMT, which a phone does
++// not have; see harmony/patches/ in the bodyclock repo for the measurement that
++// asked for this.
+ static int backend_cpu_n_threads(void) {
++    if (const char * env = std::getenv("QWEN_N_THREADS")) {
++        const int forced = std::atoi(env);
++        if (forced > 0) {
++            return forced;
++        }
++    }
+     int n = (int) std::thread::hardware_concurrency() / 2;
+     return n > 0 ? n : 1;
+ }

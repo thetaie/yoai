@@ -60,6 +60,8 @@ set "ABI="
 set "DO_DEPS="
 set "DO_LLAMA="
 set "DO_MNN="
+set "DO_QTTS="
+set "QTTS_VULKAN="
 set "DO_HAP="
 set "ARCH="
 set "ARCH_SET="
@@ -71,6 +73,10 @@ set "TOK=%~1"
 if /I "!TOK!"=="deps"     ( set "DO_DEPS=1"  & goto args_next )
 if /I "!TOK!"=="llama"    ( set "DO_LLAMA=1" & goto args_next )
 if /I "!TOK!"=="mnn"      ( set "DO_MNN=1"   & goto args_next )
+if /I "!TOK!"=="qtts"     ( set "DO_QTTS=1"  & goto args_next )
+rem `vulkan` only modifies qtts -- it is not a target of its own, and it implies
+rem one, so `build.cmd <abi> vulkan` does the useful thing rather than nothing.
+if /I "!TOK!"=="vulkan"   ( set "DO_QTTS=1"  & set "QTTS_VULKAN=1" & goto args_next )
 if /I "!TOK!"=="hap"      ( set "DO_HAP=1"   & goto args_next )
 if /I "!TOK!"=="all"      ( set "DO_DEPS=1"  & set "DO_LLAMA=1" & set "DO_HAP=1" & goto args_next )
 if /I "!TOK!"=="clean"    ( set "CLEAN=1"    & goto args_next )
@@ -207,6 +213,7 @@ echo [build] sdk=!OHOS_SDK_ROOT!
 if defined DO_DEPS  echo [build] target: deps  ^(vcpkg -^> prebuilt\%ABI%^)
 if defined DO_LLAMA echo [build] target: llama ^(llama.cpp -^> prebuilt\llama-sdk\%ABI%^)
 if defined DO_MNN   echo [build] target: mnn   ^(MNN -^> prebuilt\mnn-sdk\%ABI%^)
+if defined DO_QTTS  echo [build] target: qtts  ^(qwentts.cpp -^> prebuilt\qtts-sdk\%ABI%^)
 if defined DO_HAP   echo [build] target: hap   ^(hvigor -^> entry\build\default\outputs^)
 echo.
 
@@ -220,6 +227,10 @@ if defined DO_LLAMA (
 )
 if defined DO_MNN (
     call :mnn
+    if errorlevel 1 exit /b 1
+)
+if defined DO_QTTS (
+    call :qtts
     if errorlevel 1 exit /b 1
 )
 
@@ -671,6 +682,217 @@ copy /y "!MBUILD!\libMNN.a" "!MSDK!\lib\" >nul
 if errorlevel 1 exit /b 1
 
 echo [mnn] SDK at !MSDK!
+exit /b 0
+
+rem ===========================================================================
+rem qwentts.cpp: Qwen3-TTS, for the model's own voice reading text.
+rem
+rem A THIRD engine, and the bar for that is high -- design/voice.md has the
+rem arithmetic. What it buys that neither llama.cpp nor MNN can: a voice that
+rem holds across utterances AND keeps its prosody. llama.cpp runs the same
+rem checkpoint, but its only reference path pools the speaker into a fixed
+rem vector (attentive statistics pooling, [1536,T] -> [3072,1]) and the
+rem time-varying part goes with it; MNN's Talker cannot be driven from text at
+rem all. Measured on a desktop: VoiceDesign 1.16x real time, in-context cloning
+rem 1.97x, against 3.0x for MNN's omni Talker.
+rem
+rem Narrow, unlike MNN: one purpose, ggml underneath, a C ABI in src/qwen.h
+rem (qt_init / qt_synthesize / qt_free) and an upstream termux script, so it is
+rem built for a phone by people other than us.
+rem
+rem STATIC, like the other two lanes -- qwen-core is a static library by default
+rem and QWEN_SHARED stays off. A HAP has nowhere to put a companion .so.
+rem
+rem Output: prebuilt\qtts-sdk\<abi>\{include,lib}, shaped like the llama and MNN
+rem SDKs so the app's CMakeLists finds it the same way.
+rem ===========================================================================
+:qtts
+if not defined QTTS_SRC for %%I in ("%~dp0..\..") do set "QTTS_SRC=%%~fI\qwentts.cpp"
+if not exist "!QTTS_SRC!\CMakeLists.txt" (
+    echo no qwentts.cpp at "!QTTS_SRC!".>&2
+    echo clone it, or set QTTS_SRC to an existing checkout:>&2
+    echo   git clone --depth 1 --recursive https://github.com/ServeurpersoCom/qwentts.cpp "!QTTS_SRC!">&2
+    exit /b 1
+)
+if not exist "!QTTS_SRC!\ggml\CMakeLists.txt" (
+    echo qwentts.cpp at "!QTTS_SRC!" has no ggml submodule.>&2
+    echo   git -C "!QTTS_SRC!" submodule update --init --recursive>&2
+    exit /b 1
+)
+echo [qtts] src=!QTTS_SRC!
+
+rem Two patches, applied to somebody else's checkout. patches\ carries the full
+rem reasoning for each; in one line:
+rem
+rem   ggml-cpu.c   OHOS is the only platform taking the one __linux__ branch, and
+rem                it calls functions the sysroot neither declares nor exports.
+rem   backend.h    the CPU thread count is fixed at hardware_concurrency()/2 with
+rem                no parameter, and that heuristic is about SMT, not phones.
+rem
+rem Applied here rather than committed there because the checkout is upstream's
+rem and gets updated. :qpatch is idempotent -- see the note on it below.
+call :qpatch "!QTTS_SRC!\ggml" qwentts-ggml-ohos-affinity.patch   || exit /b 1
+call :qpatch "!QTTS_SRC!"      qwentts-thread-count-override.patch || exit /b 1
+
+set "NATIVE=!OHOS_SDK_ROOT!\native"
+set "TOOLCHAIN=!NATIVE!\build\cmake\ohos.toolchain.cmake"
+set "CMAKE=!NATIVE!\build-tools\cmake\bin\cmake.exe"
+set "NINJA=!NATIVE!\build-tools\cmake\bin\ninja.exe"
+if not exist "!CMAKE!" for %%P in (cmake.exe) do set "CMAKE=%%~$PATH:P"
+if not exist "!NINJA!" for %%P in (ninja.exe) do set "NINJA=%%~$PATH:P"
+if not exist "!CMAKE!" (
+    echo need cmake ^(the SDK's build-tools\cmake\bin, or on PATH^)>&2
+    exit /b 1
+)
+if not exist "!NINJA!" (
+    echo need ninja ^(the SDK's build-tools\cmake\bin, or on PATH^)>&2
+    exit /b 1
+)
+
+set "QBUILD=%~dp0.qtts-build\%ABI%"
+set "QSDK=%~dp0prebuilt\qtts-sdk\%ABI%"
+
+if defined CLEAN (
+    echo [qtts] cleaning
+    if exist "!QBUILD!" rmdir /s /q "!QBUILD!"
+    if exist "!QSDK!"   rmdir /s /q "!QSDK!"
+)
+
+rem The tools are the reason LLAMA-style flags are not enough here: qwen-tts,
+rem qwen-codec and tts-server all build by default and all want a main(), which
+rem a cross build has no use for. Only qwen-core is asked for by name below.
+rem
+rem GGML_NATIVE=OFF because -march=native is meaningless cross-compiling and the
+rem probe runs on the host. The feature set comes from the same flags the llama
+rem lane uses, for the same reason: CMake's feature tests compile AND RUN, which
+rem cannot work for the phone, so every one of them "fails" and ggml silently
+rem drops dotprod, i8mm and fp16 on a device that has all three.
+set "QCFG=-S "!QTTS_SRC!" -B "!QBUILD!" -G Ninja"
+set "QCFG=!QCFG! -DCMAKE_TOOLCHAIN_FILE="!TOOLCHAIN!""
+set "QCFG=!QCFG! -DOHOS_ARCH=%ABI%"
+set "QCFG=!QCFG! -DCMAKE_MAKE_PROGRAM="!NINJA!""
+set "QCFG=!QCFG! -DCMAKE_BUILD_TYPE=Release"
+set "QCFG=!QCFG! -DBUILD_SHARED_LIBS=OFF"
+set "QCFG=!QCFG! -DQWEN_SHARED=OFF"
+set "QCFG=!QCFG! -DGGML_NATIVE=OFF"
+set "QCFG=!QCFG! -DGGML_OPENMP=OFF"
+rem No -D_GNU_SOURCE here, though an earlier version of this file added it. The
+rem first error was cpu_set_t and CPU_ZERO undeclared, which _GNU_SOURCE does
+rem fix -- musl has them, and the OHOS toolchain's -D_XOPEN_SOURCE=600 hides
+rem them. But the next error was pthread_setaffinity_np, which _GNU_SOURCE
+rem cannot fix because musl does not have it at all. The flag was treating a
+rem symptom of taking a branch that was never meant for this platform.
+rem The patch above removes the branch, and with it the need for the flag.
+rem
+rem The same feature set the llama lane uses, and set the same way -- these two
+rem are the same ggml compiled twice, so a difference here would be an accident
+rem rather than a decision. `arch=` / `baseline` steer both.
+if not defined ARCH_SET set "ARCH=armv8.6-a+i8mm+bf16+dotprod+fp16"
+if /I "%ABI%"=="arm64-v8a" if defined ARCH set "QCFG=!QCFG! -DGGML_CPU_ARM_ARCH=!ARCH!"
+
+rem The GPU, off unless asked for. It needs a Vulkan SDK on the HOST as well as
+rem the driver on the phone, and four of the five flags below exist because the
+rem two halves come from different places:
+rem
+rem   glslc, SPIRV-Headers   host only. 151 compute shaders are compiled at
+rem                          build time by a vulkan-shaders-gen that ggml builds
+rem                          for the host and then runs -- a host build nested
+rem                          inside a cross build.
+rem   Vulkan_INCLUDE_DIR     host, and this is the one that is NOT obvious. The
+rem                          OHOS sysroot ships the C headers and ggml-vulkan
+rem                          includes <vulkan/vulkan.hpp>, the C++ bindings,
+rem                          which are not there. Compiling against the host
+rem                          SDK's headers and linking the phone's loader is
+rem                          fine: the loader ABI is stable and ggml queries
+rem                          every extension at runtime anyway.
+rem   Vulkan_LIBRARY         the phone's, from the sysroot.
+rem
+rem FIND_ROOT_PATH_MODE_PACKAGE=BOTH because the OHOS toolchain re-roots package
+rem searches into the sysroot, so ggml's own `list(APPEND CMAKE_PREFIX_PATH
+rem $ENV{VULKAN_SDK})` is ignored and SPIRV-Headers is never found.
+rem
+rem ninja on PATH because the nested host configure inherits the generator but
+rem not CMAKE_MAKE_PROGRAM, and fails with "unable to find a build program
+rem corresponding to Ninja" -- which reads like a missing tool rather than an
+rem unpropagated variable.
+if defined QTTS_VULKAN (
+    if not defined VULKAN_SDK (
+        echo [qtts] vulkan needs a Vulkan SDK on this machine ^(VULKAN_SDK is unset^).>&2
+        exit /b 1
+    )
+    set "QVK=!VULKAN_SDK:\=/!"
+    set "QSYSROOT=!NATIVE:\=/!/sysroot"
+    set "QCFG=!QCFG! -DGGML_VULKAN=ON"
+    set "QCFG=!QCFG! -DVulkan_GLSLC_EXECUTABLE=!QVK!/Bin/glslc.exe"
+    set "QCFG=!QCFG! -DVulkan_INCLUDE_DIR=!QVK!/Include"
+    set "QCFG=!QCFG! -DVulkan_LIBRARY=!QSYSROOT!/usr/lib/aarch64-linux-ohos/libvulkan.so"
+    set "QCFG=!QCFG! -DSPIRV-Headers_DIR=!QVK!/Lib/cmake/SPIRV-Headers"
+    set "QCFG=!QCFG! -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH"
+    for %%D in ("!NINJA!") do set "PATH=%%~dpD;!PATH!"
+    echo [qtts] vulkan backend ON, SDK !VULKAN_SDK!
+)
+
+echo [qtts] configuring
+"!CMAKE!" !QCFG!
+if errorlevel 1 exit /b 1
+
+echo [qtts] building qwen-core
+"!CMAKE!" --build "!QBUILD!" --target qwen-core
+if errorlevel 1 exit /b 1
+
+echo [qtts] assembling !QSDK!
+if not exist "!QSDK!\include" mkdir "!QSDK!\include"
+if not exist "!QSDK!\lib"     mkdir "!QSDK!\lib"
+
+rem Only the C ABI header. Everything else under src\ is the implementation and
+rem including any of it would tie this repo to qwentts.cpp's internals.
+copy /y "!QTTS_SRC!\src\qwen.h" "!QSDK!\include\" >nul
+if errorlevel 1 exit /b 1
+
+rem Every .a the build produced: qwen-core plus ggml's, which are separate
+rem archives (ggml-base, ggml-cpu, ggml). Collected by search rather than by
+rem name because ggml splits them differently between versions, and a missing
+rem one surfaces as an undefined symbol at the app's link step instead of here.
+set "QLIBS=0"
+for /R "%QBUILD%" %%F in (*.a) do (
+    copy /y "%%~fF" "!QSDK!\lib\" >nul
+    set /a QLIBS+=1
+)
+if !QLIBS! LSS 2 (
+    echo [qtts] only !QLIBS! archive^(s^) under !QBUILD! -- expected qwen-core plus ggml's>&2
+    exit /b 1
+)
+echo [qtts] SDK at !QSDK! ^(!QLIBS! archives^)
+exit /b 0
+
+rem Apply one patch from patches\ to a checkout, at most once.
+rem
+rem   %1  the git work tree to apply in (the repo, or one of its submodules)
+rem   %2  the file name under harmony\patches\
+rem
+rem `--reverse --check` is the idempotence test, and it is a better one than a
+rem marker file: it succeeds only when the change is ALREADY present, so a
+rem re-run is a no-op, a checkout that moved under the patch fails loudly, and a
+rem file somebody edited by hand is detected rather than patched twice.
+:qpatch
+set "QP_TREE=%~1"
+set "QP_FILE=%~dp0patches\%~2"
+if not exist "!QP_FILE!" (
+    echo [qtts] no patch at "!QP_FILE!".>&2
+    exit /b 1
+)
+git -C "!QP_TREE!" apply --reverse --check "!QP_FILE!" >nul 2>&1
+if not errorlevel 1 (
+    echo [qtts] already patched: %~2
+    exit /b 0
+)
+echo [qtts] patching: %~2
+git -C "!QP_TREE!" apply "!QP_FILE!"
+if errorlevel 1 (
+    echo [qtts] could not apply "!QP_FILE!" in "!QP_TREE!".>&2
+    echo [qtts] the checkout moved under it; re-read the patch and rebase it.>&2
+    exit /b 1
+)
 exit /b 0
 
 :hap

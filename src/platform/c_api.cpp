@@ -21,6 +21,7 @@
 #include "platform/membw.hpp"
 #include "voice/omni.hpp"
 #include "voice/prosody.hpp"
+#include "voice/qtts.hpp"
 #include "voice/sensevoice.hpp"
 
 #include <chrono>
@@ -1013,6 +1014,214 @@ extern "C" const char* bodyclock_omni_ask(const short* pcm,
 
     omni_buffer().assign(buf.GetString(), buf.GetSize());
     return omni_buffer().c_str();
+}
+
+//------------------------------------------------------------------------------
+// Speech output (qwentts.cpp)
+//------------------------------------------------------------------------------
+
+namespace {
+
+// One engine for the process, guarded, for the same reasons as the two above:
+// the weights are gigabytes and one instance owns compute buffers a call writes
+// through.
+std::mutex& tts_mutex() {
+    static std::mutex m;
+    return m;
+}
+
+bodyclock::voice::Qtts& tts() {
+    static bodyclock::voice::Qtts engine;
+    return engine;
+}
+
+std::string& tts_buffer() {
+    static thread_local std::string buf;
+    return buf;
+}
+
+// NOT thread_local, unlike the JSON buffer. The error belongs to the engine,
+// which is one object behind one mutex, and a host that loads on one thread and
+// asks why on another would otherwise get an empty string.
+std::string& tts_error() {
+    static std::string buf;
+    return buf;
+}
+
+std::string& tts_model_type() {
+    static std::string buf;
+    return buf;
+}
+
+// Its own buffer rather than sharing tts_buffer(). Both entry points document
+// their result as valid until this thread's next call, and with one buffer that
+// would make asking for the speaker list quietly invalidate a reply's JSON --
+// true to the letter of the contract and a trap in practice.
+std::string& tts_speakers_buffer() {
+    static thread_local std::string buf;
+    return buf;
+}
+
+struct TtsSinkBridge {
+    bodyclock_tts_audio_handler handler;
+    void*                       user_data;
+};
+
+bool tts_sink(const float* pcm, size_t n_samples, bool last, void* user_data) {
+    TtsSinkBridge* bridge = static_cast<TtsSinkBridge*>(user_data);
+    if (!bridge || !bridge->handler) {
+        return true;
+    }
+    return bridge->handler(pcm, static_cast<int>(n_samples), last ? 1 : 0,
+                           bridge->user_data) != 0;
+}
+
+}  // namespace
+
+extern "C" int bodyclock_tts_available(void) {
+    return bodyclock::voice::Qtts::available() ? 1 : 0;
+}
+
+extern "C" int bodyclock_tts_load(const char* talker_path, const char* codec_path) {
+    if (blank(talker_path) || blank(codec_path)) {
+        bodyclock::platform::log_warn("bodyclock_tts_load: both model paths are required");
+        return 1;
+    }
+    std::lock_guard<std::mutex> guard(tts_mutex());
+    const bool ok = tts().load(talker_path, codec_path);
+    tts_error() = tts().last_error();
+    tts_model_type() = ok ? tts().model_type() : std::string();
+    return ok ? 0 : 1;
+}
+
+extern "C" int bodyclock_tts_loaded(void) {
+    std::lock_guard<std::mutex> guard(tts_mutex());
+    return tts().loaded() ? 1 : 0;
+}
+
+extern "C" void bodyclock_tts_unload(void) {
+    std::lock_guard<std::mutex> guard(tts_mutex());
+    tts().unload();
+    tts_model_type().clear();
+}
+
+extern "C" const char* bodyclock_tts_model_type(void) {
+    std::lock_guard<std::mutex> guard(tts_mutex());
+    tts_model_type() = tts().model_type();
+    return tts_model_type().c_str();
+}
+
+extern "C" void bodyclock_tts_set_voice(const char* instruct) {
+    std::lock_guard<std::mutex> guard(tts_mutex());
+    tts().set_voice(instruct ? instruct : "");
+}
+
+extern "C" const char* bodyclock_tts_speakers(void) {
+    std::lock_guard<std::mutex> guard(tts_mutex());
+    const std::vector<std::string> names = tts().speakers();
+
+    rapidjson::StringBuffer buf;
+    rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+    w.StartArray();
+    for (size_t i = 0; i < names.size(); ++i) {
+        w.String(names[i].data(), static_cast<rapidjson::SizeType>(names[i].size()));
+    }
+    w.EndArray();
+
+    tts_speakers_buffer().assign(buf.GetString(), buf.GetSize());
+    return tts_speakers_buffer().c_str();
+}
+
+extern "C" void bodyclock_tts_set_speaker(const char* name) {
+    std::lock_guard<std::mutex> guard(tts_mutex());
+    tts().set_speaker(name ? name : "");
+}
+
+extern "C" void bodyclock_tts_set_seed(long long seed) {
+    std::lock_guard<std::mutex> guard(tts_mutex());
+    tts().set_seed(seed);
+}
+
+extern "C" void bodyclock_tts_set_top_k(int top_k) {
+    std::lock_guard<std::mutex> guard(tts_mutex());
+    tts().set_top_k(top_k);
+}
+
+extern "C" int bodyclock_tts_set_reference(const char* wav_path, const char* transcript) {
+    std::lock_guard<std::mutex> guard(tts_mutex());
+    if (blank(wav_path) && blank(transcript)) {
+        tts().clear_reference();
+        tts_error().clear();
+        return 0;
+    }
+    const bool ok = tts().set_reference(wav_path ? wav_path : "",
+                                        transcript ? transcript : "");
+    tts_error() = tts().last_error();
+    return ok ? 0 : 1;
+}
+
+extern "C" float bodyclock_tts_reference_seconds(void) {
+    std::lock_guard<std::mutex> guard(tts_mutex());
+    return tts().reference_seconds();
+}
+
+extern "C" void bodyclock_tts_set_streaming(int on) {
+    std::lock_guard<std::mutex> guard(tts_mutex());
+    tts().set_streaming(on != 0);
+}
+
+extern "C" void bodyclock_tts_set_threads(int threads) {
+    std::lock_guard<std::mutex> guard(tts_mutex());
+    tts().set_threads(threads);
+}
+
+extern "C" const char* bodyclock_tts_last_error(void) {
+    std::lock_guard<std::mutex> guard(tts_mutex());
+    return tts_error().c_str();
+}
+
+extern "C" const char* bodyclock_tts_say(const char* text,
+                                    bodyclock_tts_audio_handler on_audio,
+                                    void* user_data) {
+    if (blank(text)) {
+        bodyclock::platform::log_warn("bodyclock_tts_say: text is required");
+        return nullptr;
+    }
+
+    std::lock_guard<std::mutex> guard(tts_mutex());
+
+    TtsSinkBridge bridge;
+    bridge.handler   = on_audio;
+    bridge.user_data = user_data;
+
+    bodyclock::voice::QttsResult result;
+    const bool ok = tts().say(text, on_audio ? tts_sink : 0,
+                              on_audio ? &bridge : 0, &result);
+    tts_error() = tts().last_error();
+    if (!ok) {
+        return nullptr;
+    }
+
+    rapidjson::StringBuffer buf;
+    rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+    w.StartObject();
+    w.Key("speechSeconds");     w.Double(result.speech_seconds);
+    w.Key("seconds");           w.Double(result.elapsed);
+    // The ratio the whole lane turns on: seconds of computation per second of
+    // speech. Above 1 it cannot talk in real time.
+    w.Key("realtime");
+    w.Double(result.speech_seconds > 0.0f ? result.elapsed / result.speech_seconds : 0.0);
+    w.Key("firstAudioSeconds"); w.Double(result.first_audio_seconds);
+    w.Key("chunks");            w.Int(result.chunks);
+    // Which path this run ACTUALLY took, which is not the same as what was
+    // asked for: with no handler there is nobody to stream to, so the engine
+    // runs buffered whatever the setting says. Reported rather than left to the
+    // host, which sets the switch once and then reads several results.
+    w.Key("streamed");          w.Bool(on_audio != nullptr && tts().streaming());
+    w.EndObject();
+
+    tts_buffer().assign(buf.GetString(), buf.GetSize());
+    return tts_buffer().c_str();
 }
 
 //------------------------------------------------------------------------------
