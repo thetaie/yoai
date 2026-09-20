@@ -8,6 +8,7 @@
 #ifdef BODYCLOCK_QTTS
 #include <cstdio>
 #include <cstdlib>
+#include <cmath>
 #include <cstring>
 #include <vector>
 #include <qwen.h>
@@ -215,6 +216,83 @@ void apply_vulkan_env() {
 }
 #endif
 
+// Running loudness, accumulated as the samples go past so that nothing has to
+// keep the audio. See QttsResult::level_drift_db for what it is for and what it
+// is not.
+//
+// A quarter second per window: long enough to average a syllable, short enough
+// that a four-second mean over them is built from sixteen points rather than
+// four.
+struct LevelTrace {
+    static const int kWindowSamples = 6000;   // 0.25 s at 24 kHz
+
+    double sum_squares;
+    int    in_window;
+    float  peak;
+    std::vector<float> window_db;
+
+    LevelTrace() : sum_squares(0.0), in_window(0), peak(0.0f) {}
+
+    void reset() {
+        sum_squares = 0.0;
+        in_window   = 0;
+        peak        = 0.0f;
+        window_db.clear();
+    }
+
+    void feed(const float* pcm, size_t n) {
+        for (size_t i = 0; i < n; ++i) {
+            const float v = pcm[i];
+            const float a = v < 0.0f ? -v : v;
+            if (a > peak) {
+                peak = a;
+            }
+            sum_squares += static_cast<double>(v) * static_cast<double>(v);
+            if (++in_window == kWindowSamples) {
+                const double mean = sum_squares / kWindowSamples;
+                window_db.push_back(static_cast<float>(
+                    20.0 * std::log10(std::sqrt(mean) + 1e-12)));
+                sum_squares = 0.0;
+                in_window   = 0;
+            }
+        }
+    }
+
+    float peak_dbfs() const {
+        return peak > 0.0f ? static_cast<float>(20.0 * std::log10(peak)) : 0.0f;
+    }
+
+    // The range of a four-second moving mean over the SPEECH windows.
+    //
+    // Pauses are dropped first, at 25 dB below peak. Without that the metric
+    // measures how much silence an utterance contains: a pause reads about
+    // -40 dBFS, so any phrase boundary swamps a level difference of five.
+    float drift_db() const {
+        const float floor_db = peak_dbfs() - 25.0f;
+        std::vector<float> speech;
+        for (size_t i = 0; i < window_db.size(); ++i) {
+            if (window_db[i] > floor_db) {
+                speech.push_back(window_db[i]);
+            }
+        }
+        const size_t span = 16;   // 4 s of speech windows
+        if (speech.size() < 2 * span) {
+            return 0.0f;
+        }
+        float lo = 0.0f, hi = 0.0f;
+        for (size_t i = 0; i + span <= speech.size(); ++i) {
+            float mean = 0.0f;
+            for (size_t j = 0; j < span; ++j) {
+                mean += speech[i + j];
+            }
+            mean /= static_cast<float>(span);
+            if (i == 0 || mean < lo) lo = mean;
+            if (i == 0 || mean > hi) hi = mean;
+        }
+        return hi - lo;
+    }
+};
+
 const char* status_name(qt_status rc) {
     switch (rc) {
         case QT_STATUS_OK:              return "ok";
@@ -244,6 +322,7 @@ struct Qtts::Impl {
     int         top_k;      // 0 leaves qwentts.cpp's own default alone
     int         threads;    // 0 leaves its thread heuristic alone
     bool        streaming;
+    LevelTrace  level;
 
     // Per-call streaming state. Written from the compute worker and read after
     // qt_synthesize has returned, which is the only ordering that matters --
@@ -278,6 +357,7 @@ struct Qtts::Impl {
         ++m->chunks;
         if (n_samples > 0) {
             m->produced += static_cast<unsigned long>(n_samples);
+            m->level.feed(samples, static_cast<size_t>(n_samples));
         }
         if (!m->sink) {
             return true;
@@ -491,6 +571,7 @@ bool Qtts::say(const std::string& text, QttsAudioSink sink, void* user_data, Qtt
     m->chunks      = 0;
     m->produced    = 0;
     m->aborted     = false;
+    m->level.reset();
 
     qt_tts_params p;
     qt_tts_default_params(&p);
@@ -575,6 +656,7 @@ bool Qtts::say(const std::string& text, QttsAudioSink sink, void* user_data, Qtt
     if (!stream && audio.n_samples > 0) {
         m->produced = static_cast<unsigned long>(audio.n_samples);
         m->chunks   = 1;
+        m->level.feed(audio.samples, static_cast<size_t>(audio.n_samples));
         if (sink && !sink(audio.samples, static_cast<size_t>(audio.n_samples), true, user_data)) {
             m->aborted = true;
         }
@@ -595,11 +677,15 @@ bool Qtts::say(const std::string& text, QttsAudioSink sink, void* user_data, Qtt
         out->elapsed             = elapsed;
         out->first_audio_seconds = m->first_audio;
         out->chunks              = m->chunks;
+        out->peak_dbfs           = m->level.peak_dbfs();
+        out->level_drift_db      = m->level.drift_db();
     }
-    platform::log_info("qtts: %.2f s of speech in %.2f s (%.2fx), %s, first audio %.0f ms, %d chunk(s)%s",
+    platform::log_info("qtts: %.2f s of speech in %.2f s (%.2fx), %s, first audio %.0f ms, "
+                       "%d chunk(s), peak %.1f dBFS, level drift %.1f dB%s",
                        speech, elapsed, speech > 0.0f ? elapsed / speech : 0.0,
                        stream ? "streamed" : "buffered",
                        m->first_audio * 1000.0, m->chunks,
+                       m->level.peak_dbfs(), m->level.drift_db(),
                        m->aborted ? ", aborted" : "");
     m->sink = 0;
     return true;

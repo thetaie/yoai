@@ -73,6 +73,35 @@ struct QttsResult {
 
     // Handovers to the sink. 1 means nothing streamed.
     int chunks = 0;
+
+    // Loudest sample, in dBFS. 0 when nothing was produced.
+    float peak_dbfs = 0.0f;
+
+    // **How much the delivery's LEVEL wanders over the utterance**, in dB: the
+    // range of a four-second moving mean taken over the speech windows only.
+    // 0 when the audio is too short to have two such windows.
+    //
+    // A description, not a verdict, and deliberately not a threshold. It is
+    // here because one generated take had a second half five to six decibels
+    // louder than its first, which the model can do and nothing in the API
+    // prevents -- the seed is a free draw and occasionally draws that.
+    //
+    // **The obvious statistic did not work.** The largest jump between adjacent
+    // windows was tried first and ranks the bad take in the MIDDLE of takes
+    // nobody complained about: ordinary speech steps 10 to 15 dB between
+    // half-second windows at every syllable and phrase boundary, so a defect
+    // that is a sustained offset between halves is invisible to it.
+    //
+    // This one is directionally right on the few takes that have been
+    // judged -- 2.0 dB on two that sounded fine against 3.9 on the one that did
+    // not -- and **it is not validated**: a fourth take that sounded fine scored
+    // 4.5. One labelled failure cannot set a cutoff. What would: a dozen takes
+    // across seeds, each listened to and marked, which is an afternoon and has
+    // not been done.
+    //
+    // Computed from the samples as they pass, so nothing here keeps a copy of
+    // the audio.
+    float level_drift_db = 0.0f;
 };
 
 // Generated audio, as it is generated. `pcm` is mono float at **24000 Hz** --

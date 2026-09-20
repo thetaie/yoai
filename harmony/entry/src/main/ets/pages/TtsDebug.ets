@@ -2,17 +2,17 @@
  * The third voice, and the number that decides between it and the second one.
  * Reached by typing /tts.
  *
- * Three pages now, and they are not versions of each other:
+ * Two pages now, and they are not versions of each other:
  *
  *   /asr   SenseVoice plus the prosody profile — what the app will ship.
- *   /omni  MNN plus Qwen2.5-Omni-3B, the model answering in its own voice.
  *   /tts   qwentts.cpp plus Qwen3-TTS, speaking text something ELSE produced.
  *
- * The split matters because /omni's answer was no. It measured 2.8× real time
- * with the diffusion sampler already at its coarsest, and that is paid on top of
- * thinking: 1.4 seconds of silence before a word, then speech slower than
- * speech. This lane takes the text from llama.cpp, which is measured and fast,
- * and only speaks it. On a desktop the same sentences came out at 1.16×.
+ * There was a third, /omni: one model that listened, thought and spoke, on MNN.
+ * Its code is in src/voice/attic/ and its page beside it. It did not lose on
+ * speed — measured honestly, its coarsest setting beat this lane's sustained
+ * rate — it lost on 3.8 GB against 1.4, on a second inference framework, on
+ * having to think before it could speak, and on having no way to ask for a
+ * voice at all.
  *
  * **The voice is written, not cloned.** The field below takes an English
  * description and the same description gives the same speaker across different
@@ -45,6 +45,8 @@ interface TtsJson {
   firstAudioSeconds: number;
   chunks: number;
   streamed: boolean;
+  peakDbfs: number;
+  levelDriftDb: number;
 }
 
 /** The codec's rate, which is NOT the 16 kHz of the input side. */
@@ -741,6 +743,18 @@ struct TtsDebug {
           this.fixed(this.result2().firstAudioSeconds * 1000, 0) + ' ms, in ' +
           this.result2().chunks + ' chunks'
         : 'buffered · one pass, nothing arrives before the end')
+        .fontSize(11)
+        .fontColor(this.theme.text_tertiary)
+        .width('100%')
+
+      // A description of the delivery's level, printed rather than judged.
+      // One take was heard with a second half five to six dB louder than its
+      // first; this is the statistic that came closest to seeing it, and it is
+      // not validated -- a take nobody minded scored higher than the bad one.
+      // It is here so the numbers accumulate next to the listening.
+      Text('peak ' + this.fixed(this.result2().peakDbfs, 1) + ' dBFS · level ' +
+           'wanders ' + this.fixed(this.result2().levelDriftDb, 1) + ' dB over ' +
+           'the utterance')
         .fontSize(11)
         .fontColor(this.theme.text_tertiary)
         .width('100%')

@@ -1225,6 +1225,10 @@ extern "C" const char* bodyclock_tts_say(const char* text,
     // runs buffered whatever the setting says. Reported rather than left to the
     // host, which sets the switch once and then reads several results.
     w.Key("streamed");          w.Bool(on_audio != nullptr && tts().streaming());
+    w.Key("peakDbfs");          w.Double(result.peak_dbfs);
+    // A description of the delivery's level, with no threshold attached -- see
+    // QttsResult::level_drift_db for why there is not one yet.
+    w.Key("levelDriftDb");      w.Double(result.level_drift_db);
     w.EndObject();
 
     tts_buffer().assign(buf.GetString(), buf.GetSize());

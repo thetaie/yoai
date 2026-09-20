@@ -709,6 +709,15 @@ typedef int (*bodyclock_tts_audio_handler)(const float* pcm,
 //   streamed            which path this run took, which is not the same as what
 //                       bodyclock_tts_set_streaming asked for: with no handler
 //                       there is nobody to stream to.
+//   peakDbfs            the loudest sample.
+//   levelDriftDb        how much the delivery's level wanders over the
+//                       utterance: the range of a four-second moving mean over
+//                       its speech. A DESCRIPTION, with no threshold attached.
+//                       One take was heard with a second half five to six dB
+//                       louder than its first, which the model can do and the
+//                       API cannot prevent -- but one labelled failure cannot
+//                       set a cutoff, and a take nobody minded scored higher.
+//                       Reported so the labels can accumulate.
 const char* bodyclock_tts_say(const char* text,
                          bodyclock_tts_audio_handler on_audio,
                          void* user_data);

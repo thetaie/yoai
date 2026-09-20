@@ -487,7 +487,7 @@ export const nativeTtsSetThreads: (n: number) => void;
  * Speak `text`. Calls back once with ('result', json) or ('error', reason).
  *
  * The JSON carries `speechSeconds`, `seconds`, `realtime`, `firstAudioSeconds`,
- * `chunks` and `streamed`. `realtime` is seconds of computation per second of
+ * `chunks`, `streamed`, `peakDbfs` and `levelDriftDb`. `realtime` is seconds of computation per second of
  * speech and is the number this lane exists to produce; above 1 it cannot talk
  * as fast as it speaks. `streamed` is the path the run actually took, which is
  * not what `nativeTtsSetStreaming` asked for when `keepAudio` is false — with no
