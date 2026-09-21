@@ -1,0 +1,12 @@
+# The root .gitignore already covers build/ and out/, which is where the addon
+# and the Electron bundles land. This file adds the two the JavaScript side
+# brings with it.
+node_modules
+
+# tsc's incremental state, per tsconfig.{node,web}.json.
+node_modules/.tmp
+
+# The cross-built SDKs and their build trees. Outside build/ on purpose -- see
+# the note at the top of build.cmd -- so the root .gitignore's `build` does not
+# reach them.
+sdk

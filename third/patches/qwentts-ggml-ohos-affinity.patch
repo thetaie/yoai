@@ -1,0 +1,46 @@
+Thread affinity on OHOS: declare what musl hides, call what musl has.
+
+ggml picks its affinity implementation by platform, and OHOS falls into the
+__linux__ branch. Two things there do not hold on this sysroot:
+
+  cpu_set_t, CPU_ZERO, CPU_SET   musl has them, behind _GNU_SOURCE. The OHOS
+                                 toolchain passes -D_XOPEN_SOURCE=600, which
+                                 hides them. Defining _GNU_SOURCE is enough.
+  pthread_setaffinity_np         musl does not have it at all, under any guard.
+                                 But it does have sched_setaffinity, and ggml
+                                 already calls that on the one other platform
+                                 with the same gap: Android. Widening that
+                                 branch to OHOS reuses the fix upstream wrote.
+
+sched_setaffinity(0, ...) pins the calling thread, which is what this function
+is called on, so the two calls agree here.
+
+An earlier version of this patch narrowed __linux__ to __gnu_linux__ instead,
+sending OHOS to the "unsupported platform" stub. That built, and it was wrong
+twice over: it silently dropped affinity, and it called -D_GNU_SOURCE a
+symptom-level fix when _GNU_SOURCE is in fact half of the real one. llama.cpp's
+checkout carries this same patch, in this same shape, for the same sysroot --
+see llama-ggml-ohos-affinity.patch, which is this diff against a newer ggml.
+
+What affinity is worth on this device has not been measured. The thread-count
+sweep is the closest thing, and it found 4/6/8 within 2%. So this patch is
+"do not silently drop upstream's behavior", not "known to be faster".
+
+--- a/src/ggml-cpu/ggml-cpu.c
++++ b/src/ggml-cpu/ggml-cpu.c
+@@ -1,5 +1,6 @@
+ #define _CRT_SECURE_NO_DEPRECATE // Disables "unsafe" warnings on Windows
+ #define _USE_MATH_DEFINES // For M_PI on MSVC
++#define _GNU_SOURCE 1 // OHOS: cpu_set_t/CPU_ZERO live behind this guard in musl sched.h
+ 
+ #include "ggml-backend-impl.h"
+ #include "ggml-backend.h"
+@@ -2650,7 +2651,7 @@ static bool ggml_thread_apply_affinity(const bool * mask) {
+         }
+     }
+ 
+-#ifdef __ANDROID__
++#if defined(__ANDROID__) || defined(__OHOS__) // OHOS has sched_setaffinity but no pthread_setaffinity_np
+     err = sched_setaffinity(0, sizeof(cpuset), &cpuset);
+     if (err < 0) {
+         err = errno;

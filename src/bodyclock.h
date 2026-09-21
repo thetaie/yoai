@@ -499,11 +499,11 @@ const char* bodyclock_voice_analyze(const short* pcm,
 // // moves the first word much earlier and cannot close the gaps.
 // //   thinkerSeconds      audio in to last text token; `seconds` is everything.
 // //
-// // **Audio over about 30 seconds is refused rather than attempted.** Measured:
-// // 28 s works, 31 s segfaults inside the audio front end. Thirty seconds is the
-// // window every Whisper-family encoder has, so the limit is expected -- crashing
-// // instead of saying so is not, and the check here is what keeps that upstream
-// // bug out of the app.
+// // **Audio over about 30 seconds is refused rather than attempted**, and the
+// // number is not a limit. It was set from two runs that read as a boundary;
+// // re-measured, the same clip at the same length both crashes and succeeds, at
+// // any thread count. The guard shortens the input rather than avoiding the bug.
+// // See src/voice/attic/omni.hpp and design/voice.md.
 // const char* bodyclock_omni_ask(const short* pcm,
 //                           int n_samples,
 //                           const char* prompt,

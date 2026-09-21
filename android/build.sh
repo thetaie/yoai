@@ -8,9 +8,9 @@
 # The Android counterpart of harmony/build.sh, and deliberately the same shape:
 # same tokens, same prebuilt/<abi> layout, same rule that BUILDING AN SDK IS
 # TURNING ITS LANE ON. What it is not is a port of that script's workarounds.
-# The OHOS lane carries two patches and three flags for musl and for a toolchain
-# that identifies as neither Linux nor Android; bionic has the affinity calls,
-# ggml's _GNU_SOURCE gate already names Android, and none of it applies here.
+# The OHOS lane patches ggml because musl hides cpu_set_t behind _GNU_SOURCE and
+# has no pthread_setaffinity_np at all; bionic needs neither, and ggml's
+# affinity branch already names Android, so that patch does not apply here.
 #
 #   ./build.sh [abi] [deps|llama|qtts|vulkan|apk|all] [clean] [arch=<march>|baseline]
 #
@@ -239,7 +239,7 @@ build_deps() {
 build_llama() {
     if [ ! -d "$LLAMA_SRC" ]; then
         echo "[llama] no llama.cpp at $LLAMA_SRC." >&2
-        echo "[llama]   git clone https://github.com/ggml-org/llama.cpp $LLAMA_SRC" >&2
+        echo "[llama]   ../third/sync.sh clone llama.cpp   # pinned commit, patch applied" >&2
         return 1
     fi
 
@@ -305,7 +305,7 @@ build_llama() {
 build_qtts() {
     if [ ! -d "$QTTS_SRC" ]; then
         echo "[qtts] no qwentts.cpp at $QTTS_SRC." >&2
-        echo "[qtts]   git clone --depth 1 --recursive https://github.com/ServeurpersoCom/qwentts.cpp $QTTS_SRC" >&2
+        echo "[qtts]   ../third/sync.sh clone qwentts.cpp   # pinned commit, submodule, patches" >&2
         return 1
     fi
     if [ ! -d "$QTTS_SRC/ggml" ]; then
@@ -313,13 +313,13 @@ build_qtts() {
         return 1
     fi
 
-    # harmony/patches/ has two. qwentts-ggml-ohos-affinity.patch is for musl's
-    # missing pthread_setaffinity_np and does NOT apply here -- bionic has it.
-    # The thread-count one is not platform-specific: qwentts.cpp picks
-    # hardware_concurrency()/2 reasoning about hyperthreads a phone does not
-    # have. It is applied through the SAME patch file, so the two lanes cannot
-    # drift into overriding the thread count differently.
-    local patch="$REPO_ROOT/harmony/patches/qwentts-thread-count-override.patch"
+    # third/patches/ has two for this checkout. qwentts-ggml-ohos-affinity.patch
+    # is for musl's missing pthread_setaffinity_np and does NOT apply here --
+    # bionic has it. The thread-count one is not platform-specific: qwentts.cpp
+    # picks hardware_concurrency()/2 reasoning about hyperthreads a phone does
+    # not have. It is applied through the SAME patch file, so the two lanes
+    # cannot drift into overriding the thread count differently.
+    local patch="$REPO_ROOT/third/patches/qwentts-thread-count-override.patch"
     if [ -f "$patch" ]; then
         if git -C "$QTTS_SRC" apply --check --reverse "$patch" 2>/dev/null; then
             echo "[qtts] thread-count patch already applied"
@@ -332,10 +332,28 @@ build_qtts() {
     local qbuild="$SCRIPT_DIR/.qtts-build/$ABI"
     local qsdk="$SCRIPT_DIR/prebuilt/qtts-sdk/$ABI"
 
+    # ONE ggml for both lanes, and llama.cpp's is the one. This used to compile
+    # qwentts's own ggml submodule and the app linked that copy for everything,
+    # because it superset llama's. The 2026-09-21 update inverted it: libllama
+    # wants ggml_dsv4_hc_pre_gated, which the fork does not have, so whichever
+    # copy is kept one symbol goes unmet and the app does not link.
+    # GGML_SOURCE_DIR, added upstream the same day, points the qwentts build at
+    # any ggml tree -- so both lanes compile the same one from the same commit.
+    # The cost is the fork's fused snake kernel for the DAC decoder; see
+    # design/voice.md. This target therefore needs a llama.cpp checkout even
+    # when `llama` is not being built.
+    if [ ! -f "$LLAMA_SRC/ggml/CMakeLists.txt" ]; then
+        echo "[qtts] qtts compiles llama.cpp's ggml and there is none at $LLAMA_SRC/ggml." >&2
+        echo "[qtts]   ../third/sync.sh clone llama.cpp" >&2
+        return 1
+    fi
+    echo "[qtts] ggml=$LLAMA_SRC/ggml"
+
     local cfg=()
     mapfile -t cfg < <(ndk_cfg)
     cfg+=(
         -S "$QTTS_SRC" -B "$qbuild"
+        -DGGML_SOURCE_DIR="$LLAMA_SRC/ggml"
         -DBUILD_SHARED_LIBS=OFF
         # Same reason as the llama lane's: this ggml has to schedule threads the
         # way the one design/voice.md measured did.
@@ -361,7 +379,9 @@ build_qtts() {
     # qwen.h is what android/app/src/main/cpp/CMakeLists.txt probes for, so it
     # is the marker that says this SDK is complete.
     find "$QTTS_SRC" -maxdepth 3 -name 'qwen*.h' -exec cp {} "$qsdk/include/" \;
-    cp "$QTTS_SRC"/ggml/include/*.h "$qsdk/include/" 2>/dev/null || true
+    # From LLAMA_SRC, not QTTS_SRC: the headers have to be the ones the archives
+    # above were compiled from, and GGML_SOURCE_DIR moved that.
+    cp "$LLAMA_SRC"/ggml/include/*.h "$qsdk/include/" 2>/dev/null || true
     find "$qbuild" -name 'libqwen-core.a' -exec cp {} "$qsdk/lib/" \;
     find "$qbuild" -name 'libggml*.a' -exec cp {} "$qsdk/lib/" \;
 

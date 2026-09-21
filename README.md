@@ -25,6 +25,7 @@ src/                  the core -- a static library plus a C ABI
 cli/                  a desktop harness -- run the core without a device
 harmony/              the HarmonyOS app (ArkTS) + its NAPI bridge
 android/              a measurement bench (Compose) + its JNI bridge
+desktop/              the desktop client (Electron) + its Node-API bridge
 ```
 
 ### The core is a library, not a server
@@ -185,6 +186,28 @@ default is the Kirin 9020's, so the first run on a new device is comparable
 rather than optimal. The Device panel prints what the chip actually reports.
 See [android/README.md](android/README.md).
 
+### Desktop client (Electron)
+
+A real client, not a harness — the third host to embed the core, after the
+HarmonyOS app and this bench. `cli/` above is still the fastest way to exercise
+the core; this is the same core with a window on it.
+
+```
+cd desktop
+build.cmd            # Windows
+./build.sh           # macOS / Linux
+```
+
+That builds the Node-API addon and the Electron bundles; `npm run dev` after
+that is the loop while writing UI. The on-device lane is off by default for the
+same reason it is everywhere else and turns on the same way: `build.cmd clean
+llama`, with a llama.cpp checkout beside the repo.
+
+One directory rather than an `electron/` and a `web/`, and
+[desktop/README.md](desktop/README.md) argues it: a browser cannot mmap a GGUF
+or hold a key out of a page's reach, so a web build would be a different
+product rather than a second front end for this one.
+
 ## Status
 
 | Capability | State |
@@ -195,6 +218,7 @@ See [android/README.md](android/README.md).
 | Conversations persisted on device | working |
 | On-device inference (llama.cpp + GGUF) | working on HarmonyOS, in the default build |
 | Local personal-data storage | not yet |
+| Desktop client (Electron) | chat and on-device models; builds, not yet packaged |
 | Android measurement bench | scaffolded; not yet run on a device |
 | Android app | not yet |
 | Tools / MCP, attachments, markdown rendering | not yet |

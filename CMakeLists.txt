@@ -248,30 +248,40 @@ endif()
 #
 # **Exactly one ggml goes into the library**, and that last lane is why this is
 # worth a paragraph. The llama SDK and the qwentts SDK each ship
-# libggml{,-cpu,-base}.a, built from different commits two weeks apart. Linking
-# both is the rapidjson mistake again in a bigger form: the linker resolves each
+# libggml{,-cpu,-base}.a, built from different commits of two trees that move
+# independently. Linking both is the rapidjson mistake again in a bigger form:
+# the linker resolves each
 # ggml symbol from whichever archive it scans first, so one build's compiled code
 # would run against the other's implementation.
 #
 # Measured rather than guessed, because the answer decides whether the third lane
 # is affordable at all:
 #
+# At llama c390d0a against qwentts's ggml 0572d60:
+#
 #   - libqwen-core.a needs 134 ggml/gguf symbols. llama's ggml is missing ONE,
 #     ggml_prec_set_acc -- the replacement for ggml_mul_mat_set_prec, added
 #     between the two commits.
 #   - libllama.a needs 287. qwentts's ggml is missing NONE.
-#   - The public headers differ in two files and not one struct: ggml.h gains the
-#     new prec enum and its two setters, ggml-backend.h loses one function
-#     neither library calls. No layout changed, so code compiled against either
-#     header runs against either implementation.
 #
-# So the newer one supersets the older, and the qwentts SDK's ggml is the one
-# that goes in whenever that lane is on. It is built from the same -march flags
+# So the newer superset the older, and the qwentts SDK's copy is the one this
+# macro picks whenever that lane is on. It is built from the same -march flags
 # by the same script, so nothing is given up for it.
 #
-# If that stops being true, it will surface here as a missing symbol at link
-# time rather than as a crash, because C symbols are strong: a genuine collision
-# is a duplicate-definition error, not a silent wrong-layout read.
+# **That is no longer true, and the pins say so.** Both checkouts moved on
+# 2026-09-21 (see third/manifest.txt), and re-measuring at llama 335b21f against
+# qwentts's ggml e2568d7 inverts it: qwen-core needs its 134 and llama's ggml is
+# now missing NONE, while libllama needs 288 and qwentts's ggml is missing ONE,
+# ggml_dsv4_hc_pre_gated. Whichever copy is kept, one symbol is unmet; only the
+# side that goes short has swapped. The choice below is therefore WRONG for the
+# current pins and the desktop addon does not link -- the real fix is one ggml
+# for both lanes via qwentts's new GGML_SOURCE_DIR, which the same measurement
+# says works. design/voice.md carries the numbers and the one cost (qwentts's
+# ggml fork adds a fused snake kernel for the codec that llama's does not have).
+#
+# It surfaced exactly as predicted: a missing symbol at link time rather than a
+# crash, because C symbols are strong -- a genuine collision is a
+# duplicate-definition error, not a silent wrong-layout read.
 #
 # On HarmonyOS nobody sets these variables by hand: `harmony/build.cmd <abi>
 # llama` and `... qtts` assemble the SDKs under harmony/prebuilt/ and the app's
@@ -332,11 +342,27 @@ macro(bodyclock_require_ggml _why)
         endif()
     endforeach()
 
-    # The loader, which is the phone's and not the SDK's. Only when the backend
-    # is actually in, so a CPU-only build does not pull a graphics dependency
-    # into a library that has no use for one.
+    # The loader, which belongs to the platform and not to the SDK. Only when
+    # the backend is actually in, so a CPU-only build does not pull a graphics
+    # dependency into a library that has no use for one.
+    #
+    # Two names and a hint, because neither the file name nor its location is
+    # the same twice. The import library is `vulkan-1.lib` on Windows and
+    # `libvulkan.so` on OHOS and Linux; on OHOS it is in the sysroot, which the
+    # toolchain already searches, and on Windows it is under the Vulkan SDK,
+    # which nothing searches unless told. VULKAN_SDK is the variable that SDK
+    # sets, and the same one ggml's own CMake reads.
     if(GGML_VULKAN_LIB)
-        list(APPEND BODYCLOCK_GGML_LIBS vulkan)
+        unset(VULKAN_LOADER_LIB CACHE)
+        find_library(VULKAN_LOADER_LIB NAMES vulkan-1 vulkan
+                     HINTS "$ENV{VULKAN_SDK}/Lib" "$ENV{VULKAN_SDK}/lib")
+        if(NOT VULKAN_LOADER_LIB)
+            message(FATAL_ERROR
+                "ggml's Vulkan backend is in ${GGML_VULKAN_LIB} but no Vulkan "
+                "loader (vulkan-1 or vulkan) was found to link it against. "
+                "On Windows, set VULKAN_SDK to a Vulkan SDK install.")
+        endif()
+        list(APPEND BODYCLOCK_GGML_LIBS "${VULKAN_LOADER_LIB}")
         # So src/voice/qtts.cpp can set the backend's environment before the
         # engine initialises it. There is no runtime way to ask ggml whether the
         # Vulkan backend was compiled in early enough to matter.
@@ -388,7 +414,13 @@ if(BODYCLOCK_QTTS)
     # copy wins and the decision has to be made before anything links.
     bodyclock_require_ggml(BODYCLOCK_QTTS)
 
-    target_compile_definitions(bodyclock_core PRIVATE BODYCLOCK_QTTS)
+    # QWEN_STATIC matters only on Windows, and only because qwen.h defaults the
+    # other way. Its QT_API expands to __declspec(dllimport) unless told
+    # otherwise, so without this every qt_* call compiles to an __imp_ reference
+    # that a static qwen-core.lib cannot satisfy -- fifteen unresolved externals
+    # naming functions that are plainly present in the archive. The SDK is built
+    # with QWEN_SHARED=OFF, so static is what it always is here.
+    target_compile_definitions(bodyclock_core PRIVATE BODYCLOCK_QTTS QWEN_STATIC)
     target_include_directories(bodyclock_core PRIVATE "${QTTS_DIR}/include")
     target_link_libraries(bodyclock_core PUBLIC "${QWEN_CORE_LIB}")
 

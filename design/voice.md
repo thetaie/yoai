@@ -7,6 +7,240 @@ Numbers here are labeled: **measured** on this project's hardware, **measured
 elsewhere** and reproduced with the method that produced them, or **derived**
 from documented architecture.
 
+## What was measured
+
+Two machines. Everything below was run by this project, on these two, through
+this app's own lanes or the engines' own CLIs — nothing is quoted from a model
+card or a benchmark someone else ran.
+
+**Which build produced a number is part of the number**, and the engines here
+are other people's checkouts that move under us. [third/manifest.txt](../third/manifest.txt)
+pins the commit of each one and [third/patches/](../third/patches/) carries
+what we change in them; `third/sync.cmd check` says whether the trees on a
+machine still match. Figures taken before a pin moved are labeled where the
+move mattered — see the two ggml symbol tables further down, which are the
+first case where it did.
+
+- **The phone**: HUAWEI PLA-AL10, Kirin 9020, Maleoon GPU, 16 GB. Big-little,
+  and the core count is not settled here: this file has long said one big plus
+  three mid plus four little, while the runtime reports **twelve** logical CPUs.
+  Nothing below turns on which is right, but the thread sweeps do assume four
+  fast cores.
+- **The PC**: Intel Core Ultra 9 185H, 16C/22T, 32 GB, with an integrated
+  **Intel Arc Pro Graphics**. A laptop part — it throttles, which shows up
+  below.
+
+**Real time factor (RTF) is seconds of computation per second of audio.** Above
+1 the engine cannot speak as fast as it talks; below 1 it outruns playback. For
+recognition the same ratio runs the other way and small is fast.
+
+### Five engines, and which half of the audio each one does
+
+The shape of this app follows from one table. **Only one engine does both ends,
+and it is the one that was retired**; everything shipping is a stage in a chain
+because no single model does both halves at a price this phone will pay.
+
+| engine | audio in | text | audio out | size |
+| --- | :---: | :---: | :---: | --- |
+| Qwen2.5-Omni-3B, on MNN | ✓ | ✓ | ✓ | 3.8 GB |
+| SenseVoice-Small `q8`, on ggml | ✓ | | | 254 MB |
+| llama.cpp + a GGUF | | ✓ | | 1.28 GB |
+| Qwen3-TTS, on qwentts.cpp | | | ✓ | 1.4 GB |
+| the platform's own TTS | | | ✓ | — |
+
+Measured on the phone, by what each one does:
+
+**Audio in.**
+
+| | measured | status |
+| --- | --- | --- |
+| SenseVoice-Small `q8`, 4 threads | **RTF 0.173** | **shipping** |
+| Qwen2.5-Omni's audio encoder, in MNN | RTF ~0.31 | retired with the rest of omni |
+
+**Text in the middle.** No audio, and listed because the chain's wait is mostly
+here and because it is what feeds the speaking half.
+
+| | measured | status |
+| --- | --- | --- |
+| Qwen3.5-2B `Q4_K_M` | **14.0 tok/s** decode, 5.9 s to load | **shipping** |
+| Qwen3.5-4B `Q4_K_M` | 6.70 tok/s, 14.5 s to load | too slow for a reply |
+
+**Audio out.** RTF above 1 means it cannot speak as fast as it talks.
+
+| | measured | status |
+| --- | --- | --- |
+| the platform's own TTS | **1.37 s** to the first word, warm | **shipping** — one broadcast voice, no alternative |
+| Qwen3-TTS 1.7B VoiceDesign `Q4_K_M` | **RTF 2.14 fast, 3.52 sustained** | prepared playback only |
+| Qwen3-TTS 0.6B CustomVoice `Q4_K_M` | RTF 1.94 / 3.30 | audibly worse voice |
+| Qwen3-TTS base, cloning a 22.4 s reference | RTF 6.6–11.6; **first audio 30–44 s** | a fixed 24–40 s of setup per utterance |
+| omni's Talker, `dit_steps` 5 | **RTF 3.70** (2.8 at its coarsest, with artefacts) | retired to `src/voice/attic/` |
+
+**Both ends at once**, which only omni does.
+
+| | measured | status |
+| --- | --- | --- |
+| Qwen2.5-Omni-3B: 4.8 s of speech in, a spoken answer out | **46.2 s** — thinker 17.2, Talker 37.5 | retired |
+| the shipping chain: recognise → think → speak | **7.57 s cold, 1.37 s warm** to the first word | **shipping** |
+
+**And two numbers that belong to the device rather than to any engine.**
+
+| | measured | |
+| --- | --- | --- |
+| a read loop, no model | **24.4 GB/s** at 8 threads | the ceiling all of the above share |
+| ggml's Vulkan backend on the Maleoon 920 | initialises, is selected, then the OS kills the process (`GPU_LEAK_KILL`) before any audio | the GPU is unavailable here |
+
+**omni's 3.70 and Qwen3-TTS's numbers do not compare, and a shared column hides
+it.** omni's covers its Talker alone, excluding a thinker that is 17.2 s of the
+46.2, while every Qwen3-TTS figure is a whole synthesis. And omni's was taken
+before the device's two clocks were understood — its Talker ran 37.5 s
+continuously, so it belongs beside Qwen3-TTS's *sustained* 3.52, not its fast
+2.14. On that footing omni was the faster of the two. It lost on size, on a
+second inference framework, on having to think before it can speak, and on
+having no way to ask for a voice.
+
+### On the PC
+
+**This is the deployment matrix**: one passage, one seed, two passes per cell.
+Milliseconds per frame is the comparable column — a frame is 80 ms of audio, and
+the checkpoints generate different lengths from the same seed, so their RTFs are
+not directly against each other.
+
+| model | quant | backend | ms/frame | RTF | |
+| --- | --- | --- | --- | --- | --- |
+| **1.7B VoiceDesign** | **`Q8_0`** | **Arc iGPU, Vulkan, MMVQ off** | **71.0** | **0.90** | **the one to deploy** — below 1, and the richest prosody |
+| 1.7B VoiceDesign | `Q4_K_M` | Arc iGPU, Vulkan, MMVQ off | 46.1 | 0.63 | 35% cheaper, audibly flatter |
+| 1.7B VoiceDesign | `Q8_0` | Arc iGPU, Vulkan | 78.3 | 0.80–1.00 | slight nasality |
+| 1.7B VoiceDesign | `Q4_K_M` | Arc iGPU, Vulkan | 44.8 | 0.57–0.58 | first audio 196 ms; mechanical pauses |
+| 1.7B VoiceDesign | `Q4_K_M` | CPU, 11 threads | 78.8 | 0.95–1.07 | |
+| 1.7B VoiceDesign | `Q8_0` | CPU, 11 threads | 98.3 | 1.23–1.29 | |
+| 0.6B CustomVoice | `Q4_K_M` | Arc iGPU, Vulkan, MMVQ off | 36.2 | 0.44–0.46 | cheapest by far, and **not deployable** — see below |
+| 0.6B CustomVoice | `Q4_K_M` | CPU, 11 threads | 67.9 | 0.86 | |
+| 0.6B CustomVoice | `Q8_0` | either | — | — | not downloaded |
+
+Where the GPU wins, and where it does not, per frame. **One codec chunk
+throughout** (`--codec-chunk-dur 300`): the default splits at 24 s, so a run of
+23.9 s pays for one pass and one of 27.9 s pays for two, and an earlier version
+of this table compared across that boundary without noticing:
+
+| stage | CPU `Q4` | GPU `Q4` | | CPU `Q8` | GPU `Q8` | |
+| --- | --- | --- | --- | --- | --- | --- |
+| talker decode | 23.9 | 17.3 | 1.38× | 33.8 | 26.5 | 1.27× |
+| code predictor | 20.0 | 20.5 | **0.98×** | 29.3 | 29.6 | **0.99×** |
+| codec decode | 34.9 | **6.3** | **5.5×** | 35.2 | **6.4** | **5.5×** |
+
+**The codec costs the same 6.3–6.4 ms a frame in every GPU configuration**, at
+both quantizations and at both model sizes — which is what it should do, being
+the same file each time, and which the chunking confound had been hiding.
+
+#### One kernel switch, and it is not a trade
+
+**`GGML_VK_DISABLE_MMVQ=1`.** MMVQ is ggml's quantized mat-vec path — a
+performance optimization — and on this Intel driver turning it off made the
+engine both faster and better:
+
+| | MMVQ on | MMVQ off | |
+| --- | --- | --- | --- |
+| `Q8_0`, ms/frame | 78.3 | **71.0** | 9% faster |
+| `Q4_K_M`, ms/frame | 44.8 | 46.1 | 2.9% slower |
+
+By ear, across three seeds: with MMVQ on, `Q4` produced takes with flat,
+mechanical pauses and one that ran 57% long; with it off the pace varies and the
+pauses do not sound stamped. `Q8` on it has a slight nasality that goes away
+with it off. **A kernel that is slower and lossier is not a trade**, and it is
+set in `apply_vulkan_env()` rather than offered as an option.
+
+Two neighbours were tried and rejected. `DISABLE_INTEGER_DOT_PRODUCT` costs
+another 3.8% and, stacked on MMVQ, was indistinguishable by ear.
+`DISABLE_F16` costs 17% and introduced audible artefacts — the opposite of what
+disabling a lower precision should do, unexplained, and enough to leave alone.
+
+**This is also where a proxy metric failed.** Length was being used to judge
+which numeric path was behaving: the baseline ran 471 frames where the CPU ran
+299, and `DISABLE_INTEGER_DOT_PRODUCT` brought it to 308 — the closest match,
+and by that reading the winner. `DISABLE_MMVQ` came out at 349, furthest from
+the CPU of the three, and is the one that sounds right. **Agreeing with a
+reference on a number is not the same as being correct**, and there was no
+reason to think it would be.
+
+#### And `Q8_0` is the one to deploy
+
+With MMVQ off on both, judged on the same seed: `Q4` is audibly flatter — less
+variation in pace, less variation in the pauses — where `Q8`'s only remark was
+that its pitch sat high, which the written description and the seed both reach.
+
+| | ms/frame | RTF | |
+| --- | --- | --- | --- |
+| **`Q8_0`, MMVQ off** | **71.0** | **0.90** | richer prosody |
+| `Q4_K_M`, MMVQ off | 46.1 | 0.63 | 35% cheaper, flatter |
+
+**Below 1 either way, so the 35% cannot be spent on latency.** It is a
+throughput cost — streams per machine — against an audible difference in the one
+thing this engine was chosen for, which makes it worth paying. That is the
+opposite of the phone's answer, and correctly so: nothing there is below 1, so
+speed still buys something.
+
+**The margin is thin, though.** 0.90 is ten percent of headroom on an integrated
+GPU, and RTF moves with utterance length because prefill amortises — the same
+configuration read 0.80 to 1.00 across seeds. Per frame it is 71.0 ms against a
+frame worth 80, and that is the number to plan capacity against, not the RTF of
+any one take.
+
+Three more things follow for a server, and two of them were surprises:
+
+- **Quantization is not free on the GPU.** `Q4` is 29% cheaper than `Q8` there,
+  almost the same margin as on the CPU. The hope was that a compute-bound
+  backend would absorb the extra bytes and let `Q8`'s quality ride along; it
+  does not.
+- **The code predictor gets nothing from the GPU** — 1.00× at `Q4` and slightly
+  worse at `Q8` — and it barely shrank when the talker went from 1.7B to 0.6B on
+  the phone either. It is an MTP head sized by the sixteen codebooks rather than
+  by the LM, so it moves with neither. At `Q4` on the GPU it is **44% of the
+  bill**, and **the floor has changed hands**: on the phone the codec was
+  immovable at 45% of the cost, and on a GPU the codec collapses to 18% while
+  this takes its place.
+- **The small checkpoint is the fragile one, and that is now the second time.**
+  Its runaway on Vulkan — 2048 frames, the cap, twice — was MMVQ, and turning
+  that off fixes it. What it does not fix is the delivery: at one seed the 0.6B
+  on the GPU sounds distressed, close to tears, where the SAME seed on the CPU
+  is ordinary and another seed on the GPU is fine. The 1.7B takes the same
+  change in numerics without anything like that. It is the same shape as the
+  polyphone failure, where `Q4` cost the 0.6B its grapheme-to-phoneme and left
+  the 1.7B's intact: **a small checkpoint has less redundancy to spend, and a
+  numeric perturbation — quantization or a different backend — takes something
+  real.** So the 0.6B is off the table for serving despite being 42% cheaper a
+  frame, and for a firmer reason than speed.
+
+Older figures, kept for the shape and not the values:
+
+| engine and model | backend | measured | |
+| --- | --- | --- | --- |
+| Qwen3-TTS Base, free-running | llama.cpp `libmtmd`, CPU | RTF 1.41 | changes speaker between texts |
+| Qwen3-TTS Base, cloned in context | qwentts.cpp, CPU | RTF 1.97 | stable voice, good prosody |
+| Qwen3-TTS VoiceDesign | qwentts.cpp, CPU | RTF 1.16 | **does not reproduce** |
+| recognition, text | — | **not measured on this machine** | |
+| a server CPU, a discrete GPU | — | **not measured at all** | |
+
+**Those three are from an earlier session and read about 21% fast.** The same
+host, passage and checkpoint that recorded 1.16 has since measured 1.40 three
+times over, with all three stages moved together — a clock difference, not a
+configuration one. **Every CPU figure on this machine carries about ±15%**: the
+1.7B `Q4` cell above read 1.131 and 1.137 on one day and 0.948 and 1.067 on
+another. The GPU cells repeat inside 1%. A server would not wander like this,
+but nothing here can say by how much.
+
+**Below 1 is a threshold rather than a slope.** A stream needs a pre-buffer of
+`duration × (RTF − 1)` before playback can start without running dry: 132 s for
+a minute of audio on the phone, 8 s on the PC's CPU, and **nothing at all on its
+GPU**. That is the line between prepared playback and speaking as you go, and
+the PC is the first machine here on the far side of it.
+
+### What none of this covers
+
+Nothing was measured on server hardware, on a discrete GPU, on Android, or on
+any phone but this one. The thermal behaviour below is specific to this handset,
+and the GPU result is specific to HarmonyOS's memory policy — the same backend
+on the PC loaded 1.37 GB, which is the model, and nothing objected.
+
 ## The decision
 
 **Recognition and synthesis sit outside the language model, and what is read
@@ -29,10 +263,10 @@ ABI already takes `messages_json`; transcription produces text.
 
 ## Every Qwen3-TTS checkpoint, on this phone
 
-Seven configurations of one model family were run on the device. This table is
-the summary; the sections near the end of this file are where each number comes
-from, and they are worth reading before quoting any of these, because several
-replaced an earlier number that was wrong.
+The front table gives one row to this whole family. This is that row opened up,
+and the sections near the end of the file are where each number comes from —
+worth reading before quoting any of these, because several replaced an earlier
+number that was wrong.
 
 All at four threads with a pinned seed and `qwen-tokenizer-12hz` as the codec.
 Real time factor is seconds of computation per second of audio; **above 1 it
@@ -69,67 +303,6 @@ and after the clock steps down, which happens about 30 seconds into continuous
 generation from cold and 17 seconds when the device is already warm. A real
 passage spends most of itself in the second number: 30 seconds of audio took 88
 to 97 s.
-
-For scale, the same 1.7B VoiceDesign on a Core Ultra 9 185H laptop measures
-**1.40 at Q8 and 1.13 at Q4** — uniformly 1.9× faster per stage, and still
-above 1.
-
-### On a PC's integrated GPU: RTF 0.60, and the floor is not a floor
-
-The first number below 1 in this whole file, and it is worth stating what makes
-it matter: **below 1, the pre-buffer a stream needs is zero.** Above it, playback
-has to wait `duration × (RTF − 1)` before starting or it runs dry; below it,
-generation outruns playback from the first chunk. That is the difference between
-prepared playback and speaking as you go, and it is a threshold rather than a
-slope.
-
-Measured with ggml's Vulkan backend on the same laptop, same 1.7B VoiceDesign
-Q4, same passage. The device is an **Intel Arc Pro Graphics** — integrated,
-sharing the CPU's memory, `uma: 1`, `fp16: 1`, and **`matrix cores: none`**.
-
-| stage | CPU, 11 threads | Arc iGPU | |
-| --- | --- | --- | --- |
-| Talker decode | 26.67 ms/frame | 18.14 | 1.46× |
-| Code predictor | 22.84 | 20.86 | 1.09× |
-| **Codec decode** | **38.6** | **8.72** | **4.4×** |
-| Prefill | 653 ms | 159 | 4.1× |
-| per frame | 88.1 ms | **47.7** | |
-| **RTF** | **1.13** | **0.60** | |
-| first audio | ~683 ms | **196 ms** | |
-
-**The codec is the stage that moves, and it was the immovable one.** Five
-attempts on the phone left it at 73.5 ms a frame — streaming, buffering, two
-quantizations, a third-size talker, and the GPU that never ran. It is 45% of the
-bill there and the reason the ceiling looked structural. On a GPU it is 4.4×
-faster and drops to 18% of a much smaller bill. A convolutional decoder with 21
-conv contexts was the part expected to fall back to the CPU for lack of op
-coverage; it is the part that gained most.
-
-Four things a PC client would need to know:
-
-- **Shader compilation is a one-off per process**, and it is not small: the
-  first run measured 0.863 against 0.60 warm, with prefill at 3652 ms instead of
-  165 and prompt build at 894 instead of 8.5. A resident client pays it once at
-  startup. A client that spawns a process per utterance pays it every time and
-  never sees 0.60.
-- **The GPU's timings are far steadier than the CPU's.** Across three seeds:
-  0.558, 0.583, 0.612 on the GPU against 1.018, 1.112, 1.300 on the CPU. The
-  spread on the CPU side is the laptop's own clock, the same throttle the phone
-  has in a milder form — a GPU run is short enough not to provoke it.
-- **Different numerics are different takes.** The same seed and text gave 471
-  frames on the GPU and 299 on the CPU. Not a defect: at seeds 7 and 42 the GPU
-  produced 287 and 305 against the CPU's 337 and 316, so neither backend speaks
-  systematically slower. But a seed chosen for how it sounds on one backend is
-  not the same utterance on the other, and a client that pins seeds has to pin
-  them per backend.
-- **HarmonyOS's `GPU_LEAK_KILL` does not appear here.** The desktop backend
-  loaded about 1.37 GB of tensors, which is the model, and nothing objected.
-  That was a platform policy, not something ggml does everywhere, and it should
-  not be carried forward as a reason to avoid the GPU on a PC.
-
-**This is a floor for PC hardware, not a ceiling.** It is an integrated GPU with
-no matrix cores, sharing bandwidth and thermal budget with the CPU that is
-feeding it. Anything discrete would start from here.
 
 ### The engine this replaced, on the same phone
 
@@ -191,6 +364,71 @@ same quantization at 1.7B both read it correctly, so neither variable explains
 it alone. It does not carry across a model swap or a requantization, and there
 is no way to correct it from the API — nothing in the runtime takes pinyin or
 phonemes.
+
+## On a PC: the integrated GPU crosses 1
+
+The front table gives the number. This is where it comes from, and what a PC
+client would have to know to get it.
+
+Measured with ggml's Vulkan backend on the same laptop, same 1.7B VoiceDesign
+Q4, same passage. The device is an **Intel Arc Pro Graphics** — integrated,
+sharing the CPU's memory, `uma: 1`, `fp16: 1`, and **`matrix cores: none`**.
+
+| stage | CPU, 11 threads | Arc iGPU | |
+| --- | --- | --- | --- |
+| Talker decode | 23.9 ms/frame | 17.6 | 1.36× |
+| Code predictor | 20.0 | 20.0 | **1.00×** |
+| **Codec decode** | **34.9** | **8.2** | **4.3×** |
+| Prefill | 653 ms | 159 | 4.1× |
+| per frame | 78.8 ms | **45.8** | |
+| **RTF** | 0.95–1.07 | **0.57–0.58** | |
+| first audio | ~683 ms | **196 ms** | |
+
+**The codec is the stage that moves, and it was the immovable one.** Five
+attempts on the phone left it at 73.5 ms a frame — streaming, buffering, two
+quantizations, a third-size talker, and the GPU that never ran. It is 45% of the
+bill there and the reason the ceiling looked structural. On a GPU it is 4.3×
+faster and drops to 18% of a much smaller bill. A convolutional decoder with 21
+conv contexts was the part expected to fall back to the CPU for lack of op
+coverage; it is the part that gained most.
+
+**And the stage that does not move takes its place.** The code predictor is
+1.00× — the GPU buys it nothing, exactly as a third-size talker bought it
+nothing on the phone. It is an MTP head sized by the sixteen codebooks rather
+than by the LM, so neither dimension reaches it, and at 20.0 ms of a 45.8 ms
+frame it is **44% of the GPU's bill**. Whatever the next lever on this lane is,
+that is what it has to move.
+
+Five things a PC client would need to know:
+
+- **Shader compilation is a one-off per process**, and it is not small: the
+  first run measured 0.863 against 0.60 warm, with prefill at 3652 ms instead of
+  165 and prompt build at 894 instead of 8.5. A resident client pays it once at
+  startup. A client that spawns a process per utterance pays it every time and
+  never sees 0.60.
+- **The GPU's timings are far steadier than the CPU's.** Across three seeds:
+  0.558, 0.583, 0.612 on the GPU against 1.018, 1.112, 1.300 on the CPU. The
+  spread on the CPU side is the laptop's own clock, the same throttle the phone
+  has in a milder form — a GPU run is short enough not to provoke it.
+- **Different numerics are different takes.** The same seed and text gave 471
+  frames on the GPU and 299 on the CPU. Not a defect: at seeds 7 and 42 the GPU
+  produced 287 and 305 against the CPU's 337 and 316, so neither backend speaks
+  systematically slower. But a seed chosen for how it sounds on one backend is
+  not the same utterance on the other, and a client that pins seeds has to pin
+  them per backend.
+- **HarmonyOS's `GPU_LEAK_KILL` does not appear here.** The desktop backend
+  loaded about 1.37 GB of tensors, which is the model, and nothing objected.
+  That was a platform policy, not something ggml does everywhere, and it should
+  not be carried forward as a reason to avoid the GPU on a PC.
+- **The 0.6B CustomVoice checkpoint does not run correctly on this backend.**
+  Two passes, both identical: it never emits EOS, runs to the 2048-frame cap and
+  produces 163.8 s of audio for a 22-second passage, where the same seed on the
+  CPU stops at 349 frames. Unexplained, and enough to keep the small checkpoint
+  off a GPU server until it is.
+
+**This is a floor for PC hardware, not a ceiling.** It is an integrated GPU with
+no matrix cores, sharing bandwidth and thermal budget with the CPU that is
+feeding it. Anything discrete would start from here.
 
 ## Where each axis gets its numbers
 
@@ -1529,12 +1767,48 @@ desktop. The audio is written first and the crash comes during teardown, so the
 product is delivered — but a crash is a crash. Not re-tested since the callback
 ordering was fixed.
 
-**Audio over ~30 s segfaults.** **Measured**: 8.8 s and 28 s fine, 31 s, 32 s,
-37 s and 38 s all segfault, within ten seconds — during the audio front end,
-before a token is generated. The *limit* is not the defect: 30 s is the window
-every Whisper-family audio encoder has, llama.cpp included, which is why this
-file already plans `fsmn-vad` chunking. **Segfaulting instead of saying so is
-the defect.**
+**Audio over ~30 s segfaults — and "over ~30 s" was wrong.** **Measured** at
+the time: 8.8 s and 28 s fine, 31 s, 32 s, 37 s and 38 s all segfault, within
+ten seconds of starting, during the audio front end and before a token is
+generated. That reads as a threshold, and `Omni::max_seconds()` was set to 28
+on the strength of it.
+
+**Re-measured on a PC, it is not a threshold. It is not deterministic.** Ten
+runs of the same two clips through MNN's own `llm_demo`:
+
+| clip | outcome |
+| --- | --- |
+| 10 s, 14 s | ok |
+| **18 s** | crash, ok, crash, crash |
+| 22 s | crash |
+| **26 s** | ok, crash, crash, crash |
+| 28 s, 30 s | crash |
+
+**The same file, the same command, both outcomes.** The bisect gave that away
+before the repeats did — 26 s passed where 18 s and 22 s had failed, and a
+length limit cannot do that.
+
+So there is no limit to find, on this machine or any other, and the question
+of whether the limit differs per device has no threshold to compare. What can
+differ is the PROBABILITY. `max_seconds() = 28` does not prevent this crash; it
+shortens the input, which does less work and gives it fewer chances to fire.
+That is worth something and it is not what the constant says it is.
+
+Reading the code says why there is no clamp to find. Qwen2.5-Omni's encoder
+takes two inputs, so `Omni::audioProcess` takes the branch that builds a
+`seqlen × seqlen` attention mask and forwards — and the only length clamp in
+that function, `dim[2] > 3000` with the comment "Qwen2-Audio just support audio
+time <= 30s", is in the OTHER branch, the single-input one, which omni never
+reaches.
+
+**Segfaulting instead of saying so was always the defect. It is a worse defect
+than it looked**, because a caller cannot avoid it by staying under a number.
+
+**Still true at the current pin.** MNN moved from `f90018e` to `04ab6f2` on
+2026-09-21, and two of those ten commits are Omni bugfixes — attention-mask
+routing by mode, and a PLE refresh between successive text requests. Neither
+touches `audioProcess`, which is byte-identical across the update, so the
+paragraph above is not stale, only unfixed.
 
 **Not a defect: the cost.** **Measured**: about 43 s of compute for 14.4 s of
 speech — roughly **RTF 3** on a desktop CPU.
@@ -2234,6 +2508,12 @@ configuration is the same utterance; a frame is 80 ms of audio at 12.5 Hz:
 | **Codec decode** | 38.6 ms | **73.5 ms** | **73.5 ms** | **1.90×** |
 | Prefill | 0.65 s | 0.80–0.96 s, fixed | 0.83–0.92 s | amortises |
 
+**The laptop column wanders**, so read that last column as 1.9 to 2.1 rather
+than as three digits: the same three stages measured 23.9, 20.0 and 34.9 on
+another day against the 26.7, 22.8 and 38.6 here, which is the same ±15% every
+CPU figure on that machine carries. What survives is that all three move
+together.
+
 An earlier version of this table compared the phone's Q4 against the laptop's
 **Q8** and read the codec as an outlier at 2.45× where the other two were about
 1.9. It was comparing two quantizations: the codec file is the same in both
@@ -2339,11 +2619,22 @@ the same number the streaming comparison produced, from a different talker, at a
 different quantization, on a different day. Three independent attempts on one
 stage and it has not moved once.
 
-**Q4_K_M is what this lane runs at.** The pair goes from 2.2 GB to 1.4, RTF from
-2.60 to 2.29, and the voice holds — judged by ear, which was a real question
-rather than a formality: on the desktop Q8 and bf16 were audibly different in
-pace, so this quantization step could have cost the thing being bought and did
-not.
+**Q4_K_M is what this lane runs at, and that choice is now in question.** The
+pair goes from 2.2 GB to 1.4 and RTF from 2.60 to 2.29, and the voice was judged
+to hold — but "Q4 sounds fine" was said about one text with no `Q8` beside it,
+and when the two were later played back to back on the PC, **`Q8` was the more
+natural of the two**.
+
+The PC's answer flipped on that (see the deployment matrix), and the phone's does
+not automatically follow. There, neither quantization is anywhere near 1, so the
+22% is not buying latency either — it buys a generation that finishes sooner and
+a phone that heats less, which on a lane whose whole use is generate-ahead is a
+battery argument rather than an experience one. Against 0.8 GB more storage and
+an audible difference in the one thing this engine was carried for.
+
+**The measurement that would settle it has not been made**: `Q8` against `Q4` on
+the PHONE, same text, back to back. Everything above compares them on speed
+only.
 
 #### The thread count is not a lever, and the phone getting warm is
 
@@ -2684,42 +2975,125 @@ ggml-vulkan does not cover those ops they fall back to the CPU and the question
 answers itself. That is now unmeasurable here, and it was always the second
 question.
 
-#### Two things the port itself settled
+#### Two things the port settled, and neither stayed settled
 
 **Two ggml, and only one of them can be in the library.** The llama SDK and the
-qwentts SDK each ship `libggml{,-cpu,-base}.a`, built from commits two weeks
-apart. Linking both is the rapidjson mistake in a bigger form: the linker
+qwentts SDK each ship `libggml{,-cpu,-base}.a`, built from two trees that move
+independently. Linking both is the rapidjson mistake in a bigger form: the linker
 resolves each symbol from whichever archive it scans first, so one build's
 compiled code would run against the other's implementation. Three measurements
 decided it rather than a preference:
 
-| | needs | the other's ggml is missing |
+| at llama `c390d0a`, qwentts ggml `0572d60` | needs | the other's ggml is missing |
 | --- | --- | --- |
 | `libqwen-core.a` | 134 ggml/gguf symbols | 1 — `ggml_prec_set_acc` |
 | `libllama.a` | 287 | **0** |
 
-The public headers differ in two files and not one struct: `ggml.h` gains a prec
-enum and its two setters, `ggml-backend.h` loses a function neither library
-calls. So the newer one supersets the older, and the qwentts copy is what goes
-in. It is built from the same `-march` flags by the same script, so nothing is
+The public headers differed in two files and not one struct: `ggml.h` gained a
+prec enum and its two setters, `ggml-backend.h` lost a function neither library
+calls. So the newer superset the older, and the qwentts copy was what went in.
+It is built from the same `-march` flags by the same script, so nothing was
 given up for it. **This fails loudly if it stops being true** — C symbols are
 strong, so a real collision is a duplicate-definition error at link, not a
 silent wrong-layout read like rapidjson's.
 
-**One word for the whole HarmonyOS build.** `ggml-cpu.c` guards its
+**It stopped being true, and it did fail loudly.** Both checkouts were moved to
+their tips on 2026-09-21 — llama to `335b21f`, the qwentts ggml fork to
+`e2568d7` — and the desktop addon stopped linking with one undefined symbol.
+Re-measured on the new pair, from the built archives:
+
+| at llama `335b21f`, qwentts ggml `e2568d7` | needs | the other's ggml is missing |
+| --- | --- | --- |
+| `qwen-core.lib` | 134 ggml/gguf symbols | **0** |
+| `llama.lib` | 288 | 1 — `ggml_dsv4_hc_pre_gated` |
+
+**The direction inverted.** Whichever copy is kept, the same count is unmet;
+only the side that goes short has swapped. So "keep the newer one" was never a
+rule — it was one observation of a race between two trees, and which one was
+ahead changed the first time both were updated.
+
+**And the fork is not simply the older ggml.** It carries two symbols llama's
+does not, and one of them is functional: `ggml_compute_forward_snake_fused`, a
+graph-level pattern match in `ggml-cpu.c` that collapses `mul → sin → sqr →
+mul → add` into one kernel. That chain is the DAC decoder's snake activation,
+which is to say **the codec — 45% of the synthesis bill**. Dropping it does not
+break anything: the match fails and the five ops run unfused, same output.
+(The other, `ggml_backend_vk_reg`, is not a fork difference — it is there
+because only the qtts SDK is configured with `GGML_VULKAN=ON`.)
+
+**The decoder is built around that kernel, which is the part worth knowing
+before calling the loss small.** `dac-decoder-v2.h` says so in its header: the
+whole pipeline is laid out T-first *because* "the fused SNAKE op requires
+ne[0]=T and ne[1]=C", `alpha`/`beta` are folded into `a` and `inv_b` at load
+time so "the runtime kernel stays a single fused op", and the `[1, C]` weight
+layout matches its broadcast convention. The shape, type and contiguity tests
+in the dispatcher are exactly what that header undertakes to satisfy — so the
+match is designed to fire, not hoped to.
+
+It fires **29 times per codec forward**: four blocks of one SnakeBeta plus
+three residual units of two, plus `snake_post`. Unfused that is 145 ops instead
+of 29, and the count is the smaller half — each activation goes from one pass
+over the tensor to five, with four extra full-size intermediates written and
+read back, in the stage this file has already established is bandwidth-bound
+and is the floor. **Still unmeasured, and no longer plausibly negligible.**
+
+**Where it can matter is the CPU only.** The fusion lives in `ggml-cpu.c`, so
+the Vulkan path runs the five ops as five kernels either way: the GPU server
+configuration is untouched by this. What it touches is the phone, which has no
+usable GPU here, and the PC's CPU lane.
+
+**So the way out is one ggml, not a better choice between two.** qwentts.cpp
+added `GGML_SOURCE_DIR` on 2026-09-21, which points its build at any ggml tree,
+llama.cpp's included. The measurement above says that direction works — 134 of
+134, nothing missing — which makes it the fix rather than a tidy-up.
+
+**Done on the desktop lane, and it links.** `desktop/build.cmd qtts` now
+compiles llama.cpp's ggml inside the qwentts build, with `GGML_VULKAN=ON`, and
+the resulting archive set carries `ggml_dsv4_hc_pre_gated` for libllama and
+`ggml_backend_vk_reg` for the GPU path, satisfying both libraries from one
+commit. Linking llama's own SDK copy instead would not have worked here: only
+the qtts configure asks for Vulkan, so llama's SDK has no `ggml-vulkan.lib`,
+and the GPU is the entire reason this lane exists.
+
+**What it cost is confirmed absent**: `ggml_compute_forward_snake_fused` is not
+in the new archives. **Its worth has not been measured**, and that is the number
+that decides whether the fork's kernel comes back as a third patch or the loss
+is noise — five unfused ops in the stage that is 45% of the bill and was
+already the floor.
+
+**The phone lane had the same breakage, and now has the same fix.**
+`harmony/build.cmd qtts` passes `GGML_SOURCE_DIR` too, cross-compiles clean,
+and the HAP builds and signs — so libllama.a and libqwen-core.a link against
+one ggml on the device as well. `android/build.sh` is changed to match. Two
+things came with it: llama.cpp's affinity patch is now *applied by the script*
+rather than by hand, which is how it came to be recorded at all, and `qtts`
+needs a llama.cpp checkout whether or not `llama` is being built.
+
+**Two lines for the whole HarmonyOS build.** `ggml-cpu.c` guards its
 thread-affinity code with `__gnu_linux__` in five places and `__linux__` in one.
 OHOS is Linux on musl: it defines the second and not the first, so it took that
-one branch alone, into `pthread_setaffinity_np` — which the sysroot does not
-declare and `libc.so` does not export, only `sched_setaffinity`. The first fix
-tried, `-D_GNU_SOURCE`, treated the symptom: it silenced `cpu_set_t` and
-`CPU_ZERO`, which musl does have under that macro, and the next error was then
-the function that does not exist at all. Matching the
-guard to the other five drops OHOS into the file's own "unsupported platforms"
-fallback, where affinity is a no-op, and the flag became unnecessary. The patch
-lives in [harmony/patches/](../harmony/patches/) because the checkout is
-upstream's.
+one branch alone, into two errors. `cpu_set_t` and `CPU_ZERO` are undeclared —
+musl has them behind `_GNU_SOURCE`, which the toolchain's `-D_XOPEN_SOURCE=600`
+hides. Then `pthread_setaffinity_np`, which musl does not have under any guard;
+`libc.so` exports only `sched_setaffinity`. Both are fixed in the file: define
+the macro, and widen the `__ANDROID__` branch that already calls
+`sched_setaffinity` for exactly this gap. The patch lives in
+[third/patches/](../third/patches/) because the checkout is upstream's.
 
-### Fourteen misses, and the four shapes they came in
+**The first fix was wrong, and its write-up was wrong about why.** Narrowing
+`__linux__` to `__gnu_linux__` builds — it drops OHOS into the file's own
+"unsupported platforms" stub, where affinity is a no-op — and the note here
+called `-D_GNU_SOURCE` a symptom-level fix, on the grounds that the next error
+after it was the missing function. That reasoning reads a two-part problem as
+one part plus noise. `_GNU_SOURCE` is half the real fix; the second error
+needed its own half, not a different diagnosis. The tell was available and
+unread: **llama.cpp's checkout already carried this patch**, in this shape, by
+hand, applied for the same sysroot on the same machine — found only when `third/`
+went to record what those checkouts contain. What affinity is worth on this
+device is still unmeasured, so the argument for the new shape is that it does
+not silently discard upstream behavior, not that it is faster.
+
+### Nineteen misses, and the four shapes they came in
 
 Every claim these sections made from arithmetic or from a failed attempt was
 wrong, in four recurring shapes, so the pattern is worth more than the numbers:
@@ -2739,7 +3113,12 @@ wrong, in four recurring shapes, so the pattern is worth more than the numbers:
 | "`调` is wrong because it is the base checkpoint" | 1.7B base reads it correctly | that two configurations differing in three things cannot name which one did it |
 | "completing the 2×2 is a test with no payoff" | it cleared Q4 on the model this lane ships | that a test's value is what it rules IN elsewhere, not only what it settles about the thing being tested |
 | "the codec is the stage that did not scale, at **2.45×**" | 1.90×, same as the other two | that the phone column was Q4 and the laptop column Q8, and the codec is the one row a talker quantization does not move |
+| "the long Vulkan take is the seed, not the backend" | three kernel switches each shorten it, and one fixes the delivery | that a sweep over seeds shows a path is not ALWAYS wrong, not that it is right |
+| "closest to the CPU's length is the best numeric path" | the furthest of the three sounds best | that length was a proxy nobody had checked against the ear |
+| "the 0.6B runaway on Vulkan is a correctness failure, unexplained" | it is MMVQ, and it goes away | that the lossy kernel had already been found, one section up |
+| "the 0.6B is slower than the 1.7B on CPU, so it has no place" | 67.9 ms a frame against 78.8 | that the codec splits at 24 s, so two runs either side of that boundary are not comparable |
 | "omni lost to qtts on speed" | omni's coarsest setting beats qtts sustained | that RTF 2.8 was the Talker alone past the clock step, and 2.14 the whole synthesis before it |
+| "`-D_GNU_SOURCE` treated the symptom of a wrong branch" | it is half the fix; the branch is right and the other half is `sched_setaffinity` | that the llama.cpp checkout on this machine already carried the correct patch |
 
 Row three is worth a second look before the shapes. **RTF 3.6 was the prediction
 and 3.52 is the sustained answer**, so the number was very nearly right — and it
@@ -2765,6 +3144,13 @@ The correction came from being asked whether a TTS with no way to fix its voice
 was plausible — which is the question that should have been asked first, exactly
 as with MNN's silence.
 
+The last row is the same shape with a compiler in place of a model. `_GNU_SOURCE`
+did not silence the second error, and that was read as *the branch is wrong for
+this platform* rather than *this fix is not finished*. It is the cheapest
+version of the shape to avoid, because the evidence was not one lookup away but
+already on disk: the other checkout on this machine had the finished fix applied
+by hand. Nothing recorded that it was there, which is why `third/` now does.
+
 **Shape three: a question with the answer missing from it.**
 `bodyclock_local_set_threads` was added to settle whether decode is
 bandwidth-bound, and framed as two outcomes — a flat curve meaning the wall is
@@ -2786,8 +3172,8 @@ the disk, and the written voice kept. **A proof about the ceiling says nothing
 about the slope.**
 
 **Shape four: predicting a difference, and never asking how big a difference
-the measurement can see.** Both of the last two rows are this, and both were
-built out of true statements.
+the measurement can see.** The thread row and the streaming row are both this,
+and both were built out of true statements.
 
 The thread one: qwentts.cpp picks `hardware_concurrency() / 2` reasoning about
 hyperthreads, this phone has none, and the llama lane on the same device had

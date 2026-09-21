@@ -25,13 +25,21 @@ tried and rejected, so it is not argued twice:
 They are not numbered because they are not a sequence — `logo.md` does not come
 before `icons.md`. This table is the index; git is the history.
 
-Three scripts here write into the app, and are the only thing that should:
-`make-arkts-palettes.py` generates the palette table, `make-harmony-icons.py`
-the icon assets, `sync-locales.py` the untranslated locale directories and the
-status table above. Their outputs are committed, so nothing here is needed to
-build; they are needed to *change* any of it, and they check invariants on the
-way through — that every palette carries all 19 tokens, that each family is one
-light and one dark, that a new palette has been registered.
+Four scripts here write into the apps, and are the only thing that should:
+`make-arkts-palettes.py` generates the HarmonyOS palette table,
+`make-css-palettes.py` the desktop client's stylesheet of the same colors,
+`make-harmony-icons.py` the icon assets, `sync-locales.py` the untranslated
+locale directories and the status table above. Their outputs are committed, so
+nothing here is needed to build; they are needed to *change* any of it, and they
+check invariants on the way through — that every palette carries all 19 tokens,
+that each family is one light and one dark, that a new palette has been
+registered.
+
+The two palette generators read one file and must agree about what its tokens
+are called; the rename table is duplicated in both, and a token that means
+`bg_page` on the phone and something else on the desktop is precisely the
+failure a generated file exists to prevent. Change one, change the other, and
+run both.
 
 ## The canvas in `ui/`
 

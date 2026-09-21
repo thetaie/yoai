@@ -25,13 +25,13 @@ heuristic exactly as it was.
 
 --- a/src/backend.h
 +++ b/src/backend.h
-@@ -26,7 +26,17 @@
+@@ -26,7 +26,17 @@ struct BackendPair {
  // Physical core count heuristic (logical / 2 for HT/SMT).
  // Used for GGML CPU thread count: GEMM shares SIMD units across hyperthreads,
  // so one thread per physical core is optimal.
 +//
 +// QWEN_N_THREADS overrides it. The heuristic assumes SMT, which a phone does
-+// not have; see harmony/patches/ in the bodyclock repo for the measurement that
++// not have; see third/patches/ in the bodyclock repo for the measurement that
 +// asked for this.
  static int backend_cpu_n_threads(void) {
 +    if (const char * env = std::getenv("QWEN_N_THREADS")) {

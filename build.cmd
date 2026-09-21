@@ -93,8 +93,9 @@ rem ----------------------------------------------------------------------------
 if not defined LLAMA_SRC for %%I in ("%PROJECT_DIR%..") do set "LLAMA_SRC=%%~fI\llama.cpp"
 if not exist "!LLAMA_SRC!\ggml\include\ggml.h" (
     echo no llama.cpp at "!LLAMA_SRC!".>&2
-    echo clone it, or point LLAMA_SRC at an existing checkout:>&2
-    echo   git clone --depth 1 https://github.com/ggml-org/llama.cpp "!LLAMA_SRC!">&2
+    echo clone it at the pinned commit, with its patch applied:>&2
+    echo   third\sync.cmd clone llama.cpp>&2
+    echo or point LLAMA_SRC at an existing checkout.>&2
     exit /b 1
 )
 

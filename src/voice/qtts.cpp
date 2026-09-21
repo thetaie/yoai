@@ -55,6 +55,20 @@ void forward_log(qt_log_level level, const char* msg, void* /*user_data*/) {
     }
 }
 
+// setenv with "leave what is already there", spelled for three compilers.
+// MSVC has no setenv at all, and _putenv_s always overwrites, so the part that
+// makes an outside override win has to be done by hand on that side.
+void set_env_default(const char* name, const char* value) {
+    if (std::getenv(name)) {
+        return;
+    }
+#if defined(_WIN32)
+    _putenv_s(name, value);
+#else
+    setenv(name, value, 1);
+#endif
+}
+
 // The thread count, handed to qwentts.cpp the only way it takes one.
 //
 // An environment variable is a poor interface and it is the interface that
@@ -210,9 +224,24 @@ bool read_reference_wav(const std::string& path, std::vector<float>* out, std::s
 // the code is running on, not of how it was compiled, and because an override
 // from outside stays possible -- setenv's final 0 means anything already in the
 // environment wins.
+// DISABLE_MMVQ is the one of these three that is not about the phone, and the
+// only one measured to do anything. MMVQ is ggml's quantized mat-vec path, a
+// performance optimization -- and on this Intel driver turning it OFF made the
+// engine both FASTER and better: 78.3 to 71.0 ms a frame at Q8_0, 44.8 to 46.1
+// at Q4_K_M, with the Q4 cost being the only thing it took. Both quantizations
+// gained on quality by ear, across three seeds, judged on pace and on how
+// mechanical the pauses were. A kernel that is slower and lossier is not a
+// trade, so it is off by default rather than offered as a choice.
+//
+// Two neighbours were tried and are not set. DISABLE_INTEGER_DOT_PRODUCT costs
+// another 3.8% and, stacked on this, was indistinguishable by ear.
+// DISABLE_F16 costs 17% and introduced audible artefacts, which is the opposite
+// of what disabling a lower precision should do -- unexplained, and enough not
+// to touch it.
 void apply_vulkan_env() {
-    setenv("GGML_VK_PREFER_HOST_MEMORY", "1", 0);
-    setenv("GGML_VK_SUBALLOCATION_BLOCK_SIZE", "67108864", 0);
+    set_env_default("GGML_VK_PREFER_HOST_MEMORY", "1");
+    set_env_default("GGML_VK_SUBALLOCATION_BLOCK_SIZE", "67108864");
+    set_env_default("GGML_VK_DISABLE_MMVQ", "1");
 }
 #endif
 

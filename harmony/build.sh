@@ -290,13 +290,31 @@ build_llama() {
     local llama_src="${LLAMA_SRC:-$(cd "$SCRIPT_DIR/../.." && pwd)/llama.cpp}"
     if [ ! -f "$llama_src/include/llama.h" ]; then
         echo "[llama] no llama.cpp at \"$llama_src\"." >&2
-        echo "[llama] clone it, or set LLAMA_SRC to an existing checkout:" >&2
-        echo "[llama]   git clone --depth 1 https://github.com/ggml-org/llama.cpp \"$llama_src\"" >&2
+        echo "[llama] clone it at the pinned commit, with its patch applied:" >&2
+        echo "[llama]   ../third/sync.sh clone llama.cpp" >&2
+        echo "[llama] or set LLAMA_SRC to an existing checkout." >&2
         return 1
     fi
 
     if [ -z "$ARCH" ]; then echo "[llama] arch=baseline armv8-a"; else echo "[llama] arch=$ARCH"; fi
     echo "[llama] src=$llama_src"
+
+    # The OHOS affinity patch, which this lane needs and never used to apply: it
+    # was in the checkout by hand, undocumented, for long enough that nothing
+    # here knew it was load-bearing. `--reverse --check` is the idempotence
+    # test -- it succeeds only when the change is already present, so a re-run
+    # is a no-op and a checkout that moved under the patch fails loudly.
+    local patch="$SCRIPT_DIR/../third/patches/llama-ggml-ohos-affinity.patch"
+    if [ -f "$patch" ]; then
+        if git -C "$llama_src" apply --reverse --check "$patch" 2>/dev/null; then
+            echo "[patch] already patched: $(basename "$patch")"
+        else
+            echo "[patch] patching: $(basename "$patch")"
+            git -C "$llama_src" apply "$patch" || {
+                echo "[patch] could not apply it; the checkout moved -- rebase the patch." >&2
+                return 1; }
+        fi
+    fi
 
     # The SDK ships its own cmake and ninja beside the toolchain; fall back to
     # the host's if it does not.

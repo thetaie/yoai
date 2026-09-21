@@ -83,8 +83,9 @@ if [ -n "$DO_ASR" ]; then
   LLAMA_SRC="${LLAMA_SRC:-$(cd .. && pwd)/llama.cpp}"
   if [ ! -f "$LLAMA_SRC/ggml/include/ggml.h" ]; then
     echo "no llama.cpp at $LLAMA_SRC." >&2
-    echo "clone it, or point LLAMA_SRC at an existing checkout:" >&2
-    echo "  git clone --depth 1 https://github.com/ggml-org/llama.cpp $LLAMA_SRC" >&2
+    echo "clone it at the pinned commit, with its patch applied:" >&2
+    echo "  third/sync.sh clone llama.cpp" >&2
+    echo "or point LLAMA_SRC at an existing checkout." >&2
     exit 1
   fi
 

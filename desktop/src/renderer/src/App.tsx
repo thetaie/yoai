@@ -1,0 +1,360 @@
+/**
+ * The window's one screen: a thread, a composer, and the settings behind them.
+ *
+ * A port of harmony/entry/src/main/ets/pages/Index.ets, including the turn
+ * lifecycle -- which is the part worth keeping identical, because it is where
+ * the streamed pieces become one saved message and where "the model said
+ * nothing" is told apart from "the user stopped it".
+ */
+import { useCallback, useEffect, useRef, useState, type JSX } from 'react'
+import type { ChatMessage, MessagePart, Usage } from '@shared/chat'
+import { ModelConfig, modelLabel } from '@shared/provider'
+import { DEFAULT_PREFS, type CoreStatus, type InterfacePrefs, type SessionMeta } from '@shared/store'
+import { newSessionId, runTurn } from './chatEngine'
+import { Composer } from './components/Composer'
+import { Settings } from './components/Settings'
+import { Sidebar } from './components/Sidebar'
+import { Thread } from './components/Thread'
+import { S } from './strings'
+
+type View = 'chat' | 'settings'
+
+export function App(): JSX.Element {
+  const [status, setStatus] = useState<CoreStatus | null>(null)
+  const [prefs, setPrefs] = useState<InterfacePrefs>(DEFAULT_PREFS)
+  const [systemDark, setSystemDark] = useState(
+    () => window.matchMedia('(prefers-color-scheme: dark)').matches
+  )
+
+  const [models, setModels] = useState<ModelConfig[]>([])
+  const [activeId, setActiveId] = useState('')
+
+  const [sessions, setSessions] = useState<SessionMeta[]>([])
+  const [sessionId, setSessionId] = useState(newSessionId)
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+
+  const [input, setInput] = useState('')
+  const [streaming, setStreaming] = useState(false)
+  const [streamText, setStreamText] = useState('')
+  const [streamThinking, setStreamThinking] = useState('')
+  const [usage, setUsage] = useState<Usage | null>(null)
+  const [view, setView] = useState<View>('chat')
+
+  // The turn's accumulators and the transcript live in refs as well as state:
+  // the callbacks below are created once per turn and would otherwise close
+  // over the values as they were when the turn started, which for a stream of
+  // deltas means every chunk overwriting the last.
+  const textRef = useRef('')
+  const thinkRef = useRef('')
+  const messagesRef = useRef<ChatMessage[]>([])
+  const cancelerRef = useRef<{ cancel: () => void } | null>(null)
+
+  const setThread = useCallback((next: ChatMessage[]) => {
+    messagesRef.current = next
+    setMessages(next)
+  }, [])
+
+  //----------------------------------------------------------------------------
+  // Startup
+  //----------------------------------------------------------------------------
+
+  const reloadModels = useCallback(async () => {
+    setModels(await window.bodyclock.models.list())
+    setActiveId(await window.bodyclock.models.activeId())
+  }, [])
+
+  const reloadSessions = useCallback(async () => {
+    setSessions(await window.bodyclock.sessions.index())
+  }, [])
+
+  useEffect(() => {
+    void (async () => {
+      setStatus(await window.bodyclock.coreStatus())
+      setPrefs(await window.bodyclock.prefs.get())
+      await reloadModels()
+      await reloadSessions()
+    })()
+  }, [reloadModels, reloadSessions])
+
+  // 'system' is answered here and not in the stylesheet: an explicit choice has
+  // to win over prefers-color-scheme, and a media query cannot be told that.
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = (e: MediaQueryListEvent): void => setSystemDark(e.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
+  const resolvedMode: 'light' | 'dark' =
+    prefs.colorMode === 'system' ? (systemDark ? 'dark' : 'light') : prefs.colorMode
+
+  useEffect(() => {
+    const root = document.documentElement
+    root.dataset.family = prefs.paletteFamily
+    root.dataset.mode = resolvedMode
+    root.style.setProperty('--bc-font-scale', String(prefs.fontScale))
+  }, [prefs.paletteFamily, prefs.fontScale, resolvedMode])
+
+  const changePrefs = (patch: Partial<InterfacePrefs>): void => {
+    void window.bodyclock.prefs.set(patch).then(setPrefs)
+  }
+
+  //----------------------------------------------------------------------------
+  // Sessions
+  //----------------------------------------------------------------------------
+
+  const persist = useCallback(
+    async (id: string, msgs: ChatMessage[]) => {
+      await window.bodyclock.sessions.save(id, msgs)
+      await reloadSessions()
+    },
+    [reloadSessions]
+  )
+
+  const openSession = async (id: string): Promise<void> => {
+    if (streaming) {
+      return   // switching mid-turn would stream into the wrong transcript
+    }
+    setSessionId(id)
+    setThread(await window.bodyclock.sessions.messages(id))
+    setUsage(null)
+    setView('chat')
+  }
+
+  const newSession = (): void => {
+    if (streaming) {
+      return
+    }
+    setSessionId(newSessionId())
+    setThread([])
+    setUsage(null)
+    setView('chat')
+  }
+
+  const dropSession = async (id: string): Promise<void> => {
+    await window.bodyclock.sessions.remove(id)
+    await reloadSessions()
+    if (id === sessionId) {
+      newSession()
+    }
+  }
+
+  const clearSessions = async (): Promise<void> => {
+    await window.bodyclock.sessions.clear()
+    await reloadSessions()
+    newSession()
+  }
+
+  //----------------------------------------------------------------------------
+  // One turn
+  //----------------------------------------------------------------------------
+
+  /**
+   * Say something to the user in the thread. Transient rows render like a reply
+   * but are never sent to a model and never saved.
+   */
+  const note = (text: string): void => {
+    setThread([
+      ...messagesRef.current,
+      { role: 'assistant', content: text, transient: true, ts: Date.now() }
+    ])
+  }
+
+  /**
+   * Fold the streamed pieces into one assistant message and persist.
+   *
+   * A turn that produced nothing at all still gets a row: silence after a send
+   * reads as the app being broken, and "the model returned nothing" is at least
+   * actionable. An aborted turn keeps whatever arrived -- the user stopped it,
+   * they did not ask to lose it.
+   */
+  const finishTurn = (label: string, aborted: boolean, id: string): void => {
+    const parts: MessagePart[] = []
+    if (thinkRef.current.length > 0) {
+      parts.push({ kind: 'thinking', content: thinkRef.current })
+    }
+    if (textRef.current.length > 0) {
+      parts.push({ kind: 'text', content: textRef.current })
+    }
+
+    let next = messagesRef.current
+    if (parts.length > 0) {
+      next = [
+        ...next,
+        {
+          role: 'assistant',
+          content: textRef.current,
+          parts,
+          model: label,
+          ts: Date.now()
+        }
+      ]
+    } else if (!aborted) {
+      const last = next[next.length - 1]
+      if (last === undefined || last.transient !== true) {
+        next = [
+          ...next,
+          { role: 'assistant', content: S.chatEmptyReply, transient: true, ts: Date.now() }
+        ]
+      }
+    }
+    setThread(next)
+
+    setStreaming(false)
+    setStreamText('')
+    setStreamThinking('')
+    textRef.current = ''
+    thinkRef.current = ''
+    cancelerRef.current = null
+    void persist(id, next)
+  }
+
+  const send = (): void => {
+    const text = input.trim()
+    if (text.length === 0 || streaming) {
+      return
+    }
+    if (activeId.length === 0) {
+      note(S.chatNeedModel)
+      return
+    }
+
+    const withUser: ChatMessage[] = [
+      ...messagesRef.current,
+      { role: 'user', content: text, ts: Date.now() }
+    ]
+    setThread(withUser)
+    setInput('')
+    setStreaming(true)
+    setStreamText('')
+    setStreamThinking('')
+    setUsage(null)
+    textRef.current = ''
+    thinkRef.current = ''
+
+    const active = models.find((m) => m.id === activeId)
+    const label = active === undefined ? activeId : modelLabel(active)
+    const turnSession = sessionId
+
+    // No system prompt, the same as the HarmonyOS app: the one that exists
+    // there belongs to the voice chain, not to a typed conversation.
+    cancelerRef.current = runTurn(activeId, withUser, '', {
+      onDelta: (t) => {
+        textRef.current += t
+        setStreamText(textRef.current)
+      },
+      onThinking: (t) => {
+        thinkRef.current += t
+        setStreamThinking(thinkRef.current)
+      },
+      onUsage: (json) => {
+        try {
+          setUsage(JSON.parse(json) as Usage)
+        } catch {
+          // A summary that will not parse is worth nothing and costs nothing to
+          // drop; the reply itself already arrived.
+        }
+      },
+      onError: (message) => {
+        setThread([
+          ...messagesRef.current,
+          { role: 'assistant', content: message, transient: true, ts: Date.now() }
+        ])
+      },
+      onDone: (aborted) => finishTurn(label, aborted, turnSession)
+    })
+  }
+
+  const stop = (): void => cancelerRef.current?.cancel()
+
+  //----------------------------------------------------------------------------
+  // Render
+  //----------------------------------------------------------------------------
+
+  const ready = activeId.length > 0 && status?.ok === true
+
+  return (
+    <div className="shell">
+      <Sidebar
+        sessions={sessions}
+        currentId={sessionId}
+        onSelect={(id) => void openSession(id)}
+        onNew={newSession}
+        onDelete={(id) => void dropSession(id)}
+        onOpenSettings={() => setView('settings')}
+      />
+
+      <main className="main">
+        {view === 'settings' && status !== null ? (
+          <Settings
+            status={status}
+            models={models}
+            prefs={prefs}
+            resolvedMode={resolvedMode}
+            onModelsChanged={reloadModels}
+            onPrefs={changePrefs}
+            onClearSessions={() => void clearSessions()}
+            onClose={() => setView('chat')}
+          />
+        ) : (
+          <>
+            <div className="topbar">
+              <select
+                className="control"
+                value={activeId}
+                disabled={models.length === 0}
+                onChange={(e) => {
+                  setActiveId(e.target.value)
+                  void window.bodyclock.models.setActiveId(e.target.value)
+                }}
+              >
+                {models.length === 0 ? (
+                  <option value="">{S.chatPickModel}</option>
+                ) : (
+                  models.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {modelLabel(m)}
+                    </option>
+                  ))
+                )}
+              </select>
+              <div className="topbar-spacer" />
+              <button className="btn btn-quiet" onClick={newSession} disabled={streaming}>
+                {S.drawerNewChat}
+              </button>
+            </div>
+
+            {status !== null && !status.ok && <div className="banner">{status.detail}</div>}
+
+            {messages.length === 0 && !streaming ? (
+              <div className="thread">
+                <div className="placeholder">
+                  <h2>{S.chatEmptyTitle}</h2>
+                  <p>{S.chatEmptyBody}</p>
+                </div>
+              </div>
+            ) : (
+              <Thread
+                messages={messages}
+                streaming={streaming}
+                streamText={streamText}
+                streamThinking={streamThinking}
+                usage={usage}
+              />
+            )}
+
+            <Composer
+              value={input}
+              onChange={setInput}
+              onSend={send}
+              onStop={stop}
+              streaming={streaming}
+              ready={ready}
+              hint={S.chatDisclaimer}
+            />
+          </>
+        )}
+      </main>
+    </div>
+  )
+}

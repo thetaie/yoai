@@ -112,10 +112,22 @@ public:
     // `sink` NULL asks for text only. Non-NULL asks the Talker to speak the
     // reply, which is most of the cost.
     //
-    // Refuses audio longer than about 30 seconds rather than attempting it: 28 s
-    // works and 31 s segfaults inside MNN's audio front end. The window is
-    // ordinary -- every Whisper-family encoder has it -- but crashing instead of
-    // reporting it is not, so the limit is enforced here.
+    // Refuses audio longer than about 30 seconds rather than attempting it.
+    //
+    // **The number is not a limit, and the thing it guards against is not a
+    // threshold.** It was set from two runs -- 28 s fine, 31 s segfault --
+    // which read as a boundary. Re-measured later on a PC through MNN's own
+    // llm_demo, the same clip at the same length both crashes and succeeds:
+    // 18 s went crash, ok, crash, crash, and 26 s went ok, crash, crash, crash.
+    // A length limit cannot do that, and the bisect had already said so by
+    // passing 26 s after failing 18 and 22.
+    //
+    // Nor is it a thread race: one thread crashes too.
+    //
+    // So this guard does not prevent the crash. It shortens the input, which
+    // does less work and gives a memory bug in MNN's audio front end fewer
+    // chances to fire. That is worth having and it is not what the name says.
+    // design/voice.md has the runs.
     bool ask(const float* pcm, size_t n_samples, const std::string& prompt,
              OmniAudioSink sink, void* user_data, OmniReply* out);
 

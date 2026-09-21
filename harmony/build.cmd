@@ -4,7 +4,8 @@ rem Everything the HarmonyOS app needs built natively, before DevEco can compile
 rem the HAP. This does NOT build the app itself -- open harmony\ in DevEco for
 rem that. It builds what the app links against.
 rem
-rem   build.cmd [abi] [deps^|llama^|mnn^|hap^|all] [clean] [arch=<march>^|baseline]
+rem   build.cmd [abi] [deps^|llama^|mnn^|qtts^|vulkan^|hap^|all] [clean]
+rem             [arch=<march>^|baseline]
 rem
 rem     abi     arm64-v8a (default) ^| x86_64 ^| armeabi-v7a
 rem     deps    the core's C++ dependencies via vcpkg -> prebuilt\<abi>\
@@ -15,8 +16,13 @@ rem             (building it is what turns on-device chat on)
 rem     mnn     MNN with the omni Talker -> prebuilt\mnn-sdk\<abi>\
 rem             An EVALUATION lane, deliberately NOT part of `all`: nothing in
 rem             the app links it yet. See :mnn for what it is for.
+rem     qtts    speech output (qwentts.cpp) -> prebuilt\qtts-sdk\<abi>\
+rem             Needs a llama.cpp checkout too, whether or not `llama` is being
+rem             built: it compiles llama.cpp's ggml. See :qtts for why.
+rem     vulkan  modifies qtts: also build ggml's Vulkan backend. Implies qtts,
+rem             and is not a target of its own.
 rem     hap     compile and sign the app itself, via hvigor. No IDE needed.
-rem     all     all three, in that order -- and what a bare `build.cmd` does
+rem     all     deps, llama, hap -- and what a bare `build.cmd` does
 rem     clean   discard llama's cached build tree and SDK first. `deps` always
 rem             replaces its own output, so there is nothing for it to clean.
 rem     arch=   llama only: the -march feature set. `baseline` means plain
@@ -45,9 +51,14 @@ rem   DEVECO_HOME     DevEco Studio install (default: read from its own .home
 rem                   marker under %LOCALAPPDATA%\Huawei\DevEcoStudio*)
 rem   VCPKG_ROOT      vcpkg checkout (default: a sibling of the repo)
 rem   OHOS_SDK_ROOT   the SDK dir CONTAINING native\ (default: from DEVECO_HOME)
-rem   LLAMA_SRC       llama.cpp checkout (default: a sibling of the repo)
+rem   LLAMA_SRC       llama.cpp checkout (default: a sibling of the repo).
+rem                   Read by `llama` AND by `qtts`, which compiles its ggml.
 rem   LLAMA_SDK_DIR   where to assemble the llama SDK (default: auto-detected)
 rem   MNN_SRC         MNN checkout (default: a sibling of the repo), `mnn` only
+rem   QTTS_SRC        qwentts.cpp checkout (default: a sibling), `qtts` only
+rem
+rem `..\third\sync.cmd clone` fetches all of these at their pinned commits, with
+rem the patches this script expects already applied.
 rem ---------------------------------------------------------------------------
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
@@ -121,8 +132,15 @@ rem Nothing named: everything, in the order `all` would. The bare command is wha
 rem a fresh clone runs, and it should end with an installable app that has
 rem on-device chat -- not with a half-built tree needing two more invocations
 rem nobody mentioned.
+rem
+rem NOTHING named means none of the five, not none of the three. The guard used
+rem to test deps/llama/hap only, so `build.cmd qtts` -- a target it does not
+rem list -- read as an empty command line and quietly built deps, llama and the
+rem HAP as well. Same for `mnn`, the lane this file calls opt-in. The cost was
+rem minutes, not correctness, which is why it went unnoticed.
 set "IMPLIED_ALL="
-if not defined DO_DEPS if not defined DO_LLAMA if not defined DO_HAP (
+if not defined DO_DEPS if not defined DO_LLAMA if not defined DO_MNN ^
+if not defined DO_QTTS if not defined DO_HAP (
     set "DO_DEPS=1"
     set "DO_LLAMA=1"
     set "DO_HAP=1"
@@ -412,13 +430,20 @@ rem pin and re-measure against, not one silently refreshed underneath it.
 if not defined LLAMA_SRC for %%I in ("%~dp0..\..") do set "LLAMA_SRC=%%~fI\llama.cpp"
 if not exist "!LLAMA_SRC!\include\llama.h" (
     echo no llama.cpp at "!LLAMA_SRC!".>&2
-    echo clone it, or set LLAMA_SRC to an existing checkout:>&2
-    echo   git clone --depth 1 https://github.com/ggml-org/llama.cpp "!LLAMA_SRC!">&2
+    echo clone it at the pinned commit, with its patch applied:>&2
+    echo   ..\third\sync.cmd clone llama.cpp>&2
+    echo or set LLAMA_SRC to an existing checkout.>&2
     exit /b 1
 )
 
 if defined ARCH ( echo [llama] arch=!ARCH! ) else ( echo [llama] arch=baseline armv8-a )
 echo [llama] src=!LLAMA_SRC!
+
+rem The OHOS affinity patch, which this lane needs and never used to apply.
+rem It was in the checkout by hand, undocumented, for long enough that nothing
+rem here knew it was load-bearing -- found only when third/ went to record what
+rem these trees contain. Now it is a file and this is the line that applies it.
+call :qpatch "!LLAMA_SRC!" llama-ggml-ohos-affinity.patch || exit /b 1
 
 rem The SDK ships its own cmake and ninja beside the toolchain; fall back to the
 rem host's if it does not.
@@ -554,8 +579,9 @@ rem ===========================================================================
 if not defined MNN_SRC for %%I in ("%~dp0..\..") do set "MNN_SRC=%%~fI\MNN"
 if not exist "!MNN_SRC!\CMakeLists.txt" (
     echo no MNN at "!MNN_SRC!".>&2
-    echo clone it, or set MNN_SRC to an existing checkout:>&2
-    echo   git clone --depth 1 https://github.com/alibaba/MNN "!MNN_SRC!">&2
+    echo clone it at the pinned commit:>&2
+    echo   ..\third\sync.cmd clone MNN>&2
+    echo or set MNN_SRC to an existing checkout.>&2
     exit /b 1
 )
 echo [mnn] src=!MNN_SRC!
@@ -710,29 +736,57 @@ rem ===========================================================================
 if not defined QTTS_SRC for %%I in ("%~dp0..\..") do set "QTTS_SRC=%%~fI\qwentts.cpp"
 if not exist "!QTTS_SRC!\CMakeLists.txt" (
     echo no qwentts.cpp at "!QTTS_SRC!".>&2
-    echo clone it, or set QTTS_SRC to an existing checkout:>&2
-    echo   git clone --depth 1 --recursive https://github.com/ServeurpersoCom/qwentts.cpp "!QTTS_SRC!">&2
-    exit /b 1
-)
-if not exist "!QTTS_SRC!\ggml\CMakeLists.txt" (
-    echo qwentts.cpp at "!QTTS_SRC!" has no ggml submodule.>&2
-    echo   git -C "!QTTS_SRC!" submodule update --init --recursive>&2
+    echo clone it at the pinned commit, submodule and patches included:>&2
+    echo   ..\third\sync.cmd clone qwentts.cpp>&2
+    echo or set QTTS_SRC to an existing checkout.>&2
     exit /b 1
 )
 echo [qtts] src=!QTTS_SRC!
+rem The ggml submodule is deliberately NOT checked for here any more. This lane
+rem stopped compiling it -- see the GGML_SOURCE_DIR note below -- so demanding it
+rem would be a precondition on something the build does not read.
 
-rem Two patches, applied to somebody else's checkout. patches\ carries the full
-rem reasoning for each; in one line:
+rem --- ONE ggml for both lanes, and llama.cpp's is the one ---------------------
+rem This lane used to compile qwentts's own ggml submodule, and the app linked
+rem that copy for everything because it superset llama's. The 2026-09-21 update
+rem inverted that: libllama now wants ggml_dsv4_hc_pre_gated, which the fork does
+rem not have, so whichever of the two copies is kept, one symbol goes unmet and
+rem the app does not link. design/voice.md has both symbol tables.
 rem
-rem   ggml-cpu.c   OHOS is the only platform taking the one __linux__ branch, and
-rem                it calls functions the sysroot neither declares nor exports.
+rem GGML_SOURCE_DIR, which qwentts added the same day, is the way out: it points
+rem the qwentts build at any ggml tree, so both lanes compile the SAME one from
+rem the SAME commit and the question stops existing. What it costs is the fork's
+rem ggml_compute_forward_snake_fused, a graph pattern match that collapses the
+rem DAC decoder's snake activation into one kernel -- same output without it,
+rem some unmeasured amount slower, in the stage that is 45% of the synthesis.
+rem
+rem So this target now needs a llama.cpp checkout even when `llama` is not being
+rem built, which is new and is the reason for the check.
+if not defined LLAMA_SRC for %%I in ("%~dp0..\..") do set "LLAMA_SRC=%%~fI\llama.cpp"
+if not exist "!LLAMA_SRC!\ggml\CMakeLists.txt" (
+    echo qtts compiles llama.cpp's ggml and there is none at "!LLAMA_SRC!\ggml".>&2
+    echo   ..\third\sync.cmd clone llama.cpp>&2
+    echo or set LLAMA_SRC to an existing checkout.>&2
+    exit /b 1
+)
+echo [qtts] ggml=!LLAMA_SRC!\ggml
+
+rem Patches, applied to somebody else's checkouts. ..\third\patches\ carries the
+rem full reasoning for each; in one line:
+rem
+rem   ggml-cpu.c   OHOS takes the __linux__ affinity branch, where musl needs
+rem                _GNU_SOURCE for cpu_set_t and has no pthread_setaffinity_np.
+rem                Applied to LLAMA_SRC, because that is the ggml being compiled
+rem                now. qwentts-ggml-ohos-affinity.patch is the same fix for the
+rem                submodule, kept in third/patches for whoever points
+rem                GGML_SOURCE_DIR back at it, and deliberately not applied here.
 rem   backend.h    the CPU thread count is fixed at hardware_concurrency()/2 with
 rem                no parameter, and that heuristic is about SMT, not phones.
 rem
-rem Applied here rather than committed there because the checkout is upstream's
-rem and gets updated. :qpatch is idempotent -- see the note on it below.
-call :qpatch "!QTTS_SRC!\ggml" qwentts-ggml-ohos-affinity.patch   || exit /b 1
-call :qpatch "!QTTS_SRC!"      qwentts-thread-count-override.patch || exit /b 1
+rem Applied here rather than committed there because the checkouts are upstream's
+rem and get updated. :qpatch is idempotent -- see the note on it below.
+call :qpatch "!LLAMA_SRC!" llama-ggml-ohos-affinity.patch      || exit /b 1
+call :qpatch "!QTTS_SRC!"  qwentts-thread-count-override.patch || exit /b 1
 
 set "NATIVE=!OHOS_SDK_ROOT!\native"
 set "TOOLCHAIN=!NATIVE!\build\cmake\ohos.toolchain.cmake"
@@ -768,6 +822,7 @@ rem lane uses, for the same reason: CMake's feature tests compile AND RUN, which
 rem cannot work for the phone, so every one of them "fails" and ggml silently
 rem drops dotprod, i8mm and fp16 on a device that has all three.
 set "QCFG=-S "!QTTS_SRC!" -B "!QBUILD!" -G Ninja"
+set "QCFG=!QCFG! -DGGML_SOURCE_DIR="!LLAMA_SRC:\=/!/ggml""
 set "QCFG=!QCFG! -DCMAKE_TOOLCHAIN_FILE="!TOOLCHAIN!""
 set "QCFG=!QCFG! -DOHOS_ARCH=%ABI%"
 set "QCFG=!QCFG! -DCMAKE_MAKE_PROGRAM="!NINJA!""
@@ -776,13 +831,13 @@ set "QCFG=!QCFG! -DBUILD_SHARED_LIBS=OFF"
 set "QCFG=!QCFG! -DQWEN_SHARED=OFF"
 set "QCFG=!QCFG! -DGGML_NATIVE=OFF"
 set "QCFG=!QCFG! -DGGML_OPENMP=OFF"
-rem No -D_GNU_SOURCE here, though an earlier version of this file added it. The
-rem first error was cpu_set_t and CPU_ZERO undeclared, which _GNU_SOURCE does
-rem fix -- musl has them, and the OHOS toolchain's -D_XOPEN_SOURCE=600 hides
-rem them. But the next error was pthread_setaffinity_np, which _GNU_SOURCE
-rem cannot fix because musl does not have it at all. The flag was treating a
-rem symptom of taking a branch that was never meant for this platform.
-rem The patch above removes the branch, and with it the need for the flag.
+rem No -D_GNU_SOURCE on the command line: the patch above puts the #define in
+rem the one file that needs it, which is where llama.cpp's copy of the same fix
+rem puts it too. Both errors are real and both are fixed there -- cpu_set_t and
+rem CPU_ZERO, which musl hides behind _GNU_SOURCE (the OHOS toolchain passes
+rem -D_XOPEN_SOURCE=600), and pthread_setaffinity_np, which musl does not have
+rem at all and which the patch routes to sched_setaffinity, the same call the
+rem Android branch already makes. Affinity keeps working; nothing is no-op'd.
 rem
 rem The same feature set the llama lane uses, and set the same way -- these two
 rem are the same ggml compiled twice, so a difference here would be an accident
@@ -865,10 +920,10 @@ if !QLIBS! LSS 2 (
 echo [qtts] SDK at !QSDK! ^(!QLIBS! archives^)
 exit /b 0
 
-rem Apply one patch from patches\ to a checkout, at most once.
+rem Apply one patch from ..\third\patches\ to a checkout, at most once.
 rem
 rem   %1  the git work tree to apply in (the repo, or one of its submodules)
-rem   %2  the file name under harmony\patches\
+rem   %2  the file name under third\patches\
 rem
 rem `--reverse --check` is the idempotence test, and it is a better one than a
 rem marker file: it succeeds only when the change is ALREADY present, so a
@@ -876,21 +931,21 @@ rem re-run is a no-op, a checkout that moved under the patch fails loudly, and a
 rem file somebody edited by hand is detected rather than patched twice.
 :qpatch
 set "QP_TREE=%~1"
-set "QP_FILE=%~dp0patches\%~2"
+set "QP_FILE=%~dp0..\third\patches\%~2"
 if not exist "!QP_FILE!" (
-    echo [qtts] no patch at "!QP_FILE!".>&2
+    echo [patch] no patch at "!QP_FILE!".>&2
     exit /b 1
 )
 git -C "!QP_TREE!" apply --reverse --check "!QP_FILE!" >nul 2>&1
 if not errorlevel 1 (
-    echo [qtts] already patched: %~2
+    echo [patch] already patched: %~2
     exit /b 0
 )
-echo [qtts] patching: %~2
+echo [patch] patching: %~2
 git -C "!QP_TREE!" apply "!QP_FILE!"
 if errorlevel 1 (
-    echo [qtts] could not apply "!QP_FILE!" in "!QP_TREE!".>&2
-    echo [qtts] the checkout moved under it; re-read the patch and rebase it.>&2
+    echo [patch] could not apply "!QP_FILE!" in "!QP_TREE!".>&2
+    echo [patch] the checkout moved under it; re-read the patch and rebase it.>&2
     exit /b 1
 )
 exit /b 0

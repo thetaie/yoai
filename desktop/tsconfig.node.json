@@ -1,0 +1,37 @@
+{
+  "include": [
+    "electron.vite.config.ts",
+    "src/main/**/*",
+    "src/preload/**/*",
+    "src/shared/**/*"
+  ],
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "noEmit": true,
+
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+
+    // The main process reads design/palettes.json for the window's background,
+    // so the source of record stays the source of record even for the one
+    // color a stylesheet cannot reach.
+    "resolveJsonModule": true,
+
+    // Relative to this file, not to a baseUrl -- that option is on its way out
+    // and `paths` has not needed it for several releases.
+    "paths": {
+      "@shared/*": ["./src/shared/*"]
+    }
+  }
+}
