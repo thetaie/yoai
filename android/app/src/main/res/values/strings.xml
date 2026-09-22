@@ -22,7 +22,7 @@
     <string name="home_undo">撤销，回到「%1$s」</string>
     <string name="home_just_ended">刚结束「%1$s」· 共 %2$s</string>
 
-    <!-- Home: the rolling window. Deliberately not "today" -- see design/README.md. -->
+    <!-- Home: the rolling window. Deliberately not "today"; see design/README.md. -->
     <string name="home_recent">最近 24 小时</string>
     <string name="home_recent_empty">还没有记录。点一个格子开始。</string>
 

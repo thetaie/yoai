@@ -143,7 +143,7 @@ def main() -> None:
 
     out.append("/** A color family: one light palette and one dark one. */")
     out.append("@Immutable")
-    out.append("data class Family(val key: String, @androidx.annotation.StringRes val label: Int)")
+    out.append("data class Family(val key: String, @param:androidx.annotation.StringRes val label: Int)")
     out.append("")
     out.append("val FAMILIES: List<Family> = listOf(")
     for f in FAMILIES:

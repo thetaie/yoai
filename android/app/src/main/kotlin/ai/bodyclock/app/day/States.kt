@@ -27,9 +27,9 @@ import androidx.compose.ui.graphics.Color
 data class StateSpec(
     /** The core's id. Never displayed. */
     val id: String,
-    @StringRes val name: Int,
+    @param:StringRes val name: Int,
     /** The second line on the cell -- examples, not a definition. */
-    @StringRes val hint: Int,
+    @param:StringRes val hint: Int,
 )
 
 val STATES: List<StateSpec> = listOf(

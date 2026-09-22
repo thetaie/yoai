@@ -33,7 +33,7 @@
         </activity>
 
         <!--
-          The measurement bench, from before there was an app -- see
+          The measurement bench, from before there was an app; see
           android/README.md. It keeps its own launcher entry rather than hiding
           behind a debug menu, because the thing it is for is being opened on a
           device next to the app and compared against design/voice.md. Its

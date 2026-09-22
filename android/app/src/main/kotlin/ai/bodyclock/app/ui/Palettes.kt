@@ -233,7 +233,7 @@ const val DEFAULT_FAMILY: String = "arctic"
 
 /** A color family: one light palette and one dark one. */
 @Immutable
-data class Family(val key: String, @androidx.annotation.StringRes val label: Int)
+data class Family(val key: String, @param:androidx.annotation.StringRes val label: Int)
 
 val FAMILIES: List<Family> = listOf(
     Family("amber", R.string.settings_palette_amber),
