@@ -16,6 +16,7 @@ import { join } from 'node:path'
 import palettes from '../../../design/palettes.json'
 import { describeCore } from './core'
 import { cancelAllTurns, registerHandlers, watchWindow } from './ipc'
+import * as tts from './tts'
 import * as models from './models'
 import * as prefs from './prefs'
 import * as sessions from './sessions'
@@ -152,6 +153,22 @@ app.whenReady().then(() => {
   applyContentSecurityPolicy(process.env['ELECTRON_RENDERER_URL'])
   registerHandlers()
   createWindow()
+
+  // Configured IS enabled. Having picked a model, or a pair of voice models,
+  // and then having to press a button every run is a step that exists only to
+  // be forgotten -- and the thing it delays is the first reply, which is the
+  // one moment somebody is already waiting.
+  //
+  // After createWindow so the window is up while the weights are read, and
+  // unawaited because nothing here depends on the outcome.
+  if (described.ok) {
+    models.autoPreload()
+    void tts.autoLoad().then((reason) => {
+      if (reason.length > 0) {
+        console.error(`[bodyclock] the voice would not load: ${reason}`)
+      }
+    })
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

@@ -16,11 +16,19 @@
 #             first find_package)
 #     llama   the on-device LLM engine  -> prebuilt/llama-sdk/<abi>/
 #             (building it is what turns on-device chat on)
+#     mnn     MNN with the omni Talker -> prebuilt/mnn-sdk/<abi>/
+#             An EVALUATION lane, deliberately NOT part of `all`: nothing in
+#             the app links it. See build_mnn for what it is for.
+#     qtts    speech output (qwentts.cpp) -> prebuilt/qtts-sdk/<abi>/
+#             Needs a llama.cpp checkout too, whether or not `llama` is being
+#             built: it compiles llama.cpp's ggml. See build_qtts for why.
+#     vulkan  modifies qtts: also build ggml's Vulkan backend. Implies qtts,
+#             and is not a target of its own.
 #     hap     compile and sign the app itself, via hvigor. No IDE needed.
-#     all     all three, in that order -- and what a bare `./build.sh` does
-#     clean   discard llama's cached build tree and SDK first. `deps` always
+#     all     deps, llama, hap -- and what a bare `./build.sh` does
+#     clean   discard the cached build trees and SDKs first. `deps` always
 #             replaces its own output, so there is nothing for it to clean.
-#     arch=   llama only: the -march feature set; `baseline` means armv8-a
+#     arch=   llama/qtts only: the -march feature set; `baseline` means armv8-a
 #
 # The abi defaults to arm64-v8a, which is the only one a HarmonyOS NEXT device
 # has -- so it is normally left off entirely. Naming no target means `all`, so
@@ -45,8 +53,15 @@
 #                   from DevEco's own .home marker, else common locations)
 #   VCPKG_ROOT      vcpkg checkout (default: a sibling of the repo)
 #   OHOS_SDK_ROOT   the SDK dir CONTAINING native/ (default: from DEVECO_HOME)
-#   LLAMA_SRC       llama.cpp checkout (default: a sibling of the repo)
+#   LLAMA_SRC       llama.cpp checkout (default: a sibling of the repo).
+#                   Read by `llama` AND by `qtts`, which compiles its ggml.
 #   LLAMA_SDK_DIR   where to assemble the llama SDK (default: auto-detected)
+#   MNN_SRC         MNN checkout (default: a sibling of the repo), `mnn` only
+#   QTTS_SRC        qwentts.cpp checkout (default: a sibling), `qtts` only
+#   VULKAN_SDK      a host Vulkan SDK, required by `vulkan`
+#
+# `../third/sync.sh clone` fetches all of these at their pinned commits, with
+# the patches this script expects already applied.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -60,11 +75,18 @@ SCRIPT_DIR="$(pwd)"
 # Every token is a keyword or the ABI, and an unrecognized one is an ERROR
 # rather than a guess. The predecessor treated any unknown token as llama's
 # -march string, so a mistyped target silently became `-march=lama`.
-ABI="" ; DO_DEPS="" ; DO_LLAMA="" ; DO_HAP="" ; ARCH="" ; ARCH_SET="" ; CLEAN=""
+ABI="" ; DO_DEPS="" ; DO_LLAMA="" ; DO_MNN="" ; DO_QTTS="" ; QTTS_VULKAN=""
+DO_HAP="" ; ARCH="" ; ARCH_SET="" ; CLEAN=""
 for tok in "$@"; do
     case "$tok" in
         deps)      DO_DEPS=1 ;;
         llama)     DO_LLAMA=1 ;;
+        mnn)       DO_MNN=1 ;;
+        qtts)      DO_QTTS=1 ;;
+        # `vulkan` only modifies qtts -- it is not a target of its own, and it
+        # implies one, so `./build.sh vulkan` does the useful thing rather than
+        # nothing.
+        vulkan)    DO_QTTS=1 ; QTTS_VULKAN=1 ;;
         hap)       DO_HAP=1 ;;
         all)       DO_DEPS=1 ; DO_LLAMA=1 ; DO_HAP=1 ;;
         clean)     CLEAN=1 ;;
@@ -91,8 +113,12 @@ ABI="${ABI:-arm64-v8a}"
 # a fresh clone runs, and it should end with an installable app that has
 # on-device chat -- not with a half-built tree needing two more invocations
 # nobody mentioned.
+#
+# NOTHING named means none of the five, not none of the three. The guard tested
+# deps/llama/hap only, so `./build.sh qtts` -- a target it does not list -- read
+# as an empty command line and quietly built deps, llama and the HAP as well.
 IMPLIED_ALL=""
-if [ -z "$DO_DEPS" ] && [ -z "$DO_LLAMA" ] && [ -z "$DO_HAP" ]; then
+if [ -z "$DO_DEPS$DO_LLAMA$DO_MNN$DO_QTTS$DO_HAP" ]; then
     DO_DEPS=1 ; DO_LLAMA=1 ; DO_HAP=1 ; IMPLIED_ALL=1
 fi
 
@@ -448,8 +474,304 @@ build_hap() {
     fi
 }
 
+#-----------------------------------------------------------------------------
+# mnn -- MNN with the omni Talker, cross-compiled for this ABI.
+#
+# An EVALUATION lane, not a dependency: nothing in the app links it, and it is
+# deliberately excluded from `all` so a bare build does not spend twenty minutes
+# on an engine the core does not use. It exists to answer one question a desktop
+# cannot: MNN is the only way to get the model's own voice out -- llama.cpp has
+# no Talker checkpoint in GGUF -- and what is not known is whether generating
+# that speech is affordable on a phone. See design/voice.md.
+#-----------------------------------------------------------------------------
+build_mnn() {
+    local mnn_src="${MNN_SRC:-$(cd "$SCRIPT_DIR/../.." && pwd)/MNN}"
+    if [ ! -f "$mnn_src/CMakeLists.txt" ]; then
+        echo "[mnn] no MNN at \"$mnn_src\"." >&2
+        echo "[mnn] clone it at the pinned commit:" >&2
+        echo "[mnn]   ../third/sync.sh clone MNN" >&2
+        echo "[mnn] or set MNN_SRC to an existing checkout." >&2
+        return 1
+    fi
+    echo "[mnn] src=$mnn_src"
+
+    local native="$OHOS_SDK_ROOT/native"
+    local toolchain="$native/build/cmake/ohos.toolchain.cmake"
+    local cmake_bin="$native/build-tools/cmake/bin/cmake"
+    local ninja_bin="$native/build-tools/cmake/bin/ninja"
+    [ -x "$cmake_bin" ] || cmake_bin="$(command -v cmake || true)"
+    [ -x "$ninja_bin" ] || ninja_bin="$(command -v ninja || true)"
+    if [ -z "$cmake_bin" ] || [ -z "$ninja_bin" ]; then
+        echo "[mnn] need cmake and ninja (the SDK's build-tools/cmake/bin, or on PATH)." >&2
+        return 1
+    fi
+
+    local mbuild="$SCRIPT_DIR/.mnn-build/$ABI"
+    local msdk="$SCRIPT_DIR/prebuilt/mnn-sdk/$ABI"
+    if [ -n "$CLEAN" ]; then
+        echo "[mnn] cleaning"
+        rm -rf "$mbuild" "$msdk"
+    fi
+
+    # MNN_BUILD_LLM_OMNI forces MNN_BUILD_OPENCV and MNN_BUILD_AUDIO on: the omni
+    # path needs both front ends compiled in even when only audio is used at run
+    # time. Which of them actually LOADS is a runtime flag, so the 353 MB vision
+    # encoder costs nothing here beyond code size.
+    #
+    # MNN has its OWN shared-library switch and ignores the standard CMake one:
+    # with only BUILD_SHARED_LIBS=OFF it happily builds five .so files.
+    # MNN_SEP_BUILD has to go with it -- it splits the backends into separate
+    # shared objects and upstream documents it as meaningful only when shared.
+    #
+    # MNN_SME2 has to be turned off EXPLICITLY -- it defaults ON, and leaving it
+    # alone does not leave it off. It does not build here (its kernels call the
+    # fp16 FML intrinsics, which need +fp16fml, while MNN compiles those sources
+    # with -march=armv8.2-a+fp16) and it would not pay: SME2 is Armv9, which no
+    # phone this app targets has.
+    local cfg=(
+      -S "$mnn_src" -B "$mbuild" -G Ninja
+      -DCMAKE_MAKE_PROGRAM="$ninja_bin"
+      -DCMAKE_TOOLCHAIN_FILE="$toolchain"
+      -DOHOS_ARCH="$ABI"
+      -DCMAKE_BUILD_TYPE=Release
+      -DBUILD_SHARED_LIBS=OFF
+      -DMNN_BUILD_SHARED_LIBS=OFF
+      -DMNN_SEP_BUILD=OFF
+      -DMNN_BUILD_LLM=ON
+      -DMNN_BUILD_LLM_OMNI=ON
+      -DMNN_LOW_MEMORY=ON
+      -DMNN_SUPPORT_TRANSFORMER_FUSE=ON
+      -DMNN_BUILD_TOOLS=OFF
+      -DMNN_BUILD_BENCHMARK=OFF
+      -DMNN_BUILD_TEST=OFF
+      -DMNN_SME2=OFF
+    )
+    # MNN_ARM82 turns on the fp16 kernels every current arm64 phone has.
+    [ "$ABI" = "arm64-v8a" ] && cfg+=(-DMNN_ARM82=ON)
+
+    "$cmake_bin" "${cfg[@]}"
+    "$cmake_bin" --build "$mbuild" --target MNN llm
+
+    echo "[mnn] assembling $msdk"
+    mkdir -p "$msdk/include" "$msdk/lib"
+    cp -R "$mnn_src/include/MNN" "$msdk/include/"
+    cp -R "$mnn_src/transformers/llm/engine/include/llm" "$msdk/include/"
+
+    # And MNN's OWN rapidjson, which is not a convenience -- it is the fix for a
+    # crash. rapidjson is header-only templates, so its member functions land in
+    # the object files of whoever includes it, as weak symbols. The whole app is
+    # one .so, the linker keeps exactly ONE definition of each, and this repo
+    # already carries a much newer rapidjson under prebuilt/<abi>/include.
+    # Two layouts, one symbol: the newer MemoryPoolAllocator keeps a SharedData*
+    # where 1.1.0 keeps chunkHead_ and userBuffer_. Measured: SIGSEGV at 0x10
+    # inside MemoryPoolAllocator::Malloc, on the FIRST json parse.
+    cp -R "$mnn_src/3rd_party/rapidjson" "$msdk/include/"
+    if [ ! -f "$msdk/include/rapidjson/document.h" ]; then
+        echo "[mnn] no rapidjson under $msdk/include" >&2
+        echo "[mnn] MNN vendors it at 3rd_party/rapidjson -- look there" >&2
+        return 1
+    fi
+
+    # ONE archive, and that is correct: with MNN_SEP_BUILD=OFF the llm engine is
+    # an OBJECT library, so its objects are folded into libMNN.a rather than
+    # sitting beside it. Looking for a libllm.a reports a successful build as a
+    # failure -- which is how this check first read it.
+    if [ ! -f "$mbuild/libMNN.a" ]; then
+        echo "[mnn] no libMNN.a under $mbuild" >&2
+        echo "[mnn] MNN moves its output around between versions -- look there" >&2
+        return 1
+    fi
+    cp "$mbuild/libMNN.a" "$msdk/lib/"
+    echo "[mnn] SDK at $msdk"
+}
+
+#-----------------------------------------------------------------------------
+# qtts -- speech output (qwentts.cpp), optionally with ggml's Vulkan backend
+#
+# STATIC, like the other lanes -- a HAP has nowhere to put a companion .so.
+# Output: prebuilt/qtts-sdk/<abi>/{include,lib}, shaped like the llama and MNN
+# SDKs so the app's CMakeLists finds it the same way.
+#-----------------------------------------------------------------------------
+build_qtts() {
+    local qtts_src="${QTTS_SRC:-$(cd "$SCRIPT_DIR/../.." && pwd)/qwentts.cpp}"
+    if [ ! -f "$qtts_src/CMakeLists.txt" ]; then
+        echo "[qtts] no qwentts.cpp at \"$qtts_src\"." >&2
+        echo "[qtts]   ../third/sync.sh clone qwentts.cpp" >&2
+        return 1
+    fi
+    echo "[qtts] src=$qtts_src"
+    # The ggml submodule is deliberately not checked for: this lane stopped
+    # compiling it, so demanding it would be a precondition on something the
+    # build does not read.
+
+    # ONE ggml for both lanes, and llama.cpp's is the one. This lane used to
+    # compile qwentts's own ggml submodule and the app linked that copy for
+    # everything, because it superset llama's. The 2026-09-21 update inverted
+    # that: libllama now wants ggml_dsv4_hc_pre_gated, which the fork does not
+    # have, so whichever of the two copies is kept, one symbol goes unmet and
+    # the app does not link. GGML_SOURCE_DIR, which qwentts added the same day,
+    # points its build at any ggml tree, so both lanes compile the SAME one from
+    # the SAME commit. What it costs is the fork's fused snake kernel for the
+    # DAC decoder; design/voice.md has the symbol tables.
+    #
+    # So this target needs a llama.cpp checkout even when `llama` is not built.
+    local llama_src="${LLAMA_SRC:-$(cd "$SCRIPT_DIR/../.." && pwd)/llama.cpp}"
+    if [ ! -f "$llama_src/ggml/CMakeLists.txt" ]; then
+        echo "[qtts] qtts compiles llama.cpp's ggml and there is none at \"$llama_src/ggml\"." >&2
+        echo "[qtts]   ../third/sync.sh clone llama.cpp" >&2
+        return 1
+    fi
+    echo "[qtts] ggml=$llama_src/ggml"
+
+    # Applied to llama_src, because that is the ggml being compiled now.
+    # qwentts-ggml-ohos-affinity.patch is the same fix for the submodule, kept
+    # in third/patches for whoever points GGML_SOURCE_DIR back at it, and
+    # deliberately not applied here.
+    local p
+    for p in "llama-ggml-ohos-affinity.patch:$llama_src" \
+             "qwentts-thread-count-override.patch:$qtts_src"
+    do
+        local file="$SCRIPT_DIR/../third/patches/${p%%:*}"
+        local tree="${p#*:}"
+        [ -f "$file" ] || { echo "[patch] no patch at $file" >&2; return 1; }
+        if git -C "$tree" apply --reverse --check "$file" 2>/dev/null; then
+            echo "[patch] already patched: ${p%%:*}"
+        else
+            echo "[patch] patching: ${p%%:*}"
+            git -C "$tree" apply "$file" || {
+                echo "[patch] could not apply it in $tree; rebase the patch." >&2
+                return 1; }
+        fi
+    done
+
+    local native="$OHOS_SDK_ROOT/native"
+    local toolchain="$native/build/cmake/ohos.toolchain.cmake"
+    local cmake_bin="$native/build-tools/cmake/bin/cmake"
+    local ninja_bin="$native/build-tools/cmake/bin/ninja"
+    [ -x "$cmake_bin" ] || cmake_bin="$(command -v cmake || true)"
+    [ -x "$ninja_bin" ] || ninja_bin="$(command -v ninja || true)"
+    if [ -z "$cmake_bin" ] || [ -z "$ninja_bin" ]; then
+        echo "[qtts] need cmake and ninja (the SDK's build-tools/cmake/bin, or on PATH)." >&2
+        return 1
+    fi
+
+    local qbuild="$SCRIPT_DIR/.qtts-build/$ABI"
+    local qsdk="$SCRIPT_DIR/prebuilt/qtts-sdk/$ABI"
+    if [ -n "$CLEAN" ]; then
+        echo "[qtts] cleaning"
+        rm -rf "$qbuild" "$qsdk"
+    fi
+
+    # The tools are why LLAMA-style flags are not enough: qwen-tts, qwen-codec
+    # and tts-server all build by default and all want a main(), which a cross
+    # build has no use for. Only qwen-core is asked for by name below.
+    #
+    # GGML_NATIVE=OFF because -march=native is meaningless cross-compiling and
+    # the probe runs on the host. The feature set comes from the same flags the
+    # llama lane uses, for the same reason: CMake's feature tests compile AND
+    # RUN, which cannot work for the phone, so every one of them "fails" and
+    # ggml silently drops dotprod, i8mm and fp16 on a device that has all three.
+    local cfg=(
+      -S "$qtts_src" -B "$qbuild" -G Ninja
+      -DGGML_SOURCE_DIR="$llama_src/ggml"
+      -DCMAKE_MAKE_PROGRAM="$ninja_bin"
+      -DCMAKE_TOOLCHAIN_FILE="$toolchain"
+      -DOHOS_ARCH="$ABI"
+      -DCMAKE_BUILD_TYPE=Release
+      -DBUILD_SHARED_LIBS=OFF
+      -DQWEN_SHARED=OFF
+      -DGGML_NATIVE=OFF
+      -DGGML_OPENMP=OFF
+    )
+    # The same feature set the llama lane uses, and set the same way -- these
+    # two are the same ggml compiled twice, so a difference here would be an
+    # accident rather than a decision. `arch=` / `baseline` steer both.
+    if [ -z "$ARCH_SET" ]; then
+        ARCH="armv8.6-a+i8mm+bf16+dotprod+fp16"
+    fi
+    if [ "$ABI" = "arm64-v8a" ] && [ -n "$ARCH" ]; then
+        cfg+=(-DGGML_CPU_ARM_ARCH="$ARCH")
+    fi
+
+    # The GPU, off unless asked for. It needs a Vulkan SDK on the HOST as well
+    # as the driver on the phone, and the flags below exist because the two
+    # halves come from different places:
+    #
+    #   glslc, SPIRV-Headers   host only. 151 compute shaders are compiled at
+    #                          build time by a vulkan-shaders-gen that ggml
+    #                          builds for the host and then runs -- a host build
+    #                          nested inside a cross build.
+    #   Vulkan_INCLUDE_DIR     host, and this is the one that is NOT obvious.
+    #                          The OHOS sysroot ships the C headers and
+    #                          ggml-vulkan includes <vulkan/vulkan.hpp>, the C++
+    #                          bindings, which are not there. Compiling against
+    #                          the host SDK's headers and linking the phone's
+    #                          loader is fine: the loader ABI is stable and ggml
+    #                          queries every extension at runtime anyway.
+    #   Vulkan_LIBRARY         the phone's, from the sysroot.
+    #
+    # FIND_ROOT_PATH_MODE_PACKAGE=BOTH because the OHOS toolchain re-roots
+    # package searches into the sysroot, so ggml's own CMAKE_PREFIX_PATH append
+    # of VULKAN_SDK is ignored and SPIRV-Headers is never found.
+    if [ -n "$QTTS_VULKAN" ]; then
+        if [ -z "${VULKAN_SDK:-}" ]; then
+            echo "[qtts] vulkan needs a Vulkan SDK on this machine (VULKAN_SDK is unset)." >&2
+            return 1
+        fi
+        # The SDK lays its host tools out differently per platform: Bin/Include/
+        # Lib on Windows, bin/include/lib everywhere else.
+        local vkbin="$VULKAN_SDK/bin" vkinc="$VULKAN_SDK/include" vklib="$VULKAN_SDK/lib"
+        [ -d "$vkbin" ] || vkbin="$VULKAN_SDK/Bin"
+        [ -d "$vkinc" ] || vkinc="$VULKAN_SDK/Include"
+        [ -d "$vklib" ] || vklib="$VULKAN_SDK/Lib"
+        cfg+=(
+          -DGGML_VULKAN=ON
+          -DVulkan_GLSLC_EXECUTABLE="$vkbin/glslc"
+          -DVulkan_INCLUDE_DIR="$vkinc"
+          -DVulkan_LIBRARY="$native/sysroot/usr/lib/aarch64-linux-ohos/libvulkan.so"
+          -DSPIRV-Headers_DIR="$vklib/cmake/SPIRV-Headers"
+          -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH
+        )
+        # ninja on PATH because the nested host configure inherits the generator
+        # but not CMAKE_MAKE_PROGRAM, and fails with "unable to find a build
+        # program corresponding to Ninja" -- which reads like a missing tool
+        # rather than an unpropagated variable.
+        PATH="$(dirname "$ninja_bin"):$PATH"
+        export PATH
+        echo "[qtts] vulkan backend ON, SDK $VULKAN_SDK"
+    fi
+
+    echo "[qtts] configuring"
+    "$cmake_bin" "${cfg[@]}"
+    echo "[qtts] building qwen-core"
+    "$cmake_bin" --build "$qbuild" --target qwen-core
+
+    echo "[qtts] assembling $qsdk"
+    mkdir -p "$qsdk/include" "$qsdk/lib"
+    # Only the C ABI header. Everything else under src/ is the implementation,
+    # and including any of it would tie this repo to qwentts.cpp's internals.
+    cp "$qtts_src/src/qwen.h" "$qsdk/include/"
+
+    # Every .a the build produced: qwen-core plus ggml's, which are separate
+    # archives. Collected by search rather than by name because ggml splits them
+    # differently between versions, and a missing one surfaces as an undefined
+    # symbol at the app's link step instead of here.
+    local qlibs=0 lib
+    while IFS= read -r lib; do
+        cp "$lib" "$qsdk/lib/"
+        qlibs=$((qlibs + 1))
+    done < <(find "$qbuild" -name '*.a')
+    if [ "$qlibs" -lt 2 ]; then
+        echo "[qtts] only $qlibs archive(s) under $qbuild -- expected qwen-core plus ggml's" >&2
+        return 1
+    fi
+    echo "[qtts] SDK at $qsdk ($qlibs archives)"
+}
+
 if [ -n "$DO_DEPS" ];  then build_deps;  fi
 if [ -n "$DO_LLAMA" ]; then build_llama; fi
+if [ -n "$DO_MNN" ];   then build_mnn;   fi
+if [ -n "$DO_QTTS" ];  then build_qtts;  fi
 if [ -n "$DO_HAP" ];   then build_hap;   fi
 
 echo

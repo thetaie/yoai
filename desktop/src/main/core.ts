@@ -49,7 +49,39 @@ export interface BodyclockNative {
   ): number
   nativeChatCancel(turnId: number): void
   nativeChatCancelAll(): number
+
+  //--- Speech output -----------------------------------------------------------
+  // Present on every build. The qtts lane is a compile option and the C ABI
+  // stubs out without it, so these are always callable and nativeTtsAvailable()
+  // is the question to ask.
+  nativeTtsAvailable(): number
+  // `tokenizerPath` here, `codec_path` in the C ABI: the second file is the
+  // 12 Hz audio tokenizer, which is what it is called on disk and in qwentts's
+  // own load log. The ABI parameter kept an older name.
+  nativeTtsLoad(talkerPath: string, tokenizerPath: string, onDone: NativeHandler): void
+  nativeTtsLoaded(): number
+  nativeTtsUnload(): void
+  nativeTtsModelType(): string
+  /** JSON array of speaker names; only CustomVoice checkpoints have any. */
+  nativeTtsSpeakers(): string
+  nativeTtsSetSpeaker(name: string): void
+  nativeTtsSetVoice(instruct: string): void
+  nativeTtsSetSeed(seed: number): void
+  nativeTtsSetStreaming(on: number): void
+  nativeTtsSetThreads(threads: number): void
+  /** 1 when the utterance started, 0 when one was already running. */
+  nativeTtsSay(text: string, onEvent: NativeTtsHandler): number
+  nativeTtsCancel(): number
+  nativeTtsLastError(): string
 }
+
+/**
+ * (type, payload) for speech output. `payload` is a Float32Array of mono 24 kHz
+ * samples when type is 'audio', and a string otherwise -- the stats JSON on
+ * 'end', the reason on 'error'. One callback rather than two because the events
+ * are ordered and splitting them would let the terminal one overtake a chunk.
+ */
+export type NativeTtsHandler = (type: string, payload: Float32Array | string) => void
 
 /**
  * Where the addon might be, most specific first.

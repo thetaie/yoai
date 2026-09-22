@@ -29,7 +29,14 @@ function read(): Stored {
   const s = readJson<Stored>(dataFile(FILE), EMPTY)
   // A file that parsed but is not the shape we wrote: same treatment as one
   // that did not parse, because the caller cannot iterate either of them.
-  return Array.isArray(s.configured) ? s : EMPTY
+  if (!Array.isArray(s.configured)) {
+    return EMPTY
+  }
+  // `active` is normalised to a string here so every caller can treat it as
+  // one. A file written before this field existed parses fine and leaves it
+  // undefined, and the difference only shows up at the one call site that
+  // reaches for .length.
+  return { configured: s.configured, active: typeof s.active === 'string' ? s.active : '' }
 }
 
 function write(s: Stored): void {
@@ -50,6 +57,17 @@ export function list(): ModelConfig[] {
 export function add(cfg: ModelConfig): void {
   const s = read()
   s.configured = s.configured.filter((m) => m.id !== cfg.id).concat(cfg)
+  // Selecting it when nothing is selected. remove() has always repaired a
+  // dangling `active`; nothing repaired an EMPTY one, so the first model ever
+  // added left it '' and the app then reported having no model while the picker
+  // displayed that model's name -- a `<select>` whose value matches no option
+  // renders the first one, so the list looked chosen and was not.
+  //
+  // Only when empty. Adding a second model while one is selected must not
+  // silently move the conversation to it.
+  if (s.active.length === 0) {
+    s.active = cfg.id
+  }
   write(s)
   register(cfg)
 }
@@ -164,6 +182,15 @@ export function syncToCore(): number {
     write(s)
   }
 
+  // Heal a selection that never got made. add() sets it now, but a store
+  // written before it did has models and an empty `active`, and nothing else
+  // would ever fill it: the picker only writes a selection when the user
+  // changes it, and they cannot change it to the value it already displays.
+  if (s.active.length === 0 && s.configured.length > 0) {
+    s.active = s.configured[s.configured.length - 1].id
+    write(s)
+  }
+
   let ready = 0
   for (const m of s.configured) {
     if (register(m)) {
@@ -172,6 +199,34 @@ export function syncToCore(): number {
   }
   console.log(`[bodyclock] registered ${ready} of ${s.configured.length} models`)
   return ready
+}
+
+/**
+ * Read the selected on-device model's weights now, without being asked.
+ *
+ * Only the ACTIVE one. Every configured local model is gigabytes, and loading
+ * a model nobody selected would spend the memory of a conversation that is not
+ * happening. The first turn pays for the weights otherwise, which is the one
+ * moment the user is already waiting.
+ *
+ * Safe to run behind the window: bodyclock_local_load takes no lock the rest of
+ * the ABI needs -- unlike the TTS one -- and the addon runs it on a worker
+ * thread. Nothing waits on the result; it is logged and dropped.
+ */
+export function autoPreload(): void {
+  const s = read()
+  const cfg = s.configured.find((m) => m.id === s.active)
+  if (cfg === undefined || !isLocal(cfg)) {
+    return
+  }
+  console.log(`[bodyclock] preloading ${cfg.id}`)
+  core().nativeLocalLoad(cfg.id, (type, content) => {
+    if (type === 'end') {
+      console.log(`[bodyclock] ${cfg.id} is resident`)
+    } else {
+      console.error(`[bodyclock] ${cfg.id} would not preload: ${content}`)
+    }
+  })
 }
 
 /** Which vendors have a key stored. Drives the settings screen's state. */

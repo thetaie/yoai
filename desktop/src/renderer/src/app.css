@@ -14,8 +14,9 @@
   /* The one thing a palette does not carry: a type stack that exists offline.
      No webfont is loaded on purpose -- this client works with no network, and
      a font fetched from a CDN would be the only thing in it that does not. */
-  --bc-font: system-ui, -apple-system, 'Segoe UI', 'PingFang SC',
-    'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  --bc-font:
+    system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC',
+    sans-serif;
   --bc-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Consolas, monospace;
 
   --bc-radius: 10px;
@@ -217,7 +218,7 @@ select {
 .msg {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .msg[data-role='user'] {
@@ -247,7 +248,15 @@ select {
   color: var(--bc-danger);
 }
 
+/* The model's name, and whatever actions the message offers. Flex with a gap
+   rather than a margin on the button: the row is a list of items now, not a
+   label with something stuck after it, and without the gap the model name and
+   the speak button run together into "Qwen3.5-4B-Q4_K_M朗读". */
 .msg-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  line-height: 1.5;
   font-size: 0.75rem;
   color: var(--bc-text-tertiary);
   padding: 0 4px;
@@ -282,11 +291,10 @@ select {
   font-size: 0.875rem;
 }
 
-.usage {
-  font-size: 0.75rem;
-  color: var(--bc-text-tertiary);
+/* The token summary, between the model's name and the speak button. Tabular
+   figures so the counts do not shuffle the button sideways as they change. */
+.msg-usage {
   font-variant-numeric: tabular-nums;
-  padding: 0 4px;
 }
 
 .caret {
@@ -583,5 +591,8 @@ select.control:focus {
   border: 0;
   padding: 0;
   font-size: inherit;
+  /* Inherited, not the UA's `normal`: a button next to plain text sits on a
+     different baseline otherwise, and the row grows around it. */
+  line-height: inherit;
   text-decoration: underline;
 }

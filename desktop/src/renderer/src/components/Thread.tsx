@@ -6,8 +6,10 @@
  * reasoning is collapsed, because a reasoning model's chain-of-thought is not
  * part of the answer.
  */
-import { useEffect, useRef, type JSX } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type JSX } from 'react'
 import type { ChatMessage, Usage } from '@shared/chat'
+import { S } from '../strings'
+import * as tts from '../tts'
 
 interface Props {
   messages: ChatMessage[]
@@ -18,6 +20,18 @@ interface Props {
   usage: Usage | null
 }
 
+/**
+ * Which message is being spoken, as a React subscription.
+ *
+ * useSyncExternalStore rather than a useState + effect pair because the store
+ * is genuinely external -- one module singleton fronting one engine -- and this
+ * is the hook that exists for exactly that, without the render-then-catch-up
+ * flicker an effect would add.
+ */
+function useSpeaking(): string {
+  return useSyncExternalStore(tts.watch, tts.speakingOf, tts.speakingOf)
+}
+
 /** "1,024 tokens in · 512 out · $0.0031" -- absent fields are simply left out. */
 function usageLine(u: Usage): string {
   const bits: string[] = []
@@ -26,16 +40,40 @@ function usageLine(u: Usage): string {
   if (u.thoughtTokens !== undefined && u.thoughtTokens > 0) {
     bits.push(`${u.thoughtTokens.toLocaleString()} thinking`)
   }
-  // An on-device turn reports a cost of 0 and that is worth showing as free
-  // rather than hiding -- the token figures are real either way.
-  if (u.totalCost !== undefined) {
-    bits.push(u.totalCost > 0 ? `$${u.totalCost.toFixed(4)}` : '本地，无费用')
+  // Only a real cost. An on-device turn reports 0, and saying so on every reply
+  // is a line of text to tell the reader nothing happened -- the absence of a
+  // price is already the message.
+  if (u.totalCost !== undefined && u.totalCost > 0) {
+    bits.push(`$${u.totalCost.toFixed(4)}`)
   }
   return bits.join(' · ')
 }
 
-function MessageView({ m }: { m: ChatMessage }): JSX.Element {
+function MessageView({
+  m,
+  id,
+  ttsReady,
+  usage
+}: {
+  m: ChatMessage
+  id: string
+  ttsReady: boolean
+  /** The finished turn's token summary, on the message it belongs to. */
+  usage: Usage | null
+}): JSX.Element {
   const parts = m.parts ?? [{ kind: 'text' as const, content: m.content }]
+
+  // The thinking is deliberately not spoken: it is not part of the answer, and
+  // reading a model's chain-of-thought aloud is minutes of text nobody asked
+  // for. Same rule that keeps it collapsed on screen.
+  const spoken = parts
+    .filter((p) => p.kind !== 'thinking')
+    .map((p) => p.content)
+    .join('\n')
+
+  const speaking = useSpeaking() === id
+  const offer = ttsReady && m.role === 'assistant' && spoken.trim().length > 0
+
   return (
     <div className="msg" data-role={m.role} data-transient={m.transient === true}>
       {parts.map((p, i) =>
@@ -50,7 +88,23 @@ function MessageView({ m }: { m: ChatMessage }): JSX.Element {
           </div>
         )
       )}
-      {m.model !== undefined && <div className="msg-meta">{m.model}</div>}
+      {/* Rendered only when it has something in it. An always-present row is an
+          empty flex line under every user message, costing its own line-height
+          and the gap above it for nothing. */}
+      {(m.model !== undefined || offer || usage !== null) && (
+        <div className="msg-meta">
+          {m.model !== undefined && <span>{m.model}</span>}
+          {usage !== null && <span className="msg-usage">{usageLine(usage)}</span>}
+          {offer && (
+            <button
+              className="link"
+              onClick={() => void (speaking ? tts.stop() : tts.speak(id, spoken))}
+            >
+              {speaking ? S.ttsStop : S.ttsSpeak}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -63,6 +117,16 @@ export function Thread({
   usage
 }: Props): JSX.Element {
   const scroller = useRef<HTMLDivElement>(null)
+
+  // Asked once: whether this build can speak at all and has its models loaded.
+  // The buttons are simply absent otherwise, rather than present and refusing.
+  const [ttsReady, setTtsReady] = useState(false)
+  useEffect(() => {
+    void (async () => {
+      const st = await window.bodyclock.tts.status()
+      setTtsReady(st.available && st.loaded)
+    })()
+  }, [messages.length])
 
   // Follow the reply only while the user is already at the bottom. Tracked on
   // the SCROLL event rather than measured at render time: by the time an effect
@@ -88,7 +152,17 @@ export function Thread({
     <div className="thread" ref={scroller} onScroll={onScroll}>
       <div className="thread-inner">
         {messages.map((m, i) => (
-          <MessageView key={i} m={m} />
+          <MessageView
+            key={i}
+            id={`m${i}`}
+            m={m}
+            ttsReady={ttsReady}
+            // On the LAST assistant message rather than under the thread: the
+            // summary describes the turn that message is, and as a sibling of
+            // the messages it inherited the gap meant for the space BETWEEN
+            // them, so it floated halfway and belonged to neither.
+            usage={!streaming && i === messages.length - 1 && m.role === 'assistant' ? usage : null}
+          />
         ))}
 
         {streaming && (
@@ -105,8 +179,6 @@ export function Thread({
             </div>
           </div>
         )}
-
-        {!streaming && usage !== null && <div className="usage">{usageLine(usage)}</div>}
       </div>
     </div>
   )

@@ -9,8 +9,14 @@
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react'
 import type { ChatMessage, MessagePart, Usage } from '@shared/chat'
 import { ModelConfig, modelLabel } from '@shared/provider'
-import { DEFAULT_PREFS, type CoreStatus, type InterfacePrefs, type SessionMeta } from '@shared/store'
+import {
+  DEFAULT_PREFS,
+  type CoreStatus,
+  type InterfacePrefs,
+  type SessionMeta
+} from '@shared/store'
 import { newSessionId, runTurn } from './chatEngine'
+import * as tts from './tts'
 import { Composer } from './components/Composer'
 import { Settings } from './components/Settings'
 import { Sidebar } from './components/Sidebar'
@@ -113,7 +119,7 @@ export function App(): JSX.Element {
 
   const openSession = async (id: string): Promise<void> => {
     if (streaming) {
-      return   // switching mid-turn would stream into the wrong transcript
+      return // switching mid-turn would stream into the wrong transcript
     }
     setSessionId(id)
     setThread(await window.bodyclock.sessions.messages(id))
@@ -194,7 +200,12 @@ export function App(): JSX.Element {
       if (last === undefined || last.transient !== true) {
         next = [
           ...next,
-          { role: 'assistant', content: S.chatEmptyReply, transient: true, ts: Date.now() }
+          {
+            role: 'assistant',
+            content: S.chatEmptyReply,
+            transient: true,
+            ts: Date.now()
+          }
         ]
       }
     }
@@ -236,33 +247,77 @@ export function App(): JSX.Element {
     const label = active === undefined ? activeId : modelLabel(active)
     const turnSession = sessionId
 
-    // No system prompt, the same as the HarmonyOS app: the one that exists
-    // there belongs to the voice chain, not to a typed conversation.
-    cancelerRef.current = runTurn(activeId, withUser, '', {
-      onDelta: (t) => {
-        textRef.current += t
-        setStreamText(textRef.current)
-      },
-      onThinking: (t) => {
-        thinkRef.current += t
-        setStreamThinking(thinkRef.current)
-      },
-      onUsage: (json) => {
-        try {
-          setUsage(JSON.parse(json) as Usage)
-        } catch {
-          // A summary that will not parse is worth nothing and costs nothing to
-          // drop; the reply itself already arrived.
+    // A new reply supersedes the old one out loud as well as on screen.
+    // Unconditional: stopping when nothing is speaking costs an atomic flag.
+    void tts.stop()
+
+    // The system prompt is read HERE, not held in state, for the reason the
+    // speak flag taught: a value captured at startup is wrong the moment the
+    // user changes it, and the settings screen is where they change it. One
+    // extra round trip against a reply that takes seconds.
+    //
+    // Everything the user can see has already been updated above, so the await
+    // delays the request and not the interface.
+    void (async () => {
+      const { systemPrompt } = await window.bodyclock.chat.settings()
+      cancelerRef.current = runTurn(activeId, withUser, systemPrompt, {
+        onDelta: (t) => {
+          textRef.current += t
+          setStreamText(textRef.current)
+        },
+        onThinking: (t) => {
+          thinkRef.current += t
+          setStreamThinking(thinkRef.current)
+        },
+        onUsage: (json) => {
+          try {
+            setUsage(JSON.parse(json) as Usage)
+          } catch {
+            // A summary that will not parse is worth nothing and costs nothing to
+            // drop; the reply itself already arrived.
+          }
+        },
+        onError: (message) => {
+          setThread([
+            ...messagesRef.current,
+            {
+              role: 'assistant',
+              content: message,
+              transient: true,
+              ts: Date.now()
+            }
+          ])
+        },
+        onDone: (aborted) => {
+          // ONE utterance for the whole reply, once it is whole.
+          //
+          // Not sentence by sentence as it streamed: each say() is an independent
+          // generation with its own prosody arc, so consecutive ones are audibly
+          // stitched however they are cut. Waiting costs almost nothing here --
+          // measured RTF 0.56 with first audio 0.13 s -- so the speech starts
+          // immediately after the reply does, and never breaks.
+          //
+          // Asked NOW rather than remembered from startup. The models load in the
+          // background, so at the moment the window opened `loaded` was still
+          // false; a flag captured then said "do not speak" for the rest of the
+          // session, and only opening the settings screen refreshed it -- which
+          // is why the first reply was silent until the test button had been
+          // pressed.
+          //
+          // Skipped when the user stopped the turn: they asked for silence.
+          const reply = textRef.current
+          if (!aborted && reply.length > 0) {
+            void (async () => {
+              const st = await window.bodyclock.tts.status()
+              if (st.available && st.loaded && st.autoSpeak) {
+                void tts.speak(turnSession, reply)
+              }
+            })()
+          }
+          finishTurn(label, aborted, turnSession)
         }
-      },
-      onError: (message) => {
-        setThread([
-          ...messagesRef.current,
-          { role: 'assistant', content: message, transient: true, ts: Date.now() }
-        ])
-      },
-      onDone: (aborted) => finishTurn(label, aborted, turnSession)
-    })
+      })
+    })()
   }
 
   const stop = (): void => cancelerRef.current?.cancel()

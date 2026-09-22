@@ -12,6 +12,16 @@
 # has no pthread_setaffinity_np at all; bionic needs neither, and ggml's
 # affinity branch already names Android, so that patch does not apply here.
 #
+# THIS IS THE LINUX AND macOS SCRIPT. build.cmd is a separate, self-contained
+# batch file doing the same job on Windows -- it used to invoke this one through
+# bash, which broke as soon as PATH offered WSL's bash instead of Git's: WSL
+# cannot open a D:\ path, and the failure reads as a missing script. Two native
+# scripts are two things to keep in agreement; one that only works when the
+# right bash happens to come first on PATH is worse.
+#
+# Nothing here may assume bash 4: macOS still ships 3.2 as /bin/bash, so no
+# `mapfile`, no `declare -A`, no `${var,,}`.
+#
 #   ./build.sh [abi] [deps|llama|qtts|vulkan|apk|all] [clean] [arch=<march>|baseline]
 #
 #     abi     arm64-v8a (default) | x86_64
@@ -38,7 +48,8 @@
 # match it, and re-measure.
 #
 # Env overrides:
-#   ANDROID_SDK_ROOT  the SDK (default: read from android/local.properties)
+#   ANDROID_SDK_ROOT  the SDK. Default: ANDROID_HOME, then sdk.dir in
+#                     android/local.properties
 #   ANDROID_NDK_ROOT  the NDK (default: the version in android/gradle.properties)
 #   VCPKG_ROOT        vcpkg checkout (default: a sibling of the repo)
 #   LLAMA_SRC         llama.cpp checkout (default: a sibling of the repo)
@@ -106,18 +117,40 @@ API_LEVEL=26
 # Toolchain discovery
 #-----------------------------------------------------------------------------
 
-if [ -z "${ANDROID_SDK_ROOT:-}" ]; then
+# Three sources, in the order of how explicitly each one was chosen.
+# ANDROID_HOME is here because it is the variable the SDK's own installers and
+# Android Studio still set -- looking only at ANDROID_SDK_ROOT means a machine
+# with a perfectly good SDK reports not having one.
+ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+if [ -z "$ANDROID_SDK_ROOT" ] && [ -f "$SCRIPT_DIR/local.properties" ]; then
     # local.properties is the file Gradle already reads, so there is one place
-    # the SDK path lives rather than two that can disagree.
-    ANDROID_SDK_ROOT="$(sed -n 's/^sdk\.dir=//p' "$SCRIPT_DIR/local.properties" 2>/dev/null | head -1)"
+    # the SDK path lives rather than two that can disagree. Gradle escapes what
+    # it writes there -- `C\:\\Users\\me\\...` -- so it is unescaped back into a
+    # path before anything tries to open it.
+    #
+    # The [ -f ] guard is not politeness. Under `set -e` with pipefail, a sed
+    # over a missing file fails the command substitution and kills the script
+    # THERE, exit 2, in silence -- so the message below, which says exactly how
+    # to fix it, could never print. That is how this lane looked broken.
+    ANDROID_SDK_ROOT="$(sed -n 's/^sdk\.dir=//p' "$SCRIPT_DIR/local.properties" | head -1 \
+        | sed 's/\\\\/\//g; s/\\:/:/g')"
 fi
-if [ -z "${ANDROID_SDK_ROOT:-}" ] || [ ! -d "$ANDROID_SDK_ROOT" ]; then
-    echo "[build] no Android SDK. Set ANDROID_SDK_ROOT, or put sdk.dir in local.properties." >&2
+if [ -z "$ANDROID_SDK_ROOT" ] || [ ! -d "$ANDROID_SDK_ROOT" ]; then
+    echo "[build] no Android SDK at '${ANDROID_SDK_ROOT:-<unset>}'." >&2
+    echo "[build] set ANDROID_HOME or ANDROID_SDK_ROOT, or put sdk.dir in" >&2
+    echo "[build]   $SCRIPT_DIR/local.properties" >&2
     exit 1
 fi
 
 if [ -z "${ANDROID_NDK_ROOT:-}" ]; then
-    NDK_VER="$(sed -n 's/^bodyclock\.ndk=//p' "$SCRIPT_DIR/gradle.properties" | head -1)"
+    NDK_VER=""
+    if [ -f "$SCRIPT_DIR/gradle.properties" ]; then
+        NDK_VER="$(sed -n 's/^bodyclock\.ndk=//p' "$SCRIPT_DIR/gradle.properties" | head -1)"
+    fi
+    if [ -z "$NDK_VER" ]; then
+        echo "[build] no bodyclock.ndk in $SCRIPT_DIR/gradle.properties" >&2
+        exit 1
+    fi
     ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/$NDK_VER"
 fi
 if [ ! -d "$ANDROID_NDK_ROOT" ]; then
@@ -163,16 +196,19 @@ fi
 # carries undefined references to libc++ either way, and it is the final shared
 # library that decides which one resolves them -- so this is about not having to
 # re-derive that every time the question comes up.
-ndk_cfg() {
-    printf '%s\n' \
-        "-G" "Ninja" \
-        "-DCMAKE_MAKE_PROGRAM=$NINJA_BIN" \
-        "-DCMAKE_TOOLCHAIN_FILE=$NDK_TOOLCHAIN" \
-        "-DANDROID_ABI=$ANDROID_ABI_CMAKE" \
-        "-DANDROID_PLATFORM=android-$API_LEVEL" \
-        "-DANDROID_STL=c++_shared" \
-        "-DCMAKE_BUILD_TYPE=Release"
-}
+#
+# A global array rather than a function printing lines into `mapfile`, because
+# macOS still ships bash 3.2 as /bin/bash and `mapfile` arrived in bash 4. One
+# builtin is not worth making every Mac install a second bash for.
+NDK_CFG=(
+    -G Ninja
+    "-DCMAKE_MAKE_PROGRAM=$NINJA_BIN"
+    "-DCMAKE_TOOLCHAIN_FILE=$NDK_TOOLCHAIN"
+    "-DANDROID_ABI=$ANDROID_ABI_CMAKE"
+    "-DANDROID_PLATFORM=android-$API_LEVEL"
+    -DANDROID_STL=c++_shared
+    -DCMAKE_BUILD_TYPE=Release
+)
 
 #-----------------------------------------------------------------------------
 # deps -- the core's own dependencies, via vcpkg
@@ -246,8 +282,7 @@ build_llama() {
     local lbuild="$SCRIPT_DIR/.llama-build/$ABI"
     local lsdk="$SCRIPT_DIR/prebuilt/llama-sdk/$ABI"
 
-    local cfg=()
-    mapfile -t cfg < <(ndk_cfg)
+    local cfg=("${NDK_CFG[@]}")
     cfg+=(
         -S "$LLAMA_SRC" -B "$lbuild"
         -DBUILD_SHARED_LIBS=OFF
@@ -349,8 +384,7 @@ build_qtts() {
     fi
     echo "[qtts] ggml=$LLAMA_SRC/ggml"
 
-    local cfg=()
-    mapfile -t cfg < <(ndk_cfg)
+    local cfg=("${NDK_CFG[@]}")
     cfg+=(
         -S "$QTTS_SRC" -B "$qbuild"
         -DGGML_SOURCE_DIR="$LLAMA_SRC/ggml"

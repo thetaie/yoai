@@ -1,0 +1,6 @@
+# Build output and cross-built SDKs. node_modules is ignored by prettier
+# already; these are not, and `prettier --write .` would happily reformat a
+# bundle nobody wrote by hand.
+out
+build
+sdk

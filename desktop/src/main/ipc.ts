@@ -12,15 +12,17 @@
  */
 import { BrowserWindow, dialog, ipcMain, shell, WebContents } from 'electron'
 import { basename } from 'node:path'
-import { CHANNELS, PickedModel } from '../shared/api'
+import { CHANNELS, ChatSettings, PickedModel, TtsStatus } from '../shared/api'
 import { ChatMessage, WireMessage } from '../shared/chat'
 import { KIND_LOCAL, ModelConfig } from '../shared/provider'
 import { CoreStatus, InterfacePrefs } from '../shared/store'
 import { core, describeCore } from './core'
+import * as chat from './chat'
 import * as keystore from './keystore'
 import * as models from './models'
 import * as prefs from './prefs'
 import * as sessions from './sessions'
+import * as tts from './tts'
 
 /** Live turns, so a window closing can stop the ones it started. */
 const turnOwners = new Map<number, WebContents>()
@@ -36,14 +38,11 @@ export function cancelAllTurns(): number {
   try {
     return core().nativeChatCancelAll()
   } catch {
-    return 0   // the addon never loaded; there is nothing in flight
+    return 0 // the addon never loaded; there is nothing in flight
   }
 }
 
-function handle<A extends unknown[], R>(
-  channel: string,
-  fn: (...args: A) => R | Promise<R>
-): void {
+function handle<A extends unknown[], R>(channel: string, fn: (...args: A) => R | Promise<R>): void {
   ipcMain.handle(channel, (_event, ...args) => fn(...(args as A)))
 }
 
@@ -97,7 +96,12 @@ export function registerHandlers(): void {
     keystore.deleteKey(id)
   })
   handle(CHANNELS.modelsActiveId, () => models.activeId())
-  handle<[string], void>(CHANNELS.modelsSetActiveId, (id) => models.setActiveId(String(id)))
+  handle<[string], void>(CHANNELS.modelsSetActiveId, (id) => {
+    models.setActiveId(String(id))
+    // Switching to an on-device model starts reading its weights now rather
+    // than on the first message. Unawaited: the picker has already closed.
+    models.autoPreload()
+  })
   handle<[string[]], string[]>(CHANNELS.modelsVendorsWithKeys, (ids) =>
     models.vendorsWithKeys(Array.isArray(ids) ? ids.map(String) : [])
   )
@@ -117,9 +121,7 @@ export function registerHandlers(): void {
       ]
     }
     const result =
-      win === null
-        ? await dialog.showOpenDialog(opts)
-        : await dialog.showOpenDialog(win, opts)
+      win === null ? await dialog.showOpenDialog(opts) : await dialog.showOpenDialog(win, opts)
 
     if (result.canceled || result.filePaths.length === 0) {
       return null
@@ -176,6 +178,11 @@ export function registerHandlers(): void {
   // Chat
   //----------------------------------------------------------------------------
 
+  handle<[], ChatSettings>(CHANNELS.chatSettingsGet, () => chat.get())
+  handle<[Partial<ChatSettings>], ChatSettings>(CHANNELS.chatSettingsSet, (patch) =>
+    chat.set(patch ?? {})
+  )
+
   ipcMain.handle(
     CHANNELS.chatStart,
     (event, providerId: string, messages: WireMessage[], systemPrompt: string) => {
@@ -219,6 +226,107 @@ export function registerHandlers(): void {
 
   handle<[number], void>(CHANNELS.chatCancel, (turnId) => {
     core().nativeChatCancel(Number(turnId))
+  })
+
+  //----------------------------------------------------------------------------
+  // Speech output
+  //----------------------------------------------------------------------------
+
+  handle<[], TtsStatus>(CHANNELS.ttsStatus, () => tts.status())
+
+  handle<['talker' | 'tokenizer'], PickedModel | null>(CHANNELS.ttsPickModel, async (which) => {
+    // Validated rather than trusted: this value chooses which stored path gets
+    // overwritten, and the renderer is a web page.
+    //
+    // REJECTED, not defaulted. An earlier version read `which === 'tokenizer' ?
+    // 'tokenizer' : 'talker'`, which turns an unrecognised value into a valid
+    // one -- so a renderer still sending the old name wrote the tokenizer into
+    // the TALKER slot, and the engine failed two steps later with "talker GGUF
+    // has wrong architecture". Falling back to a member of the enum makes a
+    // protocol mismatch indistinguishable from a choice.
+    if (which !== 'talker' && which !== 'tokenizer') {
+      throw new Error(`unknown model slot '${String(which)}'`)
+    }
+    const slot = which
+    const win = BrowserWindow.getFocusedWindow()
+    const opts = {
+      title: slot === 'talker' ? 'Pick the talker model' : 'Pick the tokenizer model',
+      properties: ['openFile' as const],
+      filters: [
+        { name: 'GGUF models', extensions: ['gguf'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    }
+    const result =
+      win === null ? await dialog.showOpenDialog(opts) : await dialog.showOpenDialog(win, opts)
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null
+    }
+    const path = result.filePaths[0]
+    tts.setPath(slot, path)
+    // Picking the second of the two is the whole configuration, so it is also
+    // the moment to load -- pressing 载入 afterwards was a step that could only
+    // be forgotten. Unawaited, and a no-op when only one slot is filled.
+    void tts.autoLoad().then((reason) => {
+      if (reason.length > 0) {
+        console.error(`[bodyclock] the voice would not load: ${reason}`)
+      }
+    })
+    return { path, name: basename(path) }
+  })
+
+  handle<[], string>(CHANNELS.ttsLoad, () => tts.load())
+  handle<[], void>(CHANNELS.ttsUnload, () => tts.unload())
+  handle<[], void>(CHANNELS.ttsCancel, () => tts.cancel())
+  handle<[string], void>(CHANNELS.ttsSetVoice, (text) => tts.setVoice(String(text ?? '')))
+  handle<[boolean], void>(CHANNELS.ttsSetAutoSpeak, (on) => tts.setAutoSpeak(on === true))
+  handle<[string], void>(CHANNELS.ttsSetSpeaker, (name) => tts.setSpeaker(String(name ?? '')))
+  handle<[number], void>(CHANNELS.ttsSetSeed, (seed) => tts.setSeed(Number(seed)))
+
+  // Audio goes to the window that asked, as it arrives. Nothing is buffered
+  // here: the renderer owns the AudioContext, and holding samples in the main
+  // process would only add a copy and a reason for them to be late.
+  ipcMain.handle(CHANNELS.ttsSay, (event, text: string) => {
+    const sender = event.sender
+    // Timed on this side as well as in the renderer. The engine reports when it
+    // handed over the first chunk; these say when THIS process forwarded it and
+    // how the rest were spaced. Three timestamps for one hop each, which is the
+    // only way to tell a slow engine from a stalled delivery.
+    const askedAt = Date.now()
+    let forwarded = 0
+
+    // What the engine is ACTUALLY given, which is not the reply on screen: the
+    // renderer strips markdown and emoji first. Logged because the difference
+    // is invisible otherwise -- a reply that reads its own asterisks out loud
+    // looks like a synthesis fault until you can see the string that caused it.
+    const spoken = String(text ?? '')
+    console.log(
+      `[tts] say ${spoken.length} chars: ${JSON.stringify(
+        spoken.length > 160 ? `${spoken.slice(0, 160)}…` : spoken
+      )}`
+    )
+
+    return tts.say(spoken, (type, payload) => {
+      if (sender.isDestroyed()) {
+        // The window went mid-utterance. Stop generating rather than speak into
+        // nothing -- the core drops it at the next chunk.
+        tts.cancel()
+        return
+      }
+      if (type === 'audio') {
+        forwarded++
+        if (forwarded === 1) {
+          console.log(`[tts] chunk 1 forwarded ${Date.now() - askedAt} ms after say`)
+        }
+        sender.send(CHANNELS.ttsEvent, { type, pcm: payload as Float32Array })
+      } else if (type === 'end') {
+        console.log(`[tts] ${forwarded} chunk(s) forwarded, last at ${Date.now() - askedAt} ms`)
+        sender.send(CHANNELS.ttsEvent, { type, stats: String(payload) })
+      } else {
+        sender.send(CHANNELS.ttsEvent, { type: 'error', error: String(payload) })
+      }
+    })
   })
 
   //----------------------------------------------------------------------------

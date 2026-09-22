@@ -54,11 +54,11 @@
     },
     {
       "name": "chat_empty_title",
-      "value": "你的 AI，跑在你自己的设备上"
+      "value": "你的 AI，运行在你自己的设备上"
     },
     {
       "name": "chat_empty_body",
-      "value": "对话记录只保存在本机。用你自己的 API key 调用模型。"
+      "value": "对话记录只保存在本机"
     },
     {
       "name": "drawer_title",

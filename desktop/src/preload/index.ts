@@ -12,7 +12,15 @@
  * a check that runs inside the process an attacker would already own.
  */
 import { contextBridge, ipcRenderer } from 'electron'
-import { API_KEY, BodyclockApi, CHANNELS, PickedModel } from '../shared/api'
+import {
+  API_KEY,
+  BodyclockApi,
+  CHANNELS,
+  ChatSettings,
+  PickedModel,
+  TtsEvent,
+  TtsStatus
+} from '../shared/api'
 import type { ChatEvent, ChatMessage, WireMessage } from '../shared/chat'
 import type { ModelConfig } from '../shared/provider'
 import type { CoreStatus, InterfacePrefs, KeySaveResult, SessionMeta } from '../shared/store'
@@ -56,6 +64,9 @@ const api: BodyclockApi = {
   },
 
   chat: {
+    settings: () => ipcRenderer.invoke(CHANNELS.chatSettingsGet) as Promise<ChatSettings>,
+    setSettings: (patch) =>
+      ipcRenderer.invoke(CHANNELS.chatSettingsSet, patch) as Promise<ChatSettings>,
     start: (providerId: string, messages: WireMessage[], systemPrompt: string) =>
       ipcRenderer.invoke(CHANNELS.chatStart, providerId, messages, systemPrompt) as Promise<number>,
     cancel: (turnId) => ipcRenderer.invoke(CHANNELS.chatCancel, turnId) as Promise<void>,
@@ -68,6 +79,31 @@ const api: BodyclockApi = {
       ipcRenderer.on(CHANNELS.chatEvent, wrapped)
       return () => {
         ipcRenderer.removeListener(CHANNELS.chatEvent, wrapped)
+      }
+    }
+  },
+
+  tts: {
+    status: () => ipcRenderer.invoke(CHANNELS.ttsStatus) as Promise<TtsStatus>,
+    pickModel: (which: 'talker' | 'tokenizer') =>
+      ipcRenderer.invoke(CHANNELS.ttsPickModel, which) as Promise<PickedModel | null>,
+    load: () => ipcRenderer.invoke(CHANNELS.ttsLoad) as Promise<string>,
+    unload: () => ipcRenderer.invoke(CHANNELS.ttsUnload) as Promise<void>,
+    setVoice: (text: string) => ipcRenderer.invoke(CHANNELS.ttsSetVoice, text) as Promise<void>,
+    setAutoSpeak: (on: boolean) =>
+      ipcRenderer.invoke(CHANNELS.ttsSetAutoSpeak, on) as Promise<void>,
+    setSpeaker: (name: string) => ipcRenderer.invoke(CHANNELS.ttsSetSpeaker, name) as Promise<void>,
+    setSeed: (seed: number) => ipcRenderer.invoke(CHANNELS.ttsSetSeed, seed) as Promise<void>,
+    say: (text: string) => ipcRenderer.invoke(CHANNELS.ttsSay, text) as Promise<boolean>,
+    cancel: () => ipcRenderer.invoke(CHANNELS.ttsCancel) as Promise<void>,
+
+    onEvent: (listener: (ev: TtsEvent) => void) => {
+      // Same reason as chat's: the IpcRendererEvent carries a `sender`, and the
+      // page must not get one.
+      const wrapped = (_event: unknown, ev: TtsEvent): void => listener(ev)
+      ipcRenderer.on(CHANNELS.ttsEvent, wrapped)
+      return () => {
+        ipcRenderer.removeListener(CHANNELS.ttsEvent, wrapped)
       }
     }
   },

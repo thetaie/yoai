@@ -45,10 +45,25 @@ export const CHANNELS = {
   prefsGet: 'prefs:get',
   prefsSet: 'prefs:set',
 
+  chatSettingsGet: 'chat:settings',
+  chatSettingsSet: 'chat:setSettings',
   chatStart: 'chat:start',
   chatCancel: 'chat:cancel',
   /** Main -> renderer, one message per streamed event. */
   chatEvent: 'chat:event',
+
+  ttsStatus: 'tts:status',
+  ttsPickModel: 'tts:pickModel',
+  ttsLoad: 'tts:load',
+  ttsUnload: 'tts:unload',
+  ttsSetVoice: 'tts:setVoice',
+  ttsSetAutoSpeak: 'tts:setAutoSpeak',
+  ttsSetSpeaker: 'tts:setSpeaker',
+  ttsSetSeed: 'tts:setSeed',
+  ttsSay: 'tts:say',
+  ttsCancel: 'tts:cancel',
+  /** Main -> renderer: PCM chunks and the terminal event. */
+  ttsEvent: 'tts:event',
 
   openExternal: 'shell:openExternal'
 } as const
@@ -58,6 +73,79 @@ export interface PickedModel {
   path: string
   /** The file's own name, which is what the picker shows for a local model. */
   name: string
+}
+
+/** What speech output can do right now, and why not when it cannot. */
+export interface TtsStatus {
+  /** False on a build without the qtts lane -- `build.cmd qtts` turns it on. */
+  available: boolean
+  /** Whether the two GGUFs are resident. Loading takes seconds. */
+  loaded: boolean
+  /** "base" | "custom_voice" | "voice_design" | '' when nothing is loaded. */
+  modelType: string
+  /** The stored paths, '' when the user has not picked them yet. */
+  talkerPath: string
+  tokenizerPath: string
+  /**
+   * The voice, described in English. On a voice_design checkpoint this is not a
+   * preference: bodyclock.h REQUIRES an instruct there, and say() fails without
+   * one. Optional on custom_voice, refused by base.
+   */
+  voice: string
+  /** Read every reply aloud, sentence by sentence, as the model writes it. */
+  autoSpeak: boolean
+  /**
+   * The chosen speaker, and the ones this checkpoint carries.
+   *
+   * Only custom_voice has any. It is the difference that matters when a reply
+   * is spoken one sentence at a time: the speaker is a token the engine
+   * inserts, so identity is fixed structurally across independent utterances,
+   * where a written description only pins it statistically and drifts audibly
+   * from sentence to sentence.
+   */
+  speaker: string
+  speakers: string[]
+  /**
+   * Sampling seed. **Pinned, not left to the engine.**
+   *
+   * The ABI's default is -1, "a fresh seed per call", and with it the same
+   * sentence synthesised twice comes back as different audio -- measured, by
+   * hashing the PCM: two runs with everything else held fixed differed, and two
+   * with the seed pinned were byte-identical. The speaker holds identity but
+   * not the draw, so an unpinned seed is why the test button and a reply did
+   * not sound like the same person. -1 restores that behaviour deliberately.
+   */
+  seed: number
+  /** Why the last load or say failed. '' after a success. */
+  lastError: string
+}
+
+/**
+ * One event from a running utterance.
+ *
+ * `pcm` is **mono float samples at 24 kHz** -- the rate is not carried in the
+ * samples, so it is stated here and in native/src/binding.cpp and nowhere else.
+ * `stats` is the JSON bodyclock_tts_say returns: speechSeconds, realtime,
+ * firstAudioSeconds, chunks, peakDbfs and the rest, documented in bodyclock.h.
+ */
+export interface TtsEvent {
+  type: 'audio' | 'end' | 'error'
+  pcm?: Float32Array
+  stats?: string
+  error?: string
+}
+
+/**
+ * How the conversation is set up, as opposed to what is said in it.
+ *
+ * Sent with every turn rather than stored in the transcript: the core keeps no
+ * session state, so the prompt in force is always the one configured now, and
+ * reopening an old conversation does not resurrect the prompt it was held
+ * under.
+ */
+export interface ChatSettings {
+  /** Prepended to every turn as the system message. '' sends none at all. */
+  systemPrompt: string
 }
 
 export interface BodyclockApi {
@@ -108,10 +196,42 @@ export interface BodyclockApi {
      * Start one turn and resolve to its id. `messages` is the WHOLE transcript
      * including the user message just sent -- the core keeps no session state.
      */
+    /** The global system prompt, read fresh at send time. */
+    settings(): Promise<ChatSettings>
+    setSettings(patch: Partial<ChatSettings>): Promise<ChatSettings>
     start(providerId: string, messages: WireMessage[], systemPrompt: string): Promise<number>
     cancel(turnId: number): Promise<void>
     /** Subscribe to every turn's events. Returns the unsubscribe function. */
     onEvent(listener: (ev: ChatEvent) => void): () => void
+  }
+
+  /**
+   * Speech output: Qwen3-TTS through qwentts.cpp, in this process.
+   *
+   * Not a platform voice -- the engine runs here, so `load` costs seconds and
+   * gigabytes and `say` costs roughly as long as the speech it produces. The
+   * renderer does the playing: `onEvent` hands it PCM and it owns the
+   * AudioContext, because only the page has one.
+   */
+  tts: {
+    status(): Promise<TtsStatus>
+    /** Pick one of the two GGUFs. `which` says which slot it fills. */
+    pickModel(which: 'talker' | 'tokenizer'): Promise<PickedModel | null>
+    /** Read both models. Resolves to '' on success, or to the reason. */
+    load(): Promise<string>
+    unload(): Promise<void>
+    /** The written voice; see TtsStatus.voice. Empty restores the default. */
+    setVoice(text: string): Promise<void>
+    setAutoSpeak(on: boolean): Promise<void>
+    /** '' asks the engine for its own default, which is a speaker, not silence. */
+    setSpeaker(name: string): Promise<void>
+    /** -1 asks for a fresh draw each time; anything else is reproducible. */
+    setSeed(seed: number): Promise<void>
+    /** False when an utterance is already running. */
+    say(text: string): Promise<boolean>
+    cancel(): Promise<void>
+    /** Subscribe to the running utterance. Returns the unsubscribe function. */
+    onEvent(listener: (ev: TtsEvent) => void): () => void
   }
 
   /** Open a vendor's sign-up page in the user's browser, never in a window here. */

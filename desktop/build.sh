@@ -5,22 +5,32 @@
 # are separate arguments for that reason -- the loop while writing UI is
 # `npm run dev`, and nothing here has to run again until the C++ changes.
 #
-# Usage: ./build.sh [clean] [addon] [llama] [app]
+# The Linux and macOS script; build.cmd is the Windows one. Keep the two in
+# agreement -- and nothing here may assume bash 4, because macOS still ships 3.2
+# as /bin/bash.
+#
+# Usage: ./build.sh [clean] [addon] [llama] [qtts] [app]
 #
 #   (no args)  addon + app
 #   addon      just the Node-API addon (build/Release/bodyclock.node)
 #   llama      assemble a desktop llama.cpp SDK and build the addon WITH the
 #              on-device lane. Implies addon.
+#   qtts       assemble a desktop qwentts.cpp SDK with the platform's GPU
+#              backend and build the addon with speech output. Implies addon.
+#              Needs a llama.cpp checkout too, whether or not `llama` is asked
+#              for: it compiles llama.cpp's ggml. See the lane below for why.
 #   app        just the Electron bundles (out/)
 #   clean      discard build/ first. Needed to change the lane set: CMake caches
 #              it, so adding `llama` to a tree configured without it has no
-#              effect.
+#              effect. The SDKs under sdk/ are NOT discarded -- see below.
 #
 # Env overrides:
 #   VCPKG_ROOT        vcpkg checkout (default: a sibling of the repo, used only
 #                     if it exists)
 #   OPENSSL_ROOT_DIR  where to find OpenSSL, when the default search misses it
-#   LLAMA_SRC         llama.cpp checkout (default: a sibling of the repo), `llama` only
+#   LLAMA_SRC         llama.cpp checkout (default: a sibling of the repo).
+#                     Read by `llama` AND by `qtts`, which compiles its ggml.
+#   QTTS_SRC          qwentts.cpp checkout (default: a sibling), `qtts` only
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -28,17 +38,27 @@ DESKTOP_DIR="$(pwd)"
 PROJECT_DIR="$(cd .. && pwd)"
 BUILD_DIR="$DESKTOP_DIR/build"
 
+# The SDKs live OUTSIDE build/, and that is not tidiness. build/ belongs to
+# cmake-js: when its build step fails it runs its own CLEAN, which deletes the
+# whole output directory. With the SDKs inside, one compile error in binding.cpp
+# costs a full llama.cpp rebuild and a full Vulkan shader rebuild -- minutes,
+# for a typo. `clean` still only discards build/, so the SDKs also survive a
+# lane change, which is the other thing that used to rebuild them for nothing.
+SDK_DIR="$DESKTOP_DIR/sdk"
+
 DO_CLEAN=""
 DO_ADDON=""
 DO_LLAMA=""
+DO_QTTS=""
 DO_APP=""
 for arg in "$@"; do
   case "$arg" in
     clean) DO_CLEAN=1 ;;
     addon) DO_ADDON=1 ;;
     llama) DO_LLAMA=1; DO_ADDON=1 ;;
+    qtts)  DO_QTTS=1;  DO_ADDON=1 ;;
     app)   DO_APP=1 ;;
-    *) echo "Unknown argument \"$arg\". Usage: ./build.sh [clean] [addon] [llama] [app]" >&2; exit 1 ;;
+    *) echo "Unknown argument \"$arg\". Usage: ./build.sh [clean] [addon] [llama] [qtts] [app]" >&2; exit 1 ;;
   esac
 done
 
@@ -103,19 +123,22 @@ if [ -n "$DO_ADDON" ]; then
       exit 1
     fi
 
-    LBUILD="$BUILD_DIR/llama"
-    LSDK="$BUILD_DIR/llama-sdk"
+    LBUILD="$SDK_DIR/llama"
+    LSDK="$SDK_DIR/llama-sdk"
     echo "[build] llama.cpp from $LLAMA_SRC"
-    if [ ! -f "$LBUILD/build.ninja" ] && [ ! -f "$LBUILD/Makefile" ]; then
-      cmake -S "$LLAMA_SRC" -B "$LBUILD" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_SHARED_LIBS=OFF \
-        -DLLAMA_BUILD_TESTS=OFF \
-        -DLLAMA_BUILD_EXAMPLES=OFF \
-        -DLLAMA_BUILD_TOOLS=OFF \
-        -DLLAMA_BUILD_SERVER=OFF \
-        -DLLAMA_CURL=OFF
-    fi
+    # Configured every run, not only when the tree is new. The guard that used
+    # to be here saved a few seconds and cost a whole class of bug: a flag added
+    # below has no effect on a tree already configured without it, so the build
+    # keeps succeeding and the addon keeps failing to link. CMake is idempotent
+    # and quick when nothing changed.
+    cmake -S "$LLAMA_SRC" -B "$LBUILD" \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DBUILD_SHARED_LIBS=OFF \
+      -DLLAMA_BUILD_TESTS=OFF \
+      -DLLAMA_BUILD_EXAMPLES=OFF \
+      -DLLAMA_BUILD_TOOLS=OFF \
+      -DLLAMA_BUILD_SERVER=OFF \
+      -DLLAMA_CURL=OFF
     cmake --build "$LBUILD" --parallel --target llama ggml ggml-cpu ggml-base
 
     mkdir -p "$LSDK/include" "$LSDK/lib"
@@ -127,6 +150,92 @@ if [ -n "$DO_ADDON" ]; then
     echo "[build] llama SDK at $LSDK"
 
     CMAKE_JS_ARGS+=(--CDBODYCLOCK_ONDEVICE_LLM=ON "--CDLLAMA_CPP_DIR=$LSDK")
+  fi
+
+  # A desktop qwentts.cpp SDK: speech output, with whatever GPU backend this
+  # platform has. design/voice.md measures the CPU at RTF 1.13 and a laptop iGPU
+  # at 0.63, and below 1 is a threshold rather than a slope -- a stream needs a
+  # pre-buffer of duration x (RTF - 1), which at 0.63 is nothing and at 1.13 is
+  # eight seconds for a minute of audio. So the backend is the lane.
+  if [ -n "$DO_QTTS" ]; then
+    QTTS_SRC="${QTTS_SRC:-$PROJECT_DIR/../qwentts.cpp}"
+    if [ ! -f "$QTTS_SRC/src/qwen.h" ]; then
+      echo "no qwentts.cpp at $QTTS_SRC." >&2
+      echo "clone it at the pinned commit, submodule and patches included:" >&2
+      echo "  ../third/sync.sh clone qwentts.cpp" >&2
+      echo "or point QTTS_SRC at an existing checkout." >&2
+      exit 1
+    fi
+
+    # ONE ggml for both lanes, and llama.cpp's is the one. qwentts builds a ggml
+    # of its own from a fork, and until 2026-09-21 that copy superset llama's,
+    # so linking qwentts's satisfied both libraries. The update inverted it --
+    # libllama now wants ggml_dsv4_hc_pre_gated, which the fork does not have --
+    # and whichever copy is kept, one symbol goes unmet and the addon does not
+    # link. GGML_SOURCE_DIR, which qwentts added the same day, points its build
+    # at any ggml tree, so both lanes compile the same one from the same commit.
+    #
+    # The cost is the fork's ggml_compute_forward_snake_fused, a graph pattern
+    # match that collapses the DAC decoder's snake activation into one kernel.
+    # Same output without it, some unmeasured amount slower, in the codec stage.
+    # design/voice.md has the symbol tables.
+    LLAMA_SRC="${LLAMA_SRC:-$PROJECT_DIR/../llama.cpp}"
+    if [ ! -f "$LLAMA_SRC/ggml/CMakeLists.txt" ]; then
+      echo "qtts compiles llama.cpp's ggml and there is none at $LLAMA_SRC/ggml." >&2
+      echo "  ../third/sync.sh clone llama.cpp" >&2
+      exit 1
+    fi
+
+    # The GPU backend is per platform, not optional-per-platform.
+    #
+    #   macOS   Metal, and ggml turns it on ITSELF -- ggml/CMakeLists.txt does
+    #           `if (APPLE) set(GGML_METAL_DEFAULT ON)`. So the right thing here
+    #           is to pass nothing, and passing GGML_VULKAN would be wrong:
+    #           there is no native Vulkan on macOS.
+    #   Linux   Vulkan, the same flag Windows uses. Needs the loader, the headers
+    #           and glslc, which ggml compiles its shaders with.
+    QTTS_BACKEND=()
+    if [ "$(uname -s)" = "Darwin" ]; then
+      echo "[build] qtts backend: Metal (ggml enables it for APPLE by itself)"
+    else
+      if [ -z "${VULKAN_SDK:-}" ] && ! command -v glslc >/dev/null 2>&1; then
+        echo "qtts needs Vulkan: the loader, the headers, and glslc." >&2
+        echo "  Debian/Ubuntu: apt install libvulkan-dev glslc" >&2
+        echo "  Fedora:        dnf install vulkan-loader-devel glslc" >&2
+        echo "or set VULKAN_SDK if you installed the LunarG SDK somewhere else." >&2
+        exit 1
+      fi
+      echo "[build] qtts backend: Vulkan"
+      QTTS_BACKEND=(-DGGML_VULKAN=ON)
+    fi
+
+    QBUILD="$SDK_DIR/qtts"
+    QSDK="$SDK_DIR/qtts-sdk"
+    echo "[build] qwentts.cpp from $QTTS_SRC, ggml from $LLAMA_SRC/ggml"
+    cmake -S "$QTTS_SRC" -B "$QBUILD" \
+      -DCMAKE_BUILD_TYPE=Release \
+      "-DGGML_SOURCE_DIR=$LLAMA_SRC/ggml" \
+      -DBUILD_SHARED_LIBS=OFF \
+      -DQWEN_SHARED=OFF \
+      "${QTTS_BACKEND[@]+"${QTTS_BACKEND[@]}"}"
+    # Only qwen-core by name: qwen-tts, qwen-codec and tts-server all build by
+    # default and all want a main(), which the addon has no use for.
+    cmake --build "$QBUILD" --parallel --target qwen-core
+
+    mkdir -p "$QSDK/include" "$QSDK/lib"
+    cp "$QTTS_SRC"/src/qwen*.h "$QSDK/include/"
+    # Collected by search rather than by name because ggml splits its archives
+    # differently between versions, and the GPU backend adds one more. A missing
+    # one surfaces as an undefined symbol at the addon's link step.
+    find "$QBUILD" -name 'libqwen-core.*' -o -name 'libggml*.*' \
+      | while IFS= read -r lib; do cp "$lib" "$QSDK/lib/"; done
+    if ! ls "$QSDK"/lib/libqwen-core.* >/dev/null 2>&1; then
+      echo "[build] qwentts built but no qwen-core library landed in $QSDK/lib" >&2
+      exit 1
+    fi
+    echo "[build] qtts SDK at $QSDK"
+
+    CMAKE_JS_ARGS+=(--CDBODYCLOCK_QTTS=ON "--CDQTTS_DIR=$QSDK")
   fi
 
   # The addon is loaded by Electron, not by Node, so it is built against

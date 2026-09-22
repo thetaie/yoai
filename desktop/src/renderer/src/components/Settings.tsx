@@ -20,8 +20,10 @@ import {
   modelId,
   modelLabel
 } from '@shared/provider'
+import type { TtsStatus } from '@shared/api'
 import type { CoreStatus, InterfacePrefs } from '@shared/store'
 import { FAMILY_LABEL, S } from '../strings'
+import * as tts from '../tts'
 
 interface Props {
   status: CoreStatus
@@ -60,6 +62,21 @@ export function Settings({
   const [keyed, setKeyed] = useState<string[]>([])
   const [note, setNote] = useState<{ text: string; tone: 'danger' | 'success' } | null>(null)
   const [loadingLocal, setLoadingLocal] = useState('')
+  /**
+   * The preload result, tagged with the model it belongs to.
+   *
+   * Per model rather than in the page-wide `note`, which renders down in the
+   * "add a model" section: clicking 预加载 in the list put its answer three
+   * sections away, where it read as a comment on whatever was near it.
+   */
+  const [localNote, setLocalNote] = useState<{
+    id: string
+    text: string
+    tone: 'danger' | 'success'
+  } | null>(null)
+  const [prompt, setPrompt] = useState<string | null>(null)
+  const [ttsStatus, setTtsStatus] = useState<TtsStatus | null>(null)
+  const [ttsBusy, setTtsBusy] = useState(false)
 
   const vendor = findVendor(vendorId)
   const hasKey = keyed.includes(vendorId)
@@ -71,6 +88,88 @@ export function Settings({
   useEffect(() => {
     void refreshKeys()
   }, [])
+
+  const refreshTts = async (): Promise<void> => {
+    setTtsStatus(await window.bodyclock.tts.status())
+  }
+
+  useEffect(() => {
+    void refreshTts()
+  }, [])
+
+  useEffect(() => {
+    void (async () => {
+      setPrompt((await window.bodyclock.chat.settings()).systemPrompt)
+    })()
+  }, [])
+
+  const pickTts = async (which: 'talker' | 'tokenizer'): Promise<void> => {
+    const picked = await window.bodyclock.tts.pickModel(which)
+    if (picked !== null) {
+      await refreshTts()
+    }
+  }
+
+  const loadTts = async (): Promise<void> => {
+    setTtsBusy(true)
+    setNote(null)
+    const reason = await window.bodyclock.tts.load()
+    setTtsBusy(false)
+    await refreshTts()
+    setNote(
+      reason.length === 0
+        ? { text: S.settingsTtsReady, tone: 'success' }
+        : { text: reason, tone: 'danger' }
+    )
+  }
+
+  const unloadTts = async (): Promise<void> => {
+    await tts.stop()
+    await window.bodyclock.tts.unload()
+    await refreshTts()
+  }
+
+  const testTts = async (): Promise<void> => {
+    const reason = await tts.speak('settings-test', S.settingsTtsTestText)
+    if (reason.length > 0) {
+      setNote({ text: reason, tone: 'danger' })
+      return
+    }
+    // A say that started can still fail -- the engine reports it on the event
+    // stream, not on the call. Without this the only sign would be silence.
+    const fail = tts.watchOnce()
+    void fail.then((err) => {
+      if (err.length > 0) {
+        setNote({ text: err, tone: 'danger' })
+      }
+    })
+  }
+
+  const saveVoice = async (text: string): Promise<void> => {
+    await window.bodyclock.tts.setVoice(text)
+    await refreshTts()
+  }
+
+  const savePrompt = async (text: string): Promise<void> => {
+    const next = await window.bodyclock.chat.setSettings({ systemPrompt: text })
+    setPrompt(next.systemPrompt)
+  }
+
+  const setSpeaker = async (name: string): Promise<void> => {
+    await window.bodyclock.tts.setSpeaker(name)
+    await refreshTts()
+  }
+
+  const setSeed = async (raw: string): Promise<void> => {
+    const n = Number.parseInt(raw, 10)
+    await window.bodyclock.tts.setSeed(Number.isFinite(n) ? n : 7)
+    await refreshTts()
+  }
+
+  const setAuto = async (on: boolean): Promise<void> => {
+    await window.bodyclock.tts.setAutoSpeak(on)
+    await refreshTts()
+  }
 
   // Prefill from the vendor record, which is the whole reason the built-in list
   // exists: the first run should be "paste a key", not "find out what this
@@ -134,12 +233,13 @@ export function Settings({
 
   const preload = async (id: string): Promise<void> => {
     setLoadingLocal(id)
+    setLocalNote(null)
     const reason = await window.bodyclock.models.preload(id)
     setLoadingLocal('')
-    setNote(
+    setLocalNote(
       reason.length === 0
-        ? { text: S.settingsLocalReady, tone: 'success' }
-        : { text: reason, tone: 'danger' }
+        ? { id, text: S.settingsLocalReady, tone: 'success' }
+        : { id, text: reason, tone: 'danger' }
     )
   }
 
@@ -178,15 +278,31 @@ export function Settings({
                     {modelLabel(m)}
                     {isLocal(m) && <span className="row-sub"> · 本机</span>}
                   </span>
-                  {isLocal(m) && (
-                    <button
-                      className="btn"
-                      disabled={loadingLocal.length > 0}
-                      onClick={() => void preload(m.id)}
-                    >
-                      {loadingLocal === m.id ? S.settingsLocalLoading : S.settingsLocalPreload}
-                    </button>
-                  )}
+                  {/* The answer lands where the button was. A model that is
+                      resident has nothing left to click, so the success text
+                      REPLACES the button; a failure keeps it, because the only
+                      useful thing to do with a failure is try again. */}
+                  {isLocal(m) &&
+                    (localNote !== null && localNote.id === m.id && localNote.tone === 'success' ? (
+                      <span className="field-note" data-tone="success">
+                        {localNote.text}
+                      </span>
+                    ) : (
+                      <>
+                        {localNote !== null && localNote.id === m.id && (
+                          <span className="field-note" data-tone="danger">
+                            {localNote.text}
+                          </span>
+                        )}
+                        <button
+                          className="btn"
+                          disabled={loadingLocal.length > 0}
+                          onClick={() => void preload(m.id)}
+                        >
+                          {loadingLocal === m.id ? S.settingsLocalLoading : S.settingsLocalPreload}
+                        </button>
+                      </>
+                    ))}
                   <button className="btn btn-danger" onClick={() => void drop(m)}>
                     {S.settingsDelete}
                   </button>
@@ -323,6 +439,161 @@ export function Settings({
               这个版本没有编译本机推理引擎。用 <code>desktop/build.cmd llama</code>
               （或 <code>./build.sh llama</code>）重新构建 addon 即可打开这条车道。
             </p>
+          )}
+        </section>
+
+        {/*------------------------------------------------------------------*/}
+        <section className="section">
+          <h3>{S.settingsPrompt}</h3>
+          <p>{S.settingsPromptIntro}</p>
+          <div className="field">
+            {/* Uncontrolled with onBlur, like the voice description: a textarea
+                that round-trips to disk on every keystroke fights the cursor. */}
+            {prompt !== null && (
+              <textarea
+                className="control"
+                rows={4}
+                defaultValue={prompt}
+                placeholder={S.settingsPromptHint}
+                onBlur={(e) => void savePrompt(e.target.value)}
+              />
+            )}
+          </div>
+        </section>
+
+        {/*------------------------------------------------------------------*/}
+        <section className="section">
+          <h3>{S.settingsTts}</h3>
+          <p>{S.settingsTtsIntro}</p>
+          {ttsStatus !== null && !ttsStatus.available ? (
+            <p className="field-note" data-tone="danger">
+              {S.settingsTtsUnavailable}
+            </p>
+          ) : (
+            <>
+              <div className="card">
+                {[
+                  {
+                    which: 'talker' as const,
+                    label: S.settingsTtsTalker,
+                    path: ttsStatus?.talkerPath ?? ''
+                  },
+                  {
+                    which: 'tokenizer' as const,
+                    label: S.settingsTtsTokenizer,
+                    path: ttsStatus?.tokenizerPath ?? ''
+                  }
+                ].map((slot) => (
+                  <div className="row" key={slot.which}>
+                    <span className="row-label">
+                      {slot.label}
+                      <div className="path">
+                        {slot.path.length > 0 ? slot.path : S.settingsTtsNotPicked}
+                      </div>
+                    </span>
+                    <button className="btn" onClick={() => void pickTts(slot.which)}>
+                      {S.settingsTtsPick}
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="row" style={{ marginTop: 10, gap: 8 }}>
+                {ttsStatus?.loaded === true ? (
+                  <>
+                    <button className="btn" onClick={() => void testTts()}>
+                      {S.settingsTtsTest}
+                    </button>
+                    <button className="btn" onClick={() => void unloadTts()}>
+                      {S.settingsTtsUnload}
+                    </button>
+                  </>
+                ) : (
+                  <button className="btn" disabled={ttsBusy} onClick={() => void loadTts()}>
+                    {ttsBusy ? S.settingsTtsLoading : S.settingsTtsLoad}
+                  </button>
+                )}
+              </div>
+
+              {/* The voice, and on voice_design it is not a preference: the C
+                  ABI REQUIRES an instruct there and say() fails without one, so
+                  this field is what makes the checkpoint able to speak at all.
+                  Optional on custom_voice, refused by base -- which is why the
+                  field is shown only for the two that accept it. */}
+              {ttsStatus !== null &&
+                (ttsStatus.modelType === 'voice_design' ||
+                  ttsStatus.modelType === 'custom_voice') && (
+                  <div className="field" style={{ marginTop: 12 }}>
+                    <label htmlFor="ttsVoice">{S.settingsTtsVoice}</label>
+                    <input
+                      id="ttsVoice"
+                      className="control"
+                      defaultValue={ttsStatus.voice}
+                      placeholder={S.settingsTtsVoiceHint}
+                      onBlur={(e) => void saveVoice(e.target.value)}
+                    />
+                    <span className="field-note">{S.settingsTtsVoiceNote}</span>
+                  </div>
+                )}
+
+              {/* Only custom_voice carries names, and it is the checkpoint to
+                  use when replies are read one sentence at a time: the speaker
+                  is a token, so identity holds across independent utterances.
+                  The description above still applies here -- it varies delivery
+                  while this fixes who is speaking. */}
+              {ttsStatus !== null && ttsStatus.speakers.length > 0 && (
+                <div className="field" style={{ marginTop: 12 }}>
+                  <label htmlFor="ttsSpeaker">{S.settingsTtsSpeaker}</label>
+                  <select
+                    id="ttsSpeaker"
+                    className="control"
+                    value={ttsStatus.speaker}
+                    onChange={(e) => void setSpeaker(e.target.value)}
+                  >
+                    <option value="">{S.settingsTtsSpeakerDefault}</option>
+                    {ttsStatus.speakers.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="field-note">{S.settingsTtsSpeakerNote}</span>
+                </div>
+              )}
+
+              {ttsStatus !== null && (
+                <div className="field" style={{ marginTop: 12 }}>
+                  <label htmlFor="ttsSeed">{S.settingsTtsSeed}</label>
+                  <input
+                    id="ttsSeed"
+                    className="control"
+                    type="number"
+                    defaultValue={ttsStatus.seed}
+                    onBlur={(e) => void setSeed(e.target.value)}
+                  />
+                  <span className="field-note">{S.settingsTtsSeedNote}</span>
+                </div>
+              )}
+
+              <div className="field" style={{ marginTop: 12 }}>
+                <label htmlFor="ttsAuto" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    id="ttsAuto"
+                    type="checkbox"
+                    checked={ttsStatus?.autoSpeak === true}
+                    onChange={(e) => void setAuto(e.target.checked)}
+                  />
+                  {S.settingsTtsAuto}
+                </label>
+                <span className="field-note">{S.settingsTtsAutoNote}</span>
+              </div>
+
+              {ttsStatus?.loaded === true && ttsStatus.modelType.length > 0 && (
+                <p className="field-note" style={{ marginTop: 8 }}>
+                  已载入 · {ttsStatus.modelType}
+                </p>
+              )}
+            </>
           )}
         </section>
 
