@@ -1,5 +1,5 @@
 # name|env|url|branch|commit|submodules|patches (file@worktree)|used by
 llama.cpp|LLAMA_SRC|https://github.com/ggml-org/llama.cpp|master|335b21fcbda972777e4e9e69decad1f719cafeb3|no|llama-ggml-ohos-affinity.patch@.|every lane: its ggml is the only one now built
-MNN|MNN_SRC|https://github.com/alibaba/MNN.git|master|04ab6f2dea609d3ea15614ad6b093874e87d49d1|no|-|harmony mnn (evaluation lane)
+MNN|MNN_SRC|https://github.com/alibaba/MNN.git|master|04ab6f2dea609d3ea15614ad6b093874e87d49d1|no|mnn-talker-context.patch@.,mnn-vulkan-static-register.patch@.,mnn-vulkan-device-limits.patch@.,mnn-export-talker-quant-bit.patch@.|harmony mnn (evaluation lane), desktop omni
 qwentts.cpp|QTTS_SRC|https://github.com/ServeurpersoCom/qwentts.cpp.git|master|0bfb9237c1aae55f6d279fc7e32b3416a6dbb93a|yes|qwentts-thread-count-override.patch@.|harmony qtts, desktop qtts, android qtts
 vcpkg|VCPKG_ROOT|https://github.com/microsoft/vcpkg|master|d015e31e90838a4c9dfa3eed45979bc70d9357fc|no|-|harmony deps, desktop deps

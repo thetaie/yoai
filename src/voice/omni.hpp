@@ -67,6 +67,25 @@ struct OmniReply {
     // they become the interesting pair the day the ratio goes below 1.
     double first_audio_seconds = 0.0;
     int    audio_blocks        = 0;
+
+    // Where speech_elapsed went, in MNN's own counters. Three numbers because
+    // the lane has one knob and it only moves one of them.
+    //
+    // talker_prefill and talker_decode are the autoregressive half: one forward
+    // per codec token at 50 Hz, which is bandwidth against 0.392 GB of weights.
+    // token2wav is the DiT sampler plus the vocoder, and it is the half that
+    // dit_steps scales -- `steps - 1` forwards per 1.2 s chunk, 4 as shipped.
+    //
+    // So a 3x that lives in token2wav is worth attacking and a 3x that lives in
+    // the decode is not, and until these existed the sum could not tell them
+    // apart. They need a patched MNN (third/patches/mnn-talker-context.patch);
+    // all three read 0 without it.
+    double talker_prefill_seconds = 0.0;
+    double talker_decode_seconds  = 0.0;
+    double token2wav_seconds      = 0.0;
+    // Codec tokens the Talker generated. 50 per second of speech, so it is also
+    // a check on speech_seconds.
+    int    codec_tokens           = 0;
 };
 
 // The audio the Talker produced, as it is produced. `pcm` is mono float at
@@ -74,6 +93,19 @@ struct OmniReply {
 // carrying in the type's documentation because nothing in the signal itself
 // announces it. Return false to abort generation.
 typedef bool (*OmniAudioSink)(const float* pcm, size_t n_samples, bool last, void* user_data);
+
+// The reply, handed over the moment the thinker has finished and BEFORE the
+// Talker is asked for a single sample.
+//
+// The reason it exists is a measurement: on this desktop the thinker finished
+// in 3.8 s and the whole exchange took 70.3 s, so a host that reads the text out
+// of OmniReply -- which only exists when ask() returns -- shows the answer a
+// minute after the model had written it, and after the speech that says the same
+// words has finished playing. The words are the cheap half; this is the hook
+// that lets a page put them on screen while the expensive half runs.
+//
+// Called once per exchange, on the thread that called ask().
+typedef void (*OmniTextSink)(const char* text, void* user_data);
 
 class Omni {
 public:
@@ -112,6 +144,11 @@ public:
     // `sink` NULL asks for text only. Non-NULL asks the Talker to speak the
     // reply, which is most of the cost.
     //
+    // `on_text` NULL waits for the reply to come back in `out`. Non-NULL gets it
+    // as soon as the thinker stops, which on a spoken exchange is most of a
+    // minute earlier. Both callbacks share `user_data`, because they are always
+    // two halves of the same host.
+    //
     // Refuses audio longer than about 30 seconds rather than attempting it.
     //
     // **The number is not a limit, and the thing it guards against is not a
@@ -129,7 +166,7 @@ public:
     // chances to fire. That is worth having and it is not what the name says.
     // design/voice.md has the runs.
     bool ask(const float* pcm, size_t n_samples, const std::string& prompt,
-             OmniAudioSink sink, void* user_data, OmniReply* out);
+             OmniAudioSink sink, OmniTextSink on_text, void* user_data, OmniReply* out);
 
     // The longest clip ask() will accept, in seconds.
     static float max_seconds();

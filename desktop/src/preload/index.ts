@@ -17,6 +17,8 @@ import {
   BodyclockApi,
   CHANNELS,
   ChatSettings,
+  OmniEvent,
+  OmniStatus,
   PickedModel,
   TtsEvent,
   TtsStatus
@@ -104,6 +106,23 @@ const api: BodyclockApi = {
       ipcRenderer.on(CHANNELS.ttsEvent, wrapped)
       return () => {
         ipcRenderer.removeListener(CHANNELS.ttsEvent, wrapped)
+      }
+    }
+  },
+
+  omni: {
+    status: () => ipcRenderer.invoke(CHANNELS.omniStatus) as Promise<OmniStatus>,
+    pickDir: () => ipcRenderer.invoke(CHANNELS.omniPickDir) as Promise<string | null>,
+    load: () => ipcRenderer.invoke(CHANNELS.omniLoad) as Promise<string>,
+    unload: () => ipcRenderer.invoke(CHANNELS.omniUnload) as Promise<void>,
+    set: (patch) => ipcRenderer.invoke(CHANNELS.omniSet, patch) as Promise<OmniStatus>,
+    ask: (prompt: string) => ipcRenderer.invoke(CHANNELS.omniAsk, prompt) as Promise<boolean>,
+
+    onEvent: (listener: (ev: OmniEvent) => void) => {
+      const wrapped = (_event: unknown, ev: OmniEvent): void => listener(ev)
+      ipcRenderer.on(CHANNELS.omniEvent, wrapped)
+      return () => {
+        ipcRenderer.removeListener(CHANNELS.omniEvent, wrapped)
       }
     }
   },

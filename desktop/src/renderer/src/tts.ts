@@ -25,9 +25,7 @@
  * existed on this configuration.
  */
 import type { TtsEvent } from '@shared/api'
-import { createPlayer } from './audio'
-
-const player = createPlayer()
+import { player } from './audio'
 
 /** Which message is being spoken, '' when nothing is. Drives the buttons. */
 let speakingId = ''

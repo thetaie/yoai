@@ -190,13 +190,16 @@ add_library(bodyclock_core STATIC
     src/voice/fbank.cpp
     src/voice/prosody.cpp
     src/voice/sensevoice.cpp
-    # A SECOND engine, for the one thing ggml cannot do here: speak in the
-    # model's own voice. It lost to the third on every axis and now lives in
-    # src/voice/attic/ -- kept for the measurements, listed by no target. Its
-    # README has the table.
-    #   src/voice/omni.cpp
-    # A THIRD, for the same thing at a third of the cost, on text somebody else
-    # wrote. Stubs out without BODYCLOCK_QTTS.
+    # A SECOND engine, for the one thing the other two cannot do between them:
+    # take audio in and answer in the model's own voice, with no text in the
+    # middle. It lost to the third on size, on carrying a second framework and
+    # on having no way to ask for a voice -- design/voice.md and
+    # src/voice/attic/README.md have the table -- and is back because the
+    # end-to-end shape is the thing a chain cannot imitate. Stubs out without
+    # BODYCLOCK_MNN.
+    src/voice/omni.cpp
+    # A THIRD, for the speaking half alone at a third of the cost, on text
+    # somebody else wrote. Stubs out without BODYCLOCK_QTTS.
     src/voice/qtts.cpp
 )
 
@@ -569,6 +572,40 @@ if(BODYCLOCK_MNN)
     # OBJECT library folded into libMNN, so there is no libllm to find. Looking
     # for one reports a good build as a failure.
     target_compile_definitions(bodyclock_core PRIVATE BODYCLOCK_MNN)
+
+    # Whether that libMNN was built with -DMNN_VULKAN=ON, which the archive
+    # itself cannot be asked.
+    #
+    # It matters because MNN's Vulkan backend does not survive static linking on
+    # its own. EVERY part of it registers from a file-scope initializer -- the
+    # runtime creator in VulkanRuntime.cpp, and one addCreator per operator in
+    # its own file -- and an initializer only runs if the linker pulls its
+    # object out of the archive. Nothing else in MNN references any of them.
+    #
+    # The failures are separate and look nothing alike. Without the runtime
+    # creator the backend does not exist at all: "Can't Find type=7 backend, use
+    # 0 instead", and everything quietly runs on the CPU. WITH it and without
+    # the operators, the backend is chosen and then cannot execute most of the
+    # graph: a page of "Vulkan don't support 7, BinaryOp" and a fallback to the
+    # CPU per operator, which measured FIVE TIMES SLOWER than not using the GPU
+    # at all -- 14.4 s of token2wav against 3.1 s, plus 15.6 s of copying that
+    # no counter attributes to anything.
+    #
+    # So the whole archive goes in rather than one referenced symbol. It is
+    # blunt and it costs binary size; the alternative is naming every operator
+    # file MNN might ever add.
+    option(BODYCLOCK_MNN_VULKAN "The MNN at MNN_DIR has the Vulkan backend" OFF)
+    if(BODYCLOCK_MNN_VULKAN)
+        target_compile_definitions(bodyclock_core PRIVATE BODYCLOCK_MNN_VULKAN)
+        if(MSVC)
+            # INTERFACE: this is a static library, so the option has to reach
+            # whoever produces the binary -- the addon, or the CLI.
+            target_link_options(bodyclock_core INTERFACE "/WHOLEARCHIVE:${MNN_LIB}")
+        else()
+            target_link_options(bodyclock_core INTERFACE
+                "-Wl,--whole-archive" "${MNN_LIB}" "-Wl,--no-whole-archive")
+        endif()
+    endif()
 
     # BEFORE, and that word is the whole fix for a crash that looked like a
     # memory problem for a day.

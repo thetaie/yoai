@@ -73,6 +73,24 @@ export interface BodyclockNative {
   nativeTtsSay(text: string, onEvent: NativeTtsHandler): number
   nativeTtsCancel(): number
   nativeTtsLastError(): string
+
+  //--- Omni (MNN + Qwen2.5-Omni) -----------------------------------------------
+  // Present on every build, stubbed without the lane, exactly like the TTS
+  // entries above.
+  nativeOmniAvailable(): number
+  /** A DIRECTORY: config.json plus a dozen .mnn graphs, about 3.8 GB. */
+  nativeOmniLoad(modelDir: string, onDone: NativeHandler): void
+  nativeOmniLoaded(): number
+  nativeOmniUnload(): void
+  /** MNN runs `steps - 1` diffusion forwards per chunk. 0 on success. */
+  nativeOmniSetDitSteps(steps: number): number
+  /** pcm is 16-bit mono at 16 kHz. 1 when the exchange started. */
+  nativeOmniAsk(
+    pcm: Int16Array,
+    prompt: string,
+    wantAudio: boolean,
+    onEvent: NativeTtsHandler
+  ): number
 }
 
 /**

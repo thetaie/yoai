@@ -5,7 +5,7 @@ rem The addon is the slow half and changes rarely; the bundles are seconds. They
 rem are separate arguments for that reason -- the loop while writing UI is
 rem `npm run dev`, and nothing here has to run again until the C++ changes.
 rem
-rem Usage: build.cmd [clean] [addon] [llama] [qtts] [app]
+rem Usage: build.cmd [clean] [addon] [llama] [qtts] [mnn] [app]
 rem
 rem   (no args)  addon + app
 rem   addon      just the Node-API addon (build\Release\bodyclock.node)
@@ -19,6 +19,10 @@ rem              this CPU and 0.63 on its integrated GPU, and only below 1 can
 rem              a stream start without pre-buffering the whole utterance.
 rem              Needs a Vulkan SDK on PATH (VULKAN_SDK) for glslc and the C++
 rem              headers ggml-vulkan includes.
+rem   mnn        assemble a desktop MNN SDK and build the addon with the omni
+rem              lane: audio in, a spoken answer out, no text in between.
+rem              Implies addon. A second inference engine and 3.8 GB of
+rem              weights -- see design/voice.md before turning it on.
 rem   app        just the Electron bundles (out\)
 rem   clean      discard build\ first. Needed to change the lane set: CMake
 rem              caches it, so adding `llama` to a tree configured without it
@@ -30,6 +34,7 @@ rem   NINJA        ninja.exe path
 rem   VCPKG_ROOT   vcpkg checkout (default: the VS-bundled one)
 rem   LLAMA_SRC    llama.cpp checkout (default: a sibling of the repo), `llama` only
 rem   QTTS_SRC     qwentts.cpp checkout (default: a sibling), `qtts` only
+rem   MNN_SRC      MNN checkout (default: a sibling), `mnn` only
 setlocal EnableExtensions EnableDelayedExpansion
 
 set "DESKTOP_DIR=%~dp0"
@@ -50,6 +55,7 @@ set "DO_CLEAN="
 set "DO_ADDON="
 set "DO_LLAMA="
 set "DO_QTTS="
+set "DO_MNN="
 set "DO_APP="
 :args
 if "%~1"=="" goto args_done
@@ -57,8 +63,9 @@ if /I "%~1"=="clean" ( set "DO_CLEAN=1" & shift & goto args )
 if /I "%~1"=="addon" ( set "DO_ADDON=1" & shift & goto args )
 if /I "%~1"=="llama" ( set "DO_LLAMA=1" & set "DO_ADDON=1" & shift & goto args )
 if /I "%~1"=="qtts"  ( set "DO_QTTS=1"  & set "DO_ADDON=1" & shift & goto args )
+if /I "%~1"=="mnn"   ( set "DO_MNN=1"   & set "DO_ADDON=1" & shift & goto args )
 if /I "%~1"=="app"   ( set "DO_APP=1"   & shift & goto args )
-echo Unknown argument "%~1". Usage: build.cmd [clean] [addon] [llama] [qtts] [app]>&2
+echo Unknown argument "%~1". Usage: build.cmd [clean] [addon] [llama] [qtts] [mnn] [app]>&2
 exit /b 1
 :args_done
 
@@ -124,6 +131,20 @@ if defined DO_QTTS (
     set QTTS_DIR_ARG="--CDQTTS_DIR=%SDK_DIR%\qtts-sdk"
 )
 
+set "MNN_ON="
+set "MNN_DIR_ARG="
+set "MNN_VK_ON="
+if defined DO_MNN (
+    call :mnn_sdk || exit /b 1
+    set "MNN_ON=--CDBODYCLOCK_MNN=ON"
+    set MNN_DIR_ARG="--CDMNN_DIR=%SDK_DIR%\mnn-sdk"
+    rem Off, with -DMNN_VULKAN under :mnn_sdk and for the same reason. The two
+    rem travel together: this one says the Vulkan symbols exist to link against,
+    rem and referencing them in a libMNN built without the backend does not link
+    rem at all.
+    rem set "MNN_VK_ON=--CDBODYCLOCK_MNN_VULKAN=ON"
+)
+
 rem Two things here are worked around rather than configured, and both cost an
 rem afternoon to find a second time:
 rem
@@ -156,7 +177,8 @@ node "%DESKTOP_DIR%\node_modules\cmake-js\bin\cmake-js" compile ^
     --CDVCPKG_TARGET_TRIPLET=x64-windows ^
     "--CDVCPKG_INSTALLED_DIR=%PROJECT_DIR%\vcpkg_installed" ^
     !LLAMA_ON! !LLAMA_DIR! ^
-    !QTTS_ON! !QTTS_DIR_ARG!
+    !QTTS_ON! !QTTS_DIR_ARG! ^
+    !MNN_ON! !MNN_DIR_ARG! !MNN_VK_ON!
 if errorlevel 1 exit /b 1
 
 rem Ninja writes it at the root of the output directory; a multi-config
@@ -372,4 +394,115 @@ if not exist "!LSDK!\lib\llama.lib" (
     exit /b 1
 )
 echo [build] llama SDK at !LSDK!
+exit /b 0
+
+rem -----------------------------------------------------------------------------
+rem A desktop MNN SDK, shaped like the other two: include\ plus lib\.
+rem
+rem The SECOND inference engine, and the only reason to carry one: MNN has the
+rem omni Talker -- thinker to codec tokens to a diffusion transformer to a
+rem vocoder -- and llama.cpp has no Talker checkpoint in GGUF at all. This is the
+rem end-to-end lane: audio in, a spoken answer out, with no text in the middle.
+rem
+rem MNN_WIN_RUNTIME_MT is the CRT, and it is not optional. MNN sets CMP0091 NEW
+rem itself and then picks MultiThreadedDLL unless this is on; cmake-js forces /MT
+rem on the addon, and the mismatch is the same page of LNK2038 the qtts lane
+rem taught. Unlike qwentts, MNN has its own switch for it, so no policy override
+rem is needed here.
+rem
+rem MNN_SEP_BUILD=OFF goes with MNN_BUILD_SHARED_LIBS=OFF: MNN has its own
+rem shared-library switch and ignores the standard one, and with the two off the
+rem llm engine becomes an OBJECT library folded into libMNN rather than a second
+rem archive. There is no llm library to find, and looking for one reports a good
+rem build as a failure.
+rem
+rem MNN_VULKAN is DELIBERATELY ABSENT, and the reason is a measurement rather
+rem than an omission. Turning it on needs three things together: -DMNN_VULKAN=ON,
+rem -DMNN_VULKAN_IMAGE=OFF (the default image path is the classic CNN backend --
+rem no attention, no layernorm, no low-bit weights, so the DiT cannot run on it),
+rem and BODYCLOCK_MNN_VULKAN below, because a static libMNN drops every one of
+rem the backend's registrars unless the archive is linked whole. All three are
+rem in place; see CMakeLists.txt and third/patches.
+rem
+rem The idea was sound and the first half of it held. The model's config.json has
+rem two runtimes -- the main one carries the thinker and the Talker, the `mllm`
+rem block carries the audio encoder, the diffusion transformer and the vocoder --
+rem so moving only `mllm` to the GPU should overlap them properly. Today they run
+rem on separate threads and the same four cores, which is why the split adds up
+rem to the wall clock instead of hiding behind it. With `mllm` on Vulkan the
+rem Talker's decode did drop from 3.57 s to 1.91 s, exactly as predicted.
+rem
+rem What it produced was noise. Vulkan returned -4, VK_ERROR_DEVICE_LOST, several
+rem times per chunk: the GPU work never completed, so token2wav "finished" in
+rem 0.87 s against 3.07 s on the CPU and the buffers it left behind were garbage.
+rem The whole exchange was 7.5 s against 6.5 s.
+rem
+rem So it is off until there is a machine, or an MNN, where that does not happen.
+rem -----------------------------------------------------------------------------
+:mnn_sdk
+if not defined MNN_SRC for %%I in ("%PROJECT_DIR%\..") do set "MNN_SRC=%%~fI\MNN"
+if not exist "!MNN_SRC!\CMakeLists.txt" (
+    echo no MNN at "!MNN_SRC!".>&2
+    echo clone it at the pinned commit:>&2
+    echo   ..\third\sync.cmd clone MNN>&2
+    echo or point MNN_SRC at an existing checkout.>&2
+    exit /b 1
+)
+
+set "MBUILD=%SDK_DIR%\mnn"
+set "MSDK=%SDK_DIR%\mnn-sdk"
+echo [build] MNN from !MNN_SRC!
+
+rem Configured every run, for the reason spelled out under :qtts_sdk.
+(
+    cmake -S "!MNN_SRC!" -B "!MBUILD!" -G Ninja ^
+        "-DCMAKE_MAKE_PROGRAM=%NINJA%" ^
+        -DCMAKE_BUILD_TYPE=Release ^
+        -DMNN_WIN_RUNTIME_MT=ON ^
+        -DBUILD_SHARED_LIBS=OFF ^
+        -DMNN_BUILD_SHARED_LIBS=OFF ^
+        -DMNN_SEP_BUILD=OFF ^
+        -DMNN_BUILD_LLM=ON ^
+        -DMNN_BUILD_LLM_OMNI=ON ^
+        -DMNN_LOW_MEMORY=ON ^
+        -DMNN_SUPPORT_TRANSFORMER_FUSE=ON ^
+        -DMNN_BUILD_TOOLS=OFF ^
+        -DMNN_BUILD_BENCHMARK=OFF ^
+        -DMNN_BUILD_TEST=OFF
+    if errorlevel 1 exit /b 1
+)
+cmake --build "!MBUILD!" --config Release --target MNN llm
+if errorlevel 1 exit /b 1
+
+echo [build] assembling !MSDK!
+if not exist "!MSDK!\include" mkdir "!MSDK!\include"
+if not exist "!MSDK!\lib"     mkdir "!MSDK!\lib"
+xcopy /e /i /y /q "!MNN_SRC!\include\MNN" "!MSDK!\include\MNN" >nul || exit /b 1
+xcopy /e /i /y /q "!MNN_SRC!\transformers\llm\engine\include\llm" "!MSDK!\include\llm" >nul || exit /b 1
+
+rem And MNN's OWN rapidjson, which is not a convenience -- it is the fix for a
+rem crash. rapidjson is header-only templates, so its member functions land in
+rem the object files of whoever includes it, as weak symbols; the whole addon is
+rem one module and the linker keeps exactly ONE definition of each. This repo
+rem already carries a much newer rapidjson for src/llm and src/platform, and
+rem libMNN was compiled against the 1.1.0 release it vendors. Two layouts, one
+rem symbol: measured as a SIGSEGV at 0x10 inside MemoryPoolAllocator::Malloc, on
+rem the FIRST json parse of Llm::createLLM, before a line of MNN's own logging.
+xcopy /e /i /y /q "!MNN_SRC!\3rd_party\rapidjson" "!MSDK!\include\rapidjson" >nul || exit /b 1
+if not exist "!MSDK!\include\rapidjson\document.h" (
+    echo [build] no rapidjson under !MSDK!\include>&2
+    echo [build] MNN vendors it at 3rd_party\rapidjson -- look there>&2
+    exit /b 1
+)
+
+set "MLIBS=0"
+for /r "%SDK_DIR%\mnn" %%F in (MNN.lib) do (
+    copy /y "%%~fF" "!MSDK!\lib\" >nul
+    set /a MLIBS+=1
+)
+if not exist "!MSDK!\lib\MNN.lib" (
+    echo [build] MNN built but MNN.lib is not in !MSDK!\lib>&2
+    exit /b 1
+)
+echo [build] MNN SDK at !MSDK!
 exit /b 0

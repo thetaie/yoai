@@ -16,6 +16,7 @@ import {
   type SessionMeta
 } from '@shared/store'
 import { newSessionId, runTurn } from './chatEngine'
+import * as omni from './omni'
 import * as tts from './tts'
 import { Composer } from './components/Composer'
 import { Settings } from './components/Settings'
@@ -259,6 +260,60 @@ export function App(): JSX.Element {
     // Everything the user can see has already been updated above, so the await
     // delays the request and not the interface.
     void (async () => {
+      // Omni answers INSTEAD of the chain when it is switched on: one model
+      // that hears, thinks and speaks, so there is no turn to stream and no
+      // separate speech step.
+      //
+      // There is still something to show early, and it is not a token stream.
+      // The thinker writes the whole reply and stops -- measured, 3.8 s -- and
+      // the Talker then spends most of a minute saying it. onText puts those
+      // words on screen at the moment they exist, so the page is not silent
+      // while the speech it is reading out plays.
+      const om = await window.bodyclock.omni.status()
+      if (om.available && om.loaded && om.enabled) {
+        try {
+          const r = await omni.ask(text, (t) => {
+            textRef.current = t
+            setStreamText(t)
+          })
+          setThread([
+            ...messagesRef.current,
+            {
+              role: 'assistant',
+              content: r.text,
+              model: 'Qwen2.5-Omni',
+              ts: Date.now()
+            }
+          ])
+          void persist(turnSession, messagesRef.current)
+        } catch (err) {
+          note(err instanceof Error ? err.message : String(err))
+          // A failure AFTER the thinker is a failure of the voice, not of the
+          // answer. The words are on screen by then and throwing them away
+          // would be the worse half of the reply to lose.
+          if (textRef.current.length > 0) {
+            setThread([
+              ...messagesRef.current,
+              {
+                role: 'assistant',
+                content: textRef.current,
+                model: 'Qwen2.5-Omni',
+                ts: Date.now()
+              }
+            ])
+            void persist(turnSession, messagesRef.current)
+          }
+        }
+        // The reply has moved from the streaming bubble into the thread, so the
+        // bubble has to be emptied -- it used to be empty for this whole lane
+        // and is not any more.
+        setStreaming(false)
+        setStreamText('')
+        textRef.current = ''
+        cancelerRef.current = null
+        return
+      }
+
       const { systemPrompt } = await window.bodyclock.chat.settings()
       cancelerRef.current = runTurn(activeId, withUser, systemPrompt, {
         onDelta: (t) => {

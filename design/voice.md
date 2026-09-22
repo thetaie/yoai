@@ -355,7 +355,11 @@ are not equal:
   on top. It exists only at sizes and checkpoints that sound worse.
 - **A reference recording** is the only one that can copy a specific voice, and
   it costs half a minute before the first sample. The lever there is the
-  reference's length, which nobody has tried shortening.
+  reference's length. It has since been pulled — on CosyVoice3, not on this
+  checkpoint — and 17.3 s down to 6 s took **74% off the fixed charge and 22%
+  off the per-second rate** with no audible change. Still untried here; see
+  "CosyVoice3 was built and measured" for the numbers and for why they do not
+  transfer on their own.
 
 The polyphone row is the one to carry forward as a rule rather than a fact:
 grapheme-to-phoneme is **per checkpoint, and quantization can take it away**.
@@ -2194,6 +2198,127 @@ no equivalent setting.
 What is left that could move it: the NPU backend, a smaller Talker, or accepting
 that something else reads text aloud.
 
+#### On a desktop the split was measured, and it kills the diffusion argument
+
+The "~1.4 RTF for predit and BigVGAN" above is a subtraction, not a reading. It
+can now be read, because MNN keeps the numbers and simply does not expose them:
+the Talker is a separate `Llm` with a separate `LlmContext`, so none of its work
+appears in the engine's own counters. `third/patches/mnn-talker-context.patch`
+adds one virtual, `getTalkerContext()`, and `bodyclock_omni_ask` reports the
+three fields it carries. **Desktop, `dit_steps` 5, 2.30 s of speech:**
+
+| | seconds | as a ratio to the speech |
+| --- | --- | --- |
+| Talker prefill | 0.17 | — |
+| Talker decode, 119 codec tokens | **3.57** | **1.55x** |
+| token2wav (DiT + BigVGAN) | 3.07 | 1.33x |
+| whole exchange | 6.5 | 2.8x |
+
+**The autoregressive half alone is above real time**, at 30 ms per codec token
+against 0.392 GB of 8-bit weights — about 13 GB/s, which is what this desktop
+manages. `dit_steps` cannot touch that line. With the diffusion free the ratio
+still sits at 1.6, and with the floor at 3 steps — the phone table above says 2
+has audible artefacts — the realistic best is about 2.3.
+
+So the earlier prediction had the right shape and the wrong half: the talker's
+autoregression was assumed to cost about 1 and costs 1.55, and it is now the
+larger of the two rather than the cheaper.
+
+**The wait before the first word is a fixed cost and it is fully accounted
+for.** Desktop, measured repeatedly: the thinker finishes at 1.2–1.6 s and the
+first block of audio arrives at 4.4–5.7 s, regardless of how long the reply is —
+an 8-token answer waits as long as a 40-token one. The first DiT chunk needs
+60 codec tokens plus 12 of lookahead, so 72 × 30 ms of decode, then one
+token2wav pass of ~1.5 s: 3.7 s, which is the gap.
+
+**MNN's quantization is not uniform, and the expensive half is the coarse
+half.** From the export's own defaults, confirmed against the shipped weights:
+
+| | bits | source |
+| --- | --- | --- |
+| thinker | 4 | `--quant_bit`, default 4 |
+| audio encoder | 4 | `utils/audio.py` |
+| **Talker** | **8** | `utils/talker.py`, forced for `hidden_size <= 2048` |
+| **token2wav** | **8** | `utils/token2wav.py` |
+
+Upstream chose 8 for the 3B deliberately — the 7B gets 4 — and for the vocoder
+it says why: INT4 on those conv-heavy modules destroyed the output, correlation
+0.03 against PyTorch where fp16 held 0.9999. The Talker is an ordinary
+autoregressive transformer and is the one worth re-exporting at 4, which halves
+the reads that the 1.55x is made of. `--talker_quant_bit` did not exist;
+`third/patches/mnn-export-talker-quant-bit.patch` adds it. **Not yet measured**
+— it needs the original 11 GB checkpoint — and upstream's default is a reason to
+expect the answer may be no.
+
+#### Vulkan for the vocoder: two real bugs found, and it still does not work
+
+The idea was narrow and the reasoning held up. `config.json` has two runtimes —
+the main one carries the thinker and the Talker, the `mllm` block carries the
+audio encoder, the DiT and BigVGAN — and MNN disables its async token2wav worker
+only when the MAIN backend is a GPU. So `mllm.backend_type: vulkan` alone should
+put the two halves on different processors and make the overlap real. It did:
+**Talker decode dropped from 3.57 s to 1.91 s**, which is the CPU no longer
+sharing four cores with the vocoder.
+
+Everything else went wrong, in three layers, and the first two are worth
+recording because they are not about this GPU.
+
+1. **A static libMNN does not register its Vulkan backend at all.** Every part of
+   it registers from a file-scope initializer — the runtime creator in one
+   object, one `addCreator` per operator in its own — and an initializer only
+   runs if the linker pulls that object out of the archive. Nothing else in MNN
+   references them. Symptom: `Can't Find type=7 backend, use 0 instead`, then a
+   silent CPU run. Referencing one symbol fixes the runtime creator
+   (`mnn-vulkan-static-register.patch`); the operators need the archive linked
+   whole, which is one `/WHOLEARCHIVE` and, with `/OPT:REF` still discarding what
+   is unreachable, cost 0.4 MB of binary.
+2. **Two device limits were being ignored**
+   (`mnn-vulkan-device-limits.patch`). A tensor's offset in its pool goes
+   straight to `vkUpdateDescriptorSets`, so it must be a multiple of
+   `minStorageBufferOffsetAlignment`; the pools were built with
+   `nonCoherentAtomSize`, which is the flush granularity of mapped memory. Most
+   desktop drivers report 64 for both and nothing shows; this Intel Arc reports
+   1 and 64. Separately, `checkFP16` enables `storageBuffer16BitAccess` but not
+   `uniformAndStorageBuffer16BitAccess`, while the shaders put 16-bit members in
+   uniform blocks too. Both are undefined behaviour and both surfaced only as
+   `VK_ERROR_DEVICE_LOST` — 83 of them per exchange, with no other diagnostic.
+   The validation layer named both in one run.
+3. **With those fixed the device survives and the output is still noise.**
+   Identically at fp16 and fp32 — peak clipped to 1.000 against 0.573 on CPU,
+   zero-crossing rate 0.257 against 0.140, 96.8% of frames below 5% of peak — so
+   it is not precision, it is at least one wrong operator in the buffer path.
+
+**Stopped there**, and the reason is the table above rather than fatigue: the
+whole prize is token2wav's 3.07 s, and the Talker's 3.57 s — untouched by any of
+this — is the larger half.
+
+It left one thing worth keeping: `MNN_LLM_BUILD_DEMO=ON` builds `llm_demo`,
+which runs an omni exchange from a config path and a prompt file and writes
+`output.wav`. Every measurement in this section after the first was taken with
+it, without starting the desktop client.
+
+#### Above RTF 1, a player must not stream at all
+
+The streaming arithmetic above says the gaps cannot be closed. The desktop
+client now acts on it rather than restating it: the player measures what the
+producer is actually delivering — seconds of audio per second of clock, with the
+first block excluded because it arrives at no cost in clock — and **only streams
+when that is above 1.1**. Below it, everything is held and played in one piece
+when generation ends.
+
+Speech output measures 1.8 and streams as before. Omni measures 0.28–0.33 and is
+held: later, but whole. Streaming it produced 15 underruns of 1.8–4.5 s in one
+reply, which is the 1 ÷ RTF duty cycle heard rather than calculated. The
+threshold is per exchange, so a lane that gets faster starts streaming on its
+own.
+
+**The words do not have to wait for the voice.** The thinker finishes at 1.2–1.6
+s and the exchange ends at 6.5 s — on a longer reply, 3.8 s against 70.3 s — and
+until this session the reply text appeared only when the whole call returned, so
+the page showed the answer after the speech reading it had finished playing.
+`bodyclock_omni_ask` now takes a text handler and fires it the moment the
+thinker stops.
+
 **What was NOT established**, so it is not quietly assumed later: whether MNN's
 quantization transcribes as well as the GGUF build does. The reference clip is
 the one that crashes. The finding that Qwen2.5-Omni-3B beats SenseVoice on four
@@ -2462,7 +2587,7 @@ something specific:
 | 0.6B base, in-context clone | ~24 s of setup per utterance, first audio at 29.8 s, and it **mispronounces** |
 | 1.7B base, in-context clone | reads correctly, and costs **RTF 11.76** with first audio at 43.8 s |
 | 1.7B CustomVoice | untried; CustomVoice already lost on voice at 0.6B |
-| a shorter reference for cloning | untried, and only worth it if cloning were otherwise viable |
+| a shorter reference for cloning | untried here; on CosyVoice3 it took 74% off the fixed charge but only 22% off the rate, and the rate is what a long passage pays |
 
 **What it costs is the one thing nothing fixed.** RTF 2.14 for the first half
 minute and 3.52 after. Six levers were tried on that number — streaming against
@@ -2846,8 +2971,19 @@ property.
 
 **The lever is the reference, not the model.** Both halves of the fixed cost
 scale with how long the recording is, and nobody has tried a short one at either
-end. A five-second reference would cost a fifth of the setup and a fifth of the
-added attention per frame — whether it still carries the voice is the question.
+end here. A five-second reference would cost a fifth of the setup and a fifth of
+the added attention per frame — whether it still carries the voice is the
+question.
+
+**Half of that prediction has since been tested, on CosyVoice3, and half of it
+was wrong.** Cutting a reference from 17.3 s to 6 s — 65% — took 74% off the
+fixed charge, which is the proportional scaling this paragraph assumed. It took
+only **22%** off the per-second rate, where proportional would have been 65%. So
+the setup half is a length and the attention half is not, or not only: a shorter
+reference buys back the wait before the first sample much more than it buys back
+the rate afterwards. On a long passage the rate is what dominates. That is a
+different engine and does not transfer, but it says which of the two halves to
+measure first, and which to stop expecting much from.
 
 **At 1.7B and Q8 the same clone costs RTF 11.76 and 43.8 s to first audio** —
 prefill alone is 14.7 s against the 0.6B's 3.5, because the reference's 280
@@ -2918,8 +3054,26 @@ top, and it was passed over on a misreading rather than a measurement.
 **Since written, the speaker parameter exists and the 0.6B CustomVoice has been
 run**; its cost is in "The 0.6B was worth trying after all" below, and the
 reading above held — the style instruction does apply, and costs 226 ms of
-prefill. How the nine speakers sound is still open, and the 1.7B CustomVoice is
-still untouched.
+prefill. How the nine speakers sound is still open.
+
+**And the 1.7B CustomVoice is what the desktop client ships.** Measured through
+it, 1.7B CustomVoice `Q4_K_M` with the 12 Hz tokenizer at `Q8_0`: **RTF 0.56,
+first audio at the speaker 0.13 s**, a reply arriving in 20–29 chunks. It is the
+lane the playback rule above calls fast enough to stream, and by a wide margin.
+
+Three things the client had to learn about the parameters, each of which looked
+like a bug first:
+
+- **`seed` -1 draws afresh every call**, and the same sentence then varies by
+  55% in spoken duration. Heard as "the pace changes between replies". The
+  client pins it.
+- **The instruct participates in generation on custom_voice**, 20 tokens of it,
+  rather than being ignored in favour of the speaker id. Writing `slow` into it
+  is worth 44%.
+- **Speech rate is a property of the text, not a setting**: 5.92 against 3.29
+  characters a second on two passages with everything else identical. So a
+  written pace is a nudge, not a multiplier, and a reply that reads slowly was
+  never the configuration's doing.
 
 #### The GPU runs, and the platform kills it
 
@@ -3199,6 +3353,147 @@ answer; this one says a difference smaller than the scatter cannot be either.
 The first two shapes are errors in arithmetic and in reading. This one is an
 error in the experiment: **an option left out of the question cannot be chosen
 by the answer.**
+
+## CosyVoice3 was built and measured, and the reference length is the result
+
+Looked at for one reason: **streaming text input**. Every engine here takes a
+complete string and streams only its audio out, so a reply cannot start being
+spoken until it has finished being written. CosyVoice2's paper describes an
+interleaved layout — N text tokens then M speech tokens, with a filling token
+for "the next slot is text and none has arrived" — which is the thing that would
+remove that wait. CosyVoice3 inherits it.
+
+**The port does not implement that layout.** `cosyvoice.cpp`'s prompt is
+assembled in `src/cosyvoice-llm-job.cpp` as `sos` · reference transcript ·
+**the whole utterance text** · `task` · reference speech tokens · accepted
+tokens, and only then does decoding start. Text is a prefix, exactly as it is in
+Qwen3-TTS, and `llm_prefill` only appends to the tail of the KV cache — which by
+then is where the speech tokens are. The low-level API does expose the loop in
+pieces (`cosyvoice_tokenize`, `llm_prefill`, `llm_decode`, `sample_token`,
+`accept_token`, `token2wav`), so the interleaved layout could be built on it,
+but nothing here ships it. The high-level entry points all take `const char*`.
+
+Measured anyway, because the weights were already down and it is the same ggml
+family this repo already builds.
+
+**What produced these numbers.** `cosyvoice.cpp` at `f46496b`, whose CMake
+shallow-clones ggml master rather than pinning it — here that was **0.24.0 /
+`456172e`**, and the Vulkan result below is a reason that matters. Model
+`CosyVoice3-2512_Q8_0.gguf` (944 MB) with `speech_tokenizer_v3.onnx` and
+`campplus.onnx` for the frontend. **PC only — nothing was run on the phone.**
+Cross-lingual mode, pinned seed, 11 threads, which is this file's PC CPU
+protocol. Reference: qwentts.cpp's own `freeman.wav`, 17.26 s, and a 6.0 s head
+cut of it. Not in [third/manifest.txt](../third/manifest.txt): no lane builds
+it, and the checkout was a scratch one.
+
+| reference | audio | generate | RTF |
+| --- | --- | --- | --- |
+| 17.3 s | 1.32 s | 41.02 s | 31.07 |
+| 17.3 s | 10.08 s | 77.37 s | 7.68 |
+| 6.0 s | 1.32 s | 13.64 s | 10.34 |
+| **6.0 s** | **10.08 s** | **41.94 s** | **4.16** |
+
+**Two lengths per reference is what makes those four numbers a cost rather than
+a score.** Solving each pair for a fixed charge plus a rate:
+
+| reference | fixed, per utterance | per second of audio |
+| --- | --- | --- |
+| 17.3 s | 35.5 s | 4.15 s |
+| 6.0 s | **9.4 s** | **3.23 s** |
+
+**Cutting the reference by 65% took 74% off the fixed charge and 22% off the
+rate**, and the utterance itself held: the two reference lengths produced the
+same 1.32 s and 10.08 s durations to the sample, and level envelopes that track
+each other within about 4 dB across every half-second bin. Same content, same
+pauses in the same places — not a bit-for-bit match, which a different prompt
+could not give. The fixed half is the reference being encoded
+and prefilled; the rate half is it sitting in context for every frame
+afterwards, which is the same mechanism this file already measured on Qwen3-TTS
+base as +47% a frame for 280 extra frames.
+
+**That is the transferable result, and it is not about CosyVoice3.** The lever
+was named as untried in four places — the checkpoint summary, the levers table
+and the cloning section, all above, and `bodyclock.h`'s
+`bodyclock_tts_set_reference`. It has now been pulled once, on a different
+engine, and the two halves did not move together: the fixed charge scaled with
+the reference's length, the per-frame rate did not. The cloning section above
+predicted both would. Qwen3-TTS base pays 24 s at 0.6B and 40 s at 1.7B per
+utterance for a 22.4-second reference; nothing here says that scales the same
+way, and everything here says it is the first thing to measure.
+
+### Deterministic, and correct on CPU
+
+Four threads and eleven threads produced **byte-identical** output — same MD5,
+not merely the same duration. This file's Qwen3-TTS figures carry ±15% on this
+machine and its 0.6B lost grapheme-to-phoneme to a requantization, so a lane
+that does not move under a thread count is worth recording as a difference.
+
+The polyphone probe passes: `调暗` is read `tiáo` at Q8. Q4_K_M was not
+downloaded, and on a **0.5B** checkpoint — smaller than the 0.6B that failed
+this probe at Q4 — that is the row most likely to fail it.
+
+Output is 24 kHz mono float, which is already what
+[audio.ts](../desktop/src/renderer/src/audio.ts) asks its `AudioContext` for, so
+nothing about the rate would have to change.
+
+`prompt_speech` extracts once and is reused: 279 KB, 3–4 s, and no ONNX pass per
+utterance. Qwen3-TTS has no equivalent — its reference is re-encoded every
+`say()`.
+
+### Vulkan does not work on this device, and it fails quietly first
+
+The backend name is `vulkan0`; plain `vulkan` is refused. It then selects the
+right device — the same **Intel Arc Pro Graphics** every GPU row in this file was
+measured on.
+
+**The short probe ran to completion and produced garbage.** Same text, same
+seed, against CPU's 1.32 s of speech at −29 dBFS, Vulkan returned **7.28 s
+between −52 and −80 dBFS** — noise floor, and 5.5× the token count. The
+corruption is in the LLM stage, not the vocoder: it is not a quieter or rougher
+version of the right utterance, it is a different and much longer one. Anything
+past about nine characters aborts outright, in
+`ggml-vulkan.cpp:2668`, `GGML_ASSERT(!dst || get_misalign_bytes(ctx, dst) == 0)`,
+with text splitting on or off alike.
+
+The port's own backend table says Vulkan is verified on an Intel **Raptor Lake**
+iGPU. This is Meteor Lake, and the ggml under it is an unpinned master. Either
+could be it.
+
+**An exit code of 0 and a WAV of the right shape is not a result.** A Vulkan RTF
+of 2.17 was computed from that 7.28 s file and reported before anyone played it.
+It measured the cost of generating noise, and it was the most favourable number
+this engine produced all day — which is the direction a silent failure tends to
+push, because the work it skips is work.
+
+### The arithmetic that closes it
+
+RTF 4.16 is CPU, and CPU has never been the question — Qwen3-TTS reads 1.2 to
+1.4 there too and only crosses 1 on the iGPU. So the honest comparison is what
+the GPU would have to be worth, and this file already knows: on this Arc,
+Qwen3-TTS gains **1.38× at Q8** (98.3 → 71.0 ms/frame) and **1.71× at Q4**
+(78.8 → 46.1).
+
+CosyVoice3 needs **4.16×** to reach real time. Q4 is worth 19% on this host and
+a 3-second reference might take the rate from 3.23 toward 2.9; together they
+land near 2, not near 1. Fixing the Vulkan crash would not change that
+conclusion, so it was not attempted.
+
+**And the feature it was looked at for is gated on the same number.**
+[audio.ts](../desktop/src/renderer/src/audio.ts)'s `REALTIME_MARGIN` is a
+threshold, not a preference: a producer slower than playback is never streamed
+at all, it is gathered and played in one piece. A 10-second reply at RTF 4.16
+needs 31.6 s of pre-buffer. Streaming text *in* saves a fraction of a second at
+the front of a wait that long.
+
+### What this does not settle
+
+Nothing was run on the phone, at Q4, on SYCL, or with a reference shorter than
+6 s. Voice similarity across the two reference lengths was judged by envelope
+and by one listen, not by anything that would catch a slow drift in timbre. And
+one favourable reading survives: CosyVoice3's per-utterance cost falls away with
+a shorter reference in a way Qwen3-TTS's does not, because `prompt_speech` is
+extracted once. That matters only if the rate term comes down too, and it has
+not.
 
 ## What llama.cpp can do now
 

@@ -33,6 +33,40 @@ const SAMPLE_RATE = 24000
 const PRIME_SECONDS = 0.6
 
 /**
+ * How much faster than real time a producer has to be before its audio is
+ * played as it arrives.
+ *
+ * The prime above answers "is there enough to start with"; this answers "will
+ * there be enough to continue", and they are different questions with different
+ * answers per lane. Speech output generates at about 1.8x real time, so every
+ * second played buys most of another second of lead and the cushion only ever
+ * has to cover the beginning. Omni's Talker measured 0.32x -- it produces one
+ * second of speech every three seconds -- and no cushion fixes that: playback
+ * drains whatever is in hand and then waits, which is what fifteen underruns of
+ * 1.8-4.5 s each were. The ratio itself is the gap.
+ *
+ * So a producer slower than real time is not streamed at all. Its audio is
+ * gathered until flush(), then played end to end: later, but in one piece.
+ *
+ * Measured rather than configured, because the one number that decides is the
+ * one this machine is actually managing right now -- the same model at the same
+ * settings runs at a different ratio on a phone, and a lane that gets faster
+ * starts streaming on its own.
+ */
+const REALTIME_MARGIN = 1.1
+
+/**
+ * How much has to have arrived before the rate above means anything.
+ *
+ * A rate needs two points. The first block arrives with whatever the producer
+ * had ready, at no cost in clock, so it says nothing about the rate and is
+ * excluded from the estimate entirely -- counting it made omni look like 0.56x
+ * when it was running at 0.28x.
+ */
+const JUDGE_BLOCKS = 2
+const JUDGE_SECONDS = 0.25
+
+/**
  * How far ahead to schedule when nothing is already queued.
  *
  * Only for the first chunk of a stream and for recovering after an underrun:
@@ -52,6 +86,15 @@ export interface Player {
   playing(): boolean
 }
 
+/**
+ * The one player, shared by every lane that produces speech.
+ *
+ * A singleton because the speaker is one: speech output and omni both hand back
+ * 24 kHz mono float, and two players would mean two AudioContexts able to talk
+ * over each other. Whoever starts speaking stops whoever was.
+ */
+export const player: Player = createPlayer()
+
 export function createPlayer(): Player {
   let ctx: AudioContext | null = null
   /** Where the next chunk starts. 0 means nothing is playing. */
@@ -63,6 +106,15 @@ export function createPlayer(): Player {
   let pending: Float32Array[] = []
   let pendingSeconds = 0
   let started = false
+
+  /** How the producer is doing, for the decision REALTIME_MARGIN describes. */
+  let firstPushAt = 0
+  let firstBlockSeconds = 0
+  let blocksIn = 0
+  /** Total seconds of audio this stream carried, for the closing line. */
+  let totalSeconds = 0
+  /** null until the stream has been judged; then 'stream' or 'hold'. */
+  let verdict: 'stream' | 'hold' | null = null
 
   const ensure = (): AudioContext => {
     if (ctx === null) {
@@ -110,14 +162,19 @@ export function createPlayer(): Player {
 
     if (nextAt < c.currentTime) {
       // Its slot has already gone past: the speech has a hole exactly here.
-      // Reported rather than silently patched, because the remedy is a longer
-      // prime and the only way to know the prime is too short is to be told.
+      // Reported rather than silently patched, because a hole means the
+      // producer is losing ground and the only useful response is to know it.
+      //
+      // With REALTIME_MARGIN in place this should now be rare: a lane measured
+      // slower than playback is never started in the first place. One here
+      // means a lane that looked fast enough at the second block and then
+      // slowed down, so the lateness is what to read.
       underruns++
       console.warn(
-        `[tts] audio underrun #${underruns}: chunk arrived ${(
+        `[audio] underrun #${underruns}: block ${blocksIn} arrived ${(
           (c.currentTime - nextAt) *
           1000
-        ).toFixed(0)} ms late`
+        ).toFixed(0)} ms after the speaker ran dry`
       )
       nextAt = c.currentTime + GUARD
     }
@@ -135,7 +192,11 @@ export function createPlayer(): Player {
   const begin = (): void => {
     const c = ensure()
     started = true
-    nextAt = c.currentTime + GUARD
+    // max(), not assignment: an utterance can begin while the previous one is
+    // still audible -- flush() ends a stream without stopping its playback --
+    // and starting this one at currentTime would lay it OVER the tail of that
+    // one. stop() sets nextAt to 0, so an interrupted stream still starts now.
+    nextAt = Math.max(nextAt, c.currentTime + GUARD)
     for (const p of pending) {
       schedule(p)
     }
@@ -143,27 +204,98 @@ export function createPlayer(): Player {
     pendingSeconds = 0
   }
 
+  /**
+   * Forget this stream, keeping whatever it has already scheduled.
+   *
+   * One utterance is one stream, and every stream is judged on its own: the
+   * producer's rate is a property of the lane that is running now, so a reply
+   * spoken by omni must not leave its verdict behind for the next one spoken by
+   * the speech lane. They share this player because the speaker is one.
+   */
+  const endStream = (): void => {
+    started = false
+    pending = []
+    pendingSeconds = 0
+    firstPushAt = 0
+    firstBlockSeconds = 0
+    blocksIn = 0
+    totalSeconds = 0
+    underruns = 0
+    verdict = null
+  }
+
+  /**
+   * Seconds of audio produced per second of clock, excluding the first block.
+   *
+   * -1 while there is not enough to say. See JUDGE_BLOCKS.
+   */
+  const producerRate = (): number => {
+    const elapsed = (performance.now() - firstPushAt) / 1000
+    if (blocksIn < JUDGE_BLOCKS || elapsed < JUDGE_SECONDS) {
+      return -1
+    }
+    return (pendingSeconds - firstBlockSeconds) / elapsed
+  }
+
   return {
     push(pcm: Float32Array): void {
       if (pcm.length === 0) {
         return
       }
+      const seconds = pcm.length / SAMPLE_RATE
+      totalSeconds += seconds
+      blocksIn++
+      if (blocksIn === 1) {
+        firstPushAt = performance.now()
+        firstBlockSeconds = seconds
+      }
       if (started) {
         schedule(pcm)
         return
       }
+
       pending.push(pcm)
-      pendingSeconds += pcm.length / SAMPLE_RATE
-      if (pendingSeconds >= PRIME_SECONDS) {
+      pendingSeconds += seconds
+
+      if (verdict === 'hold' || pendingSeconds < PRIME_SECONDS) {
+        return
+      }
+      const rate = producerRate()
+      if (rate < 0) {
+        // Enough to start with, but not yet enough to know whether it can be
+        // continued. Waiting for the next block costs a moment against a gap in
+        // the middle of a word.
+        return
+      }
+      verdict = rate >= REALTIME_MARGIN ? 'stream' : 'hold'
+      console.log(
+        `[audio] producer at ${rate.toFixed(2)}x real time -> ` +
+          (verdict === 'stream'
+            ? `playing now, ${pendingSeconds.toFixed(2)} s in hand`
+            : 'slower than playback, holding until the whole reply is in')
+      )
+      if (verdict === 'stream') {
         begin()
       }
     },
 
     flush(): void {
-      // An utterance shorter than the prime would otherwise never be heard.
+      // Everything held, and anything shorter than the prime, which would
+      // otherwise never be heard at all.
       if (!started && pending.length > 0) {
+        const waited = ((performance.now() - firstPushAt) / 1000).toFixed(1)
+        console.log(
+          `[audio] playing ${pendingSeconds.toFixed(1)} s in one piece, ` +
+            `gathered over ${waited} s in ${blocksIn} block(s)`
+        )
         begin()
+      } else if (started) {
+        console.log(
+          `[audio] streamed ${totalSeconds.toFixed(1)} s in ${blocksIn} block(s), ` +
+            `${underruns} underrun(s)`
+        )
       }
+      endStream()
     },
 
     stop(): void {
@@ -176,10 +308,7 @@ export function createPlayer(): Player {
         }
       }
       live = []
-      pending = []
-      pendingSeconds = 0
-      started = false
-      underruns = 0
+      endStream()
       // 0 rather than currentTime, so the next utterance's first chunk is not
       // measured against a slot left over from this one. That is what made the
       // counter report the pause between two replies -- seconds of it -- as if

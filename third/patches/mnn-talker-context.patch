@@ -1,0 +1,61 @@
+Expose the Talker's context, so the cost of speech can be split.
+
+The omni lane measured about 3x slower than real time on a desktop, and the one
+lever on that which does not need a different model is dit_steps -- MNN runs
+`steps - 1` DiT forwards per 1.2 s chunk, and the shipped config says 5. Whether
+turning it is worth anything depends on how much of the 3x is the diffusion
+sampler, and nothing reachable from outside MNN said.
+
+The reason is that the Talker is a separate Llm with a separate LlmContext. The
+counters on the engine's own context -- prefill_us, decode_us, audio_us -- cover
+the thinker alone; the Talker's carries its prefill, its autoregressive decode,
+and token2wav (the DiT sampler plus BigVGAN) in audio_us. A host can therefore
+time the whole exchange and cannot say which part of it to attack.
+
+MNN already computes exactly this split under DUMP_TALKER_PERFORMANCE, which
+prints it to stdout of a debug build. This adds one virtual so the same numbers
+reach a host: getTalkerContext(), NULL on an engine without a Talker.
+
+Note that generate_init() resets prefill_us, decode_us and sample_us but NOT
+audio_us, so a caller wanting per-exchange token2wav time has to snapshot it
+before generation and subtract.
+
+diff --git a/transformers/llm/engine/include/llm/llm.hpp b/transformers/llm/engine/include/llm/llm.hpp
+index ead27da..720495e 100644
+--- a/transformers/llm/engine/include/llm/llm.hpp
++++ b/transformers/llm/engine/include/llm/llm.hpp
+@@ -215,6 +215,20 @@ public:
+     const LlmContext* getContext() const {
+         return mContext.get();
+     }
++    // The Talker's context, for an engine that owns one. NULL otherwise.
++    //
++    // The Talker is a separate Llm with a separate LlmContext, so none of its
++    // work appears in the counters above: this engine's context reports the
++    // thinker alone. The Talker's carries the three numbers that say where the
++    // cost of speech went -- prefill_us, decode_us for its autoregressive half,
++    // and audio_us for token2wav, which is the DiT sampler plus the vocoder.
++    //
++    // That split is what decides whether dit_steps is worth turning, and
++    // DUMP_TALKER_PERFORMANCE already prints it; this exposes the same numbers
++    // to a host rather than to stdout of a debug build.
++    virtual const LlmContext* getTalkerContext() const {
++        return nullptr;
++    }
+     const std::shared_ptr<Express::Executor>& getExecutor() const {
+         return mExecutor;
+     }
+diff --git a/transformers/llm/engine/src/omni.hpp b/transformers/llm/engine/src/omni.hpp
+index 87f5746..aac61c4 100644
+--- a/transformers/llm/engine/src/omni.hpp
++++ b/transformers/llm/engine/src/omni.hpp
+@@ -198,6 +198,9 @@ public:
+     virtual void response(const std::vector<int>& input_ids, std::ostream* os = &std::cout, const char* end_with = nullptr, int max_new_tokens = -1) override;
+     virtual void setWavformCallback(std::function<bool(const float*, size_t, bool)> callback) override;
+     virtual void generateWavform() override;
++    virtual const LlmContext* getTalkerContext() const override {
++        return mTalker ? mTalker->getContext() : nullptr;
++    }
+     virtual bool generateTTS(const std::string& text, const std::string& language = "english", int max_new_tokens = -1,
+                              const std::string& ref_audio = "") override;
+     // Embedding API — single ExecutorScope wrapping the forward pass (same pattern as forwardVec)

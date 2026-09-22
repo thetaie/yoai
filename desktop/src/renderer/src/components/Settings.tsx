@@ -20,7 +20,7 @@ import {
   modelId,
   modelLabel
 } from '@shared/provider'
-import type { TtsStatus } from '@shared/api'
+import type { OmniStatus, TtsStatus } from '@shared/api'
 import type { CoreStatus, InterfacePrefs } from '@shared/store'
 import { FAMILY_LABEL, S } from '../strings'
 import * as tts from '../tts'
@@ -76,6 +76,18 @@ export function Settings({
   } | null>(null)
   const [prompt, setPrompt] = useState<string | null>(null)
   const [ttsStatus, setTtsStatus] = useState<TtsStatus | null>(null)
+  const [omniStatus, setOmniStatus] = useState<OmniStatus | null>(null)
+  const [omniBusy, setOmniBusy] = useState(false)
+  /**
+   * The omni load result, shown in the omni section.
+   *
+   * Not the page-wide `note`, which renders down in "add a remote model":
+   * loading takes ten seconds and its answer landed several screens away, so
+   * the button looked like it did nothing at all.
+   */
+  const [omniNote, setOmniNote] = useState<{ text: string; tone: 'danger' | 'success' } | null>(
+    null
+  )
   const [ttsBusy, setTtsBusy] = useState(false)
 
   const vendor = findVendor(vendorId)
@@ -164,6 +176,42 @@ export function Settings({
     const n = Number.parseInt(raw, 10)
     await window.bodyclock.tts.setSeed(Number.isFinite(n) ? n : 7)
     await refreshTts()
+  }
+
+  const refreshOmni = async (): Promise<void> => {
+    setOmniStatus(await window.bodyclock.omni.status())
+  }
+
+  useEffect(() => {
+    void refreshOmni()
+  }, [])
+
+  const pickOmniDir = async (): Promise<void> => {
+    if ((await window.bodyclock.omni.pickDir()) !== null) {
+      await refreshOmni()
+    }
+  }
+
+  const loadOmni = async (): Promise<void> => {
+    setOmniBusy(true)
+    setOmniNote(null)
+    const reason = await window.bodyclock.omni.load()
+    setOmniBusy(false)
+    await refreshOmni()
+    setOmniNote(
+      reason.length === 0
+        ? { text: S.settingsOmniReady, tone: 'success' }
+        : { text: reason, tone: 'danger' }
+    )
+  }
+
+  const unloadOmni = async (): Promise<void> => {
+    await window.bodyclock.omni.unload()
+    await refreshOmni()
+  }
+
+  const setOmni = async (patch: { ditSteps?: number; enabled?: boolean }): Promise<void> => {
+    setOmniStatus(await window.bodyclock.omni.set(patch))
   }
 
   const setAuto = async (on: boolean): Promise<void> => {
@@ -593,6 +641,80 @@ export function Settings({
                   已载入 · {ttsStatus.modelType}
                 </p>
               )}
+            </>
+          )}
+        </section>
+
+        {/*------------------------------------------------------------------*/}
+        <section className="section">
+          <h3>{S.settingsOmni}</h3>
+          <p>{S.settingsOmniIntro}</p>
+          {omniStatus !== null && !omniStatus.available ? (
+            <p className="field-note" data-tone="danger">
+              {S.settingsOmniUnavailable}
+            </p>
+          ) : (
+            <>
+              <div className="card">
+                <div className="row">
+                  <span className="row-label">
+                    {S.settingsOmniDir}
+                    <div className="path">
+                      {omniStatus !== null && omniStatus.modelDir.length > 0
+                        ? omniStatus.modelDir
+                        : S.settingsOmniNotPicked}
+                    </div>
+                  </span>
+                  <button className="btn" onClick={() => void pickOmniDir()}>
+                    {S.settingsOmniPick}
+                  </button>
+                </div>
+              </div>
+              <span className="field-note">{S.settingsOmniDirNote}</span>
+
+              <div className="row" style={{ marginTop: 10, gap: 8 }}>
+                {omniStatus?.loaded === true ? (
+                  <button className="btn" onClick={() => void unloadOmni()}>
+                    {S.settingsOmniUnload}
+                  </button>
+                ) : (
+                  <button className="btn" disabled={omniBusy} onClick={() => void loadOmni()}>
+                    {omniBusy ? S.settingsOmniLoading : S.settingsOmniLoad}
+                  </button>
+                )}
+                {omniNote !== null && (
+                  <span className="field-note" data-tone={omniNote.tone}>
+                    {omniNote.text}
+                  </span>
+                )}
+              </div>
+
+              {omniStatus !== null && (
+                <div className="field" style={{ marginTop: 12 }}>
+                  <label htmlFor="omniDit">{S.settingsOmniDit}</label>
+                  <input
+                    id="omniDit"
+                    className="control"
+                    type="number"
+                    defaultValue={omniStatus.ditSteps}
+                    onBlur={(e) => void setOmni({ ditSteps: Number.parseInt(e.target.value, 10) })}
+                  />
+                  <span className="field-note">{S.settingsOmniDitNote}</span>
+                </div>
+              )}
+
+              <div className="field" style={{ marginTop: 12 }}>
+                <label htmlFor="omniOn" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    id="omniOn"
+                    type="checkbox"
+                    checked={omniStatus?.enabled === true}
+                    onChange={(e) => void setOmni({ enabled: e.target.checked })}
+                  />
+                  {S.settingsOmniEnabled}
+                </label>
+                <span className="field-note">{S.settingsOmniEnabledNote}</span>
+              </div>
             </>
           )}
         </section>

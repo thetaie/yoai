@@ -12,7 +12,7 @@
  */
 import { BrowserWindow, dialog, ipcMain, shell, WebContents } from 'electron'
 import { basename } from 'node:path'
-import { CHANNELS, ChatSettings, PickedModel, TtsStatus } from '../shared/api'
+import { CHANNELS, ChatSettings, OmniStatus, PickedModel, TtsStatus } from '../shared/api'
 import { ChatMessage, WireMessage } from '../shared/chat'
 import { KIND_LOCAL, ModelConfig } from '../shared/provider'
 import { CoreStatus, InterfacePrefs } from '../shared/store'
@@ -20,6 +20,7 @@ import { core, describeCore } from './core'
 import * as chat from './chat'
 import * as keystore from './keystore'
 import * as models from './models'
+import * as omni from './omni'
 import * as prefs from './prefs'
 import * as sessions from './sessions'
 import * as tts from './tts'
@@ -325,6 +326,60 @@ export function registerHandlers(): void {
         sender.send(CHANNELS.ttsEvent, { type, stats: String(payload) })
       } else {
         sender.send(CHANNELS.ttsEvent, { type: 'error', error: String(payload) })
+      }
+    })
+  })
+
+  //----------------------------------------------------------------------------
+  // Omni
+  //----------------------------------------------------------------------------
+
+  handle<[], OmniStatus>(CHANNELS.omniStatus, () => omni.status())
+  handle<[], string>(CHANNELS.omniLoad, () => omni.load())
+  handle<[], void>(CHANNELS.omniUnload, () => omni.unload())
+
+  handle<[{ ditSteps?: number; enabled?: boolean }], OmniStatus>(CHANNELS.omniSet, (patch) => {
+    if (typeof patch?.ditSteps === 'number') omni.setDitSteps(patch.ditSteps)
+    if (typeof patch?.enabled === 'boolean') omni.setEnabled(patch.enabled)
+    return omni.status()
+  })
+
+  handle<[], string | null>(CHANNELS.omniPickDir, async () => {
+    const win = BrowserWindow.getFocusedWindow()
+    // A DIRECTORY, unlike every other picker here: an MNN model is a folder of
+    // graphs, not one file.
+    const opts = { title: 'Pick the omni model directory', properties: ['openDirectory' as const] }
+    const result =
+      win === null ? await dialog.showOpenDialog(opts) : await dialog.showOpenDialog(win, opts)
+    if (result.canceled || result.filePaths.length === 0) {
+      return null
+    }
+    omni.setModelDir(result.filePaths[0])
+    return result.filePaths[0]
+  })
+
+  // Text in, speech out, with a silence where the recording will go.
+  //
+  // ask() requires audio -- the model is multimodal and the prompt alone is not
+  // a valid input -- so until there is a microphone the question travels as the
+  // prompt and the audio is half a second of nothing. Everything except
+  // recognition is exercised by that, which is what this lane is being asked
+  // about.
+  ipcMain.handle(CHANNELS.omniAsk, (event, prompt: string) => {
+    const sender = event.sender
+    const silence = new Int16Array(8000) // 0.5 s at 16 kHz
+    return omni.ask(silence, String(prompt ?? ''), true, (type, payload) => {
+      if (sender.isDestroyed()) {
+        return
+      }
+      if (type === 'audio') {
+        sender.send(CHANNELS.omniEvent, { type, pcm: payload as Float32Array })
+      } else if (type === 'text') {
+        sender.send(CHANNELS.omniEvent, { type, text: String(payload) })
+      } else if (type === 'end') {
+        sender.send(CHANNELS.omniEvent, { type, stats: String(payload) })
+      } else {
+        sender.send(CHANNELS.omniEvent, { type: 'error', error: String(payload) })
       }
     })
   })

@@ -19,6 +19,12 @@
 #include <llm/llm.hpp>
 #include <ostream>
 #include <sstream>
+
+#ifdef BODYCLOCK_MNN_VULKAN
+// Declared here rather than in an MNN header, because it is not part of MNN's
+// API: it exists only to be referenced. See the call in load().
+extern "C" void MNNForceLinkVulkanRuntime();
+#endif
 #endif
 
 namespace bodyclock {
@@ -199,6 +205,12 @@ struct Omni::Impl {
     clk::time_point started;
     clk::time_point first_audio;
     int             blocks = 0;
+
+    // The previous block's arrival and the first block's size, for the per-block
+    // line: the gap between two blocks is what a listener hears as a hole, and
+    // the first block has to be left out of the rate because it cost no clock.
+    clk::time_point prev_audio;
+    size_t          first_block = 0;
 };
 
 bool Omni::available() {
@@ -219,6 +231,15 @@ bool Omni::load(const std::string& model_dir) {
     Impl* m = impl_;
     m->loaded = false;
     m->llm.reset();
+
+#ifdef BODYCLOCK_MNN_VULKAN
+    // Before createLLM, because the backend has to be registered before anything
+    // asks for it. This call does nothing; REFERENCING it is the point, and the
+    // reason is in the patch it needs -- a static libMNN leaves the Vulkan
+    // registrar's object out of the link, and the only symptom is one line of
+    // MNN's own output saying it fell back to the CPU.
+    MNNForceLinkVulkanRuntime();
+#endif
 
     // MNN resolves every other file relative to this one, which is why the
     // public API takes a directory: handing it llm.mnn directly would leave the
@@ -300,11 +321,44 @@ bool Omni::load(const std::string& model_dir) {
         // Stamped before the sink runs, not after: the sink writes the samples
         // somewhere, and how long that takes is the host's business, not the
         // engine's latency.
+        const clk::time_point now = clk::now();
         if (m->blocks == 0) {
-            m->first_audio = clk::now();
+            m->first_audio = now;
         }
         ++m->blocks;
         m->produced += n;
+
+        // One line per block, because the summary at the end cannot answer the
+        // question a listener is asking. "16 blocks, 19.1 s of speech in 66 s"
+        // is compatible with an even trickle and with a long stall followed by a
+        // burst, and those sound completely different -- the first is a slow
+        // voice, the second is a voice with holes in it.
+        //
+        // The rate here is the TALKER's, so the first block is excluded from
+        // both halves of it: it arrives with whatever was ready, at no cost in
+        // clock, and counting it made this lane read 0.56x when it was running
+        // at 0.28x. Below 1x, a player that started at block 1 runs dry between
+        // every pair of blocks and the shortfall is the ratio itself.
+        const double at   = std::chrono::duration<double>(now - m->started).count();
+        const double gap  = std::chrono::duration<double>(now - m->prev_audio).count();
+        const double have = static_cast<double>(m->produced) / 24000.0;
+        if (m->blocks == 1) {
+            m->first_block = n;
+            platform::log_info("omni: block 1 at %.2f s -- %.2f s of audio",
+                               at, static_cast<double>(n) / 24000.0);
+        } else {
+            const double since_first =
+                std::chrono::duration<double>(now - m->first_audio).count();
+            const double rate = since_first > 0.0
+                                    ? (have - static_cast<double>(m->first_block) / 24000.0) /
+                                          since_first
+                                    : 0.0;
+            platform::log_info("omni: block %d at %.2f s (+%.2f s) -- %.2f s of audio, "
+                               "%.2f s in hand, talker at %.2fx real time",
+                               m->blocks, at, gap, static_cast<double>(n) / 24000.0, have, rate);
+        }
+        m->prev_audio = now;
+
         if (!m->sink(pcm, n, last, m->sink_user)) {
             m->aborted = true;
             return false;
@@ -354,7 +408,7 @@ bool Omni::set_dit_steps(int steps) {
 }
 
 bool Omni::ask(const float* pcm, size_t n_samples, const std::string& prompt,
-               OmniAudioSink sink, void* user_data, OmniReply* out) {
+               OmniAudioSink sink, OmniTextSink on_text, void* user_data, OmniReply* out) {
     if (!out) {
         return false;
     }
@@ -411,9 +465,11 @@ bool Omni::ask(const float* pcm, size_t n_samples, const std::string& prompt,
     m->aborted   = false;
     m->produced  = 0;
     m->blocks    = 0;
+    m->first_block = 0;
 
     const clk::time_point started = clk::now();
-    m->started = started;
+    m->started    = started;
+    m->prev_audio = started;
     std::ostringstream text;
 
     // ONE response() call, prompt through to the last token, which is MNN's own
@@ -481,6 +537,14 @@ bool Omni::ask(const float* pcm, size_t n_samples, const std::string& prompt,
         return false;
     }
 
+    // The words, before the voice. AFTER the failure check above, so a host is
+    // never handed an empty reply that it would have to tell apart from a real
+    // one, and before generateWavform(), which is where the rest of the minute
+    // goes. See OmniTextSink for the two numbers that make the difference.
+    if (on_text) {
+        on_text(out->text.c_str(), user_data);
+    }
+
     // Two conditions before handing over to the Talker, and both are about not
     // crashing inside MNN:
     //
@@ -496,6 +560,15 @@ bool Omni::ask(const float* pcm, size_t n_samples, const std::string& prompt,
                            m->has_talker_embeds ? "present" : "MISSING", ctx->gen_seq_len);
     }
     if (can_speak) {
+        // The Talker keeps its own counters, on its own context. generate_init()
+        // clears prefill_us, decode_us and sample_us but NOT audio_us, so that
+        // one is snapshotted and subtracted; the other two would be correct
+        // either way, and are read the same way so the three stay symmetrical.
+        const MNN::Transformer::LlmContext* tctx = m->llm->getTalkerContext();
+        const int64_t prefill0 = tctx ? tctx->prefill_us : 0;
+        const int64_t decode0  = tctx ? tctx->decode_us : 0;
+        const int64_t wav0     = tctx ? tctx->audio_us : 0;
+
         const clk::time_point spoke = clk::now();
         m->llm->generateWavform();
         out->speech_elapsed = seconds_since(spoke);
@@ -518,6 +591,33 @@ bool Omni::ask(const float* pcm, size_t n_samples, const std::string& prompt,
                            "whole exchange %.1f s",
                            out->first_audio_seconds, out->audio_blocks,
                            out->thinker_seconds, out->seconds);
+
+        // And WHERE that time went, which is the only question with an action
+        // attached. dit_steps scales token2wav and nothing else, so a ratio
+        // carried by the decode is one this lane cannot turn down.
+        //
+        // The remainder is real and worth printing: it is MNN graph setup,
+        // buffer concatenation and the handovers to the sink, none of which is
+        // counted anywhere. A large one means the split above is not the story.
+        if (tctx != 0) {
+            out->talker_prefill_seconds = (tctx->prefill_us - prefill0) / 1e6;
+            out->talker_decode_seconds  = (tctx->decode_us - decode0) / 1e6;
+            out->token2wav_seconds      = (tctx->audio_us - wav0) / 1e6;
+            out->codec_tokens           = tctx->gen_seq_len;
+            const double rest = out->speech_elapsed - out->talker_prefill_seconds -
+                                out->talker_decode_seconds - out->token2wav_seconds;
+            platform::log_info(
+                "omni: speech split -- prefill %.2f s, decode %.2f s (%d codec tokens), "
+                "token2wav %.2f s (DiT + vocoder), %.2f s elsewhere",
+                out->talker_prefill_seconds, out->talker_decode_seconds, out->codec_tokens,
+                out->token2wav_seconds, rest);
+        } else {
+            // Not a warning: a stock MNN is a supported build, it simply cannot
+            // answer this. Said once per exchange so a sweep reading 0.00 knows
+            // why rather than recording it as a measurement.
+            platform::log_info("omni: speech split unavailable -- this MNN has no "
+                               "getTalkerContext(); see third/patches");
+        }
     }
 
     m->sink      = 0;
@@ -548,7 +648,8 @@ bool Omni::set_dit_steps(int) {
     return false;
 }
 
-bool Omni::ask(const float*, size_t, const std::string&, OmniAudioSink, void*, OmniReply* out) {
+bool Omni::ask(const float*, size_t, const std::string&, OmniAudioSink, OmniTextSink, void*,
+               OmniReply* out) {
     if (out) {
         *out = OmniReply();
     }

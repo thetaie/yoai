@@ -65,6 +65,15 @@ export const CHANNELS = {
   /** Main -> renderer: PCM chunks and the terminal event. */
   ttsEvent: 'tts:event',
 
+  omniStatus: 'omni:status',
+  omniPickDir: 'omni:pickDir',
+  omniLoad: 'omni:load',
+  omniUnload: 'omni:unload',
+  omniSet: 'omni:set',
+  omniAsk: 'omni:ask',
+  /** Main -> renderer: PCM chunks, then the reply and its timings. */
+  omniEvent: 'omni:event',
+
   openExternal: 'shell:openExternal'
 } as const
 
@@ -146,6 +155,36 @@ export interface TtsEvent {
 export interface ChatSettings {
   /** Prepended to every turn as the system message. '' sends none at all. */
   systemPrompt: string
+}
+
+/** What the end-to-end lane can do right now. */
+export interface OmniStatus {
+  /** False on a build without the MNN lane -- `build.cmd clean mnn` turns it on. */
+  available: boolean
+  loaded: boolean
+  /** The model DIRECTORY, not a file: MNN models are a folder of graphs. */
+  modelDir: string
+  /** Diffusion solver steps; 0 leaves the model's own config alone. */
+  ditSteps: number
+  /** Route the composer through omni instead of the chat + speech chain. */
+  enabled: boolean
+}
+
+/** One event from a running omni exchange. Audio is 24 kHz mono, as with TTS. */
+export interface OmniEvent {
+  type: 'audio' | 'text' | 'end' | 'error'
+  pcm?: Float32Array
+  /**
+   * On 'text': the whole reply, as soon as the thinker stops.
+   *
+   * It has its own event because 'end' is far too late to show words with:
+   * measured here, the text existed at 3.8 s and 'end' arrived at 70.3 s, by
+   * which point the speech reading those words had finished playing.
+   */
+  text?: string
+  /** On 'end': the reply text and the timings, as JSON. See bodyclock.h. */
+  stats?: string
+  error?: string
 }
 
 export interface BodyclockApi {
@@ -232,6 +271,25 @@ export interface BodyclockApi {
     cancel(): Promise<void>
     /** Subscribe to the running utterance. Returns the unsubscribe function. */
     onEvent(listener: (ev: TtsEvent) => void): () => void
+  }
+
+  /**
+   * Omni: one model that hears, thinks and speaks.
+   *
+   * Not a replacement for the chain -- it is the shape the chain cannot be.
+   * Costly enough that design/voice.md argues over whether it is affordable;
+   * these calls exist so the question can be asked on real hardware.
+   */
+  omni: {
+    status(): Promise<OmniStatus>
+    /** Pick the model DIRECTORY. */
+    pickDir(): Promise<string | null>
+    load(): Promise<string>
+    unload(): Promise<void>
+    set(patch: { ditSteps?: number; enabled?: boolean }): Promise<OmniStatus>
+    /** False when the engine is not loaded or is already answering. */
+    ask(prompt: string): Promise<boolean>
+    onEvent(listener: (ev: OmniEvent) => void): () => void
   }
 
   /** Open a vendor's sign-up page in the user's browser, never in a window here. */

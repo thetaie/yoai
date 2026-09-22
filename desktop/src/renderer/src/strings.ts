@@ -94,6 +94,25 @@ export const S = {
   ttsNotReady: '语音还没就绪。先到设置里选好两个模型。',
   ttsBusy: '正在朗读上一句，先等它说完。',
 
+  // Omni
+  settingsOmni: '端到端语音（omni）',
+  settingsOmniIntro:
+    '一个模型听、想、说，中间没有文字。开启后发消息走 omni，不再走「模型 + 语音输出」那条链。代价很大：3.8 GB 权重、第二套推理框架，本机实测合成比实时慢 3.1 倍。',
+  settingsOmniUnavailable: '这个版本没有编译 omni。用 `build.cmd clean mnn` 重新构建。',
+  settingsOmniDir: '模型目录',
+  settingsOmniPick: '选择目录',
+  settingsOmniNotPicked: '未选择',
+  settingsOmniDirNote: '要的是目录不是文件：MNN 模型是 config.json 加十几个 .mnn 图。',
+  settingsOmniLoad: '载入',
+  settingsOmniLoading: '正在载入…',
+  settingsOmniUnload: '卸载',
+  settingsOmniReady: 'omni 已就绪',
+  settingsOmniDit: '扩散步数',
+  settingsOmniDitNote:
+    '0 表示用模型自带的配置（5）。MNN 每块跑 steps-1 次 DiT 前向，调小更快——但被牺牲的是自然度，而自然度正是带这个引擎的全部理由。',
+  settingsOmniEnabled: '用 omni 回答',
+  settingsOmniEnabledNote: '开启后，输入框里的消息交给 omni，文字和语音都由它产生。',
+
   // Appearance
   settingsInterface: '界面',
   settingsInterfaceIntro: '改动即时生效，无需重启。',

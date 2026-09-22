@@ -17,10 +17,10 @@
 // transfer inside the core. A turn producing no further events cannot be
 // interrupted earlier -- there is nothing to observe the flag.
 //
-// This bridge exposes the chat, on-device and speech-output lanes. The voice
-// (recognition) and bundle entry points are in the header and deliberately not
-// wired up here: nothing in the desktop client calls them yet, and an export
-// nobody uses is a second place to keep correct.
+// This bridge exposes the chat, on-device, speech-output and omni lanes. The
+// voice (recognition) and bundle entry points are in the header and
+// deliberately not wired up here: nothing in the desktop client calls them yet,
+// and an export nobody uses is a second place to keep correct.
 
 #include <node_api.h>
 
@@ -409,16 +409,19 @@ napi_value NativeChatCancelAll(napi_env env, napi_callback_info /*info*/) {
 //
 // Audio crosses the thread boundary the same way chat deltas do -- one
 // threadsafe function, blocking calls, events in order -- with one difference
-// that earns its own event struct: a chunk is PCM, not text. CallJsTts hands
+// that earns its own event struct: a chunk is PCM, not text. CallJsAudio hands
 // "audio" to JS as a Float32Array over a copy, and everything else as a string.
 //
 // Rate is 24 kHz mono, which the JS side has to know because nothing in the
 // samples says so. It is stated once here and once in shared/api.ts.
 
-// One TTS event crossing to the JS thread; CallJsTts takes ownership.
-struct TtsEvent {
-    std::string        type;      // "audio" | "end" | "error"
-    std::string        content;   // stats JSON, or the error. Empty for audio.
+// One audio-lane event crossing to the JS thread; CallJsAudio takes ownership.
+// Shared by speech output and by omni: both hand back 24 kHz mono float in
+// chunks and a JSON summary at the end, so one shape serves both rather than
+// two that would have to be kept identical.
+struct AudioEvent {
+    std::string        type;      // "audio" | "text" | "end" | "error"
+    std::string        content;   // the reply, stats JSON, or the error. Empty for audio.
     std::vector<float> pcm;       // 24 kHz mono, only for "audio".
 };
 
@@ -430,8 +433,8 @@ std::atomic<bool> g_tts_busy{false};
 std::atomic<bool> g_tts_cancel{false};
 
 // Runs ON THE JS THREAD, once per queued event.
-void CallJsTts(napi_env env, napi_value js_callback, void* /*context*/, void* data) {
-    std::unique_ptr<TtsEvent> ev(static_cast<TtsEvent*>(data));
+void CallJsAudio(napi_env env, napi_value js_callback, void* /*context*/, void* data) {
+    std::unique_ptr<AudioEvent> ev(static_cast<AudioEvent*>(data));
     if (env == nullptr || js_callback == nullptr) return;   // env tearing down
 
     napi_value undefined = nullptr;
@@ -472,7 +475,7 @@ int OnTtsAudio(const float* pcm, int n_samples, int /*last*/, void* user_data) {
     if (pcm == nullptr || n_samples <= 0) return 1;
 
     napi_threadsafe_function tsfn = static_cast<napi_threadsafe_function>(user_data);
-    TtsEvent* ev = new TtsEvent{"audio", "", std::vector<float>(pcm, pcm + n_samples)};
+    AudioEvent* ev = new AudioEvent{"audio", "", std::vector<float>(pcm, pcm + n_samples)};
     // Blocking, so a slow JS side applies backpressure rather than dropping a
     // chunk -- a dropped chunk is a gap in the middle of a word.
     napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
@@ -481,7 +484,7 @@ int OnTtsAudio(const float* pcm, int n_samples, int /*last*/, void* user_data) {
 
 void TtsLoadWorker(std::string talker, std::string codec, napi_threadsafe_function tsfn) {
     const int rc = bodyclock_tts_load(talker.c_str(), codec.c_str());
-    TtsEvent* ev = new TtsEvent{rc == 0 ? "end" : "error",
+    AudioEvent* ev = new AudioEvent{rc == 0 ? "end" : "error",
                                 rc == 0 ? "" : bodyclock_tts_last_error(),
                                 {}};
     napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
@@ -491,9 +494,9 @@ void TtsLoadWorker(std::string talker, std::string codec, napi_threadsafe_functi
 void TtsSayWorker(std::string text, napi_threadsafe_function tsfn) {
     const char* stats = bodyclock_tts_say(text.c_str(), OnTtsAudio, tsfn);
 
-    TtsEvent* ev = stats != nullptr
-                       ? new TtsEvent{"end", stats, {}}
-                       : new TtsEvent{"error", bodyclock_tts_last_error(), {}};
+    AudioEvent* ev = stats != nullptr
+                       ? new AudioEvent{"end", stats, {}}
+                       : new AudioEvent{"error", bodyclock_tts_last_error(), {}};
     napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
     napi_release_threadsafe_function(tsfn, napi_tsfn_release);
 
@@ -529,7 +532,7 @@ napi_value NativeTtsLoad(napi_env env, napi_callback_info info) {
     napi_threadsafe_function tsfn = nullptr;
     if (napi_create_threadsafe_function(env, argv[2], nullptr, work_name,
                                         0 /*unbounded*/, 1 /*one worker*/,
-                                        nullptr, nullptr, nullptr, CallJsTts, &tsfn) != napi_ok) {
+                                        nullptr, nullptr, nullptr, CallJsAudio, &tsfn) != napi_ok) {
         napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
         return nullptr;
     }
@@ -631,7 +634,7 @@ napi_value NativeTtsSay(napi_env env, napi_callback_info info) {
     napi_threadsafe_function tsfn = nullptr;
     if (napi_create_threadsafe_function(env, argv[1], nullptr, work_name,
                                         0 /*unbounded*/, 1 /*one worker*/,
-                                        nullptr, nullptr, nullptr, CallJsTts, &tsfn) != napi_ok) {
+                                        nullptr, nullptr, nullptr, CallJsAudio, &tsfn) != napi_ok) {
         g_tts_busy.store(false, std::memory_order_relaxed);
         napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
         return nullptr;
@@ -651,6 +654,182 @@ napi_value NativeTtsCancel(napi_env env, napi_callback_info /*info*/) {
 
 napi_value NativeTtsLastError(napi_env env, napi_callback_info /*info*/) {
     return Utf8(env, bodyclock_tts_last_error());
+}
+
+//------------------------------------------------------------------------------
+// Omni (MNN + Qwen2.5-Omni)
+//------------------------------------------------------------------------------
+//
+// The end-to-end lane: audio in, an answer out, spoken in the model's own
+// voice, with no text in the middle. The other two lanes are halves of a chain
+// and this one is not, which is the whole reason it is carried -- see
+// design/voice.md for what that costs.
+//
+// It reuses the audio machinery above because the two agree where it matters:
+// chunks of 24 kHz mono float, then a JSON summary. What differs is the INPUT.
+// Speech output takes text; this takes 16-bit mono at 16 kHz, so the numbers on
+// the two sides of one exchange are not the same rate and a host feeding the
+// reply back to a speaker has to say so.
+
+std::atomic<bool> g_omni_busy{false};
+
+// Called by the engine on its worker thread, once per block of speech.
+int OnOmniAudio(const float* pcm, int n_samples, int /*last*/, void* user_data) {
+    if (pcm == nullptr || n_samples <= 0) return 1;
+    napi_threadsafe_function tsfn = static_cast<napi_threadsafe_function>(user_data);
+    AudioEvent* ev = new AudioEvent{"audio", "", std::vector<float>(pcm, pcm + n_samples)};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    return 1;
+}
+
+// Called once, on the engine's thread, the moment the thinker stops.
+//
+// It goes out as its own event instead of waiting for "end" because the two are
+// nowhere near each other in time: measured here, the text existed at 3.8 s and
+// "end" arrived at 70.3 s. Without this the page showed the answer after the
+// speech reading it had finished playing.
+void OnOmniText(const char* text, void* user_data) {
+    napi_threadsafe_function tsfn = static_cast<napi_threadsafe_function>(user_data);
+    AudioEvent* ev = new AudioEvent{"text", text != nullptr ? text : "", {}};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+}
+
+void OmniLoadWorker(std::string dir, napi_threadsafe_function tsfn) {
+    const int rc = bodyclock_omni_load(dir.c_str());
+    AudioEvent* ev = new AudioEvent{rc == 0 ? "end" : "error",
+                                    rc == 0 ? "" : "the omni model would not load",
+                                    {}};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+}
+
+void OmniAskWorker(std::vector<std::int16_t> pcm,
+                   std::string prompt,
+                   bool want_audio,
+                   napi_threadsafe_function tsfn) {
+    // The text handler is passed whether or not audio was asked for: it costs
+    // one string crossing per exchange, and on a text-only ask it arrives at
+    // effectively the same moment as "end" anyway.
+    const char* json = bodyclock_omni_ask(pcm.data(), static_cast<int>(pcm.size()),
+                                     prompt.c_str(),
+                                     want_audio ? OnOmniAudio : nullptr,
+                                     OnOmniText,
+                                     tsfn);
+
+    AudioEvent* ev = json != nullptr ? new AudioEvent{"end", json, {}}
+                                     : new AudioEvent{"error", "omni could not answer", {}};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+    g_omni_busy.store(false, std::memory_order_relaxed);
+}
+
+napi_value NativeOmniAvailable(napi_env env, napi_callback_info /*info*/) {
+    return Int32(env, bodyclock_omni_available());
+}
+
+// nativeOmniLoad(modelDir, onDone: (type, content) => void): void
+//
+// A DIRECTORY, not a file: an MNN model is a config.json plus a dozen .mnn
+// graphs, about 3.8 GB together. On a worker for the same reason the other two
+// loads are -- reading that much blocks for seconds.
+napi_value NativeOmniLoad(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 2) {
+        napi_throw_error(env, nullptr, "nativeOmniLoad(modelDir, onDone) needs two arguments");
+        return nullptr;
+    }
+
+    std::string dir = ToUtf8(env, argv[0]);
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "bodyclock_omni_load", NAPI_AUTO_LENGTH, &work_name);
+
+    napi_threadsafe_function tsfn = nullptr;
+    if (napi_create_threadsafe_function(env, argv[1], nullptr, work_name,
+                                        0 /*unbounded*/, 1 /*one worker*/,
+                                        nullptr, nullptr, nullptr, CallJsAudio, &tsfn) != napi_ok) {
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+
+    std::thread(OmniLoadWorker, std::move(dir), tsfn).detach();
+    return nullptr;
+}
+
+napi_value NativeOmniLoaded(napi_env env, napi_callback_info /*info*/) {
+    return Int32(env, bodyclock_omni_loaded());
+}
+
+napi_value NativeOmniUnload(napi_env env, napi_callback_info /*info*/) {
+    bodyclock_omni_unload();
+    return nullptr;
+}
+
+// The one lever on the cost that does not need a different model: MNN runs
+// `steps - 1` diffusion forwards per chunk, and what fewer of them coarsens is
+// naturalness -- the thing this engine is carried for. See bodyclock.h.
+napi_value NativeOmniSetDitSteps(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    std::int32_t steps = 0;
+    if (argc >= 1) napi_get_value_int32(env, argv[0], &steps);
+    return Int32(env, bodyclock_omni_set_dit_steps(steps));
+}
+
+// nativeOmniAsk(pcm: Int16Array, prompt, wantAudio, onEvent): number
+//
+// 1 when the exchange started, 0 when one is already running. The samples are
+// COPIED out of the typed array before the worker starts: the caller's buffer
+// belongs to the JS heap and may be collected or resized the moment this
+// returns, and the engine reads it for as long as the answer takes.
+napi_value NativeOmniAsk(napi_env env, napi_callback_info info) {
+    size_t argc = 4;
+    napi_value argv[4] = {nullptr, nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 4) {
+        napi_throw_error(env, nullptr,
+                         "nativeOmniAsk(pcm, prompt, wantAudio, onEvent) needs four arguments");
+        return nullptr;
+    }
+
+    bool expected = false;
+    if (!g_omni_busy.compare_exchange_strong(expected, true)) {
+        return Int32(env, 0);
+    }
+
+    napi_typedarray_type type;
+    size_t              length = 0;
+    void*               data   = nullptr;
+    if (napi_get_typedarray_info(env, argv[0], &type, &length, &data, nullptr, nullptr) != napi_ok ||
+        type != napi_int16_array || data == nullptr) {
+        g_omni_busy.store(false, std::memory_order_relaxed);
+        napi_throw_error(env, nullptr, "nativeOmniAsk: pcm must be an Int16Array");
+        return nullptr;
+    }
+    const std::int16_t* samples = static_cast<const std::int16_t*>(data);
+    std::vector<std::int16_t> pcm(samples, samples + length);
+
+    std::string prompt = ToUtf8(env, argv[1]);
+    bool want_audio = false;
+    napi_get_value_bool(env, argv[2], &want_audio);
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "bodyclock_omni_ask", NAPI_AUTO_LENGTH, &work_name);
+
+    napi_threadsafe_function tsfn = nullptr;
+    if (napi_create_threadsafe_function(env, argv[3], nullptr, work_name,
+                                        0 /*unbounded*/, 1 /*one worker*/,
+                                        nullptr, nullptr, nullptr, CallJsAudio, &tsfn) != napi_ok) {
+        g_omni_busy.store(false, std::memory_order_relaxed);
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+
+    std::thread(OmniAskWorker, std::move(pcm), std::move(prompt), want_audio, tsfn).detach();
+    return Int32(env, 1);
 }
 
 }   // namespace
@@ -693,6 +872,13 @@ NAPI_MODULE_INIT() {
         {"nativeTtsSay",          nullptr, NativeTtsSay,          nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsCancel",       nullptr, NativeTtsCancel,       nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsLastError",    nullptr, NativeTtsLastError,    nullptr, nullptr, nullptr, napi_default, nullptr},
+
+        {"nativeOmniAvailable",   nullptr, NativeOmniAvailable,   nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeOmniLoad",        nullptr, NativeOmniLoad,        nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeOmniLoaded",      nullptr, NativeOmniLoaded,      nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeOmniUnload",      nullptr, NativeOmniUnload,      nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeOmniSetDitSteps", nullptr, NativeOmniSetDitSteps, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeOmniAsk",         nullptr, NativeOmniAsk,         nullptr, nullptr, nullptr, napi_default, nullptr},
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;
