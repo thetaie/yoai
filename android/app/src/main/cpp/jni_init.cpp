@@ -127,6 +127,82 @@ JNIEXPORT jstring JNICALL BC(nativeMemoryBandwidth)(JNIEnv* env, jobject,
 }
 
 //------------------------------------------------------------------------------
+// The day log
+//------------------------------------------------------------------------------
+//
+// Unlike everything else in this file these are FAST -- one indexed SQLite
+// query each -- so Kotlin calls them straight from the main thread. That is the
+// only reason the home screen can read the current state during composition
+// instead of through a coroutine and a loading state.
+//
+// The reads return JSON whose shape is documented in src/bodyclock.h. Nothing
+// here parses it: the Kotlin side does, once, in Timeline.kt.
+
+JNIEXPORT jint JNICALL BC(nativeTimelineOpen)(JNIEnv* env, jobject, jstring dir) {
+    const std::string s = to_utf8(env, dir);
+    return bodyclock_timeline_open(s.c_str());
+}
+
+JNIEXPORT jboolean JNICALL BC(nativeTimelineOpened)(JNIEnv*, jobject) {
+    return bodyclock_timeline_opened() != 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL BC(nativeTimelineClose)(JNIEnv*, jobject) {
+    bodyclock_timeline_close();
+}
+
+JNIEXPORT jint JNICALL BC(nativeTimelineSwitchTo)(JNIEnv* env, jobject, jstring state_id) {
+    const std::string s = to_utf8(env, state_id);
+    return bodyclock_timeline_switch_to(s.c_str());
+}
+
+JNIEXPORT jint JNICALL BC(nativeTimelineEnd)(JNIEnv*, jobject) {
+    return bodyclock_timeline_end();
+}
+
+JNIEXPORT jint JNICALL BC(nativeTimelineEndAt)(JNIEnv*, jobject, jlong at) {
+    return bodyclock_timeline_end_at(at);
+}
+
+JNIEXPORT jint JNICALL BC(nativeTimelineUndo)(JNIEnv*, jobject) {
+    return bodyclock_timeline_undo();
+}
+
+JNIEXPORT jint JNICALL BC(nativeTimelineNoteAdd)(JNIEnv* env, jobject, jstring text) {
+    const std::string s = to_utf8(env, text);
+    return bodyclock_timeline_note_add(s.c_str());
+}
+
+JNIEXPORT jstring JNICALL BC(nativeTimelineNow)(JNIEnv* env, jobject) {
+    return from_utf8(env, bodyclock_timeline_now());
+}
+
+JNIEXPORT jstring JNICALL BC(nativeTimelineRecent)(JNIEnv* env, jobject, jint hours) {
+    return from_utf8(env, bodyclock_timeline_recent(hours));
+}
+
+JNIEXPORT jstring JNICALL BC(nativeTimelineDay)(JNIEnv* env, jobject, jint local_day) {
+    return from_utf8(env, bodyclock_timeline_day(local_day));
+}
+
+JNIEXPORT jint JNICALL BC(nativeTimelineToday)(JNIEnv*, jobject) {
+    return bodyclock_timeline_today();
+}
+
+JNIEXPORT jstring JNICALL BC(nativeTimelineDayToIso)(JNIEnv* env, jobject, jint local_day) {
+    return from_utf8(env, bodyclock_timeline_day_to_iso(local_day));
+}
+
+JNIEXPORT jint JNICALL BC(nativeTimelineIsoToDay)(JNIEnv* env, jobject, jstring iso) {
+    const std::string s = to_utf8(env, iso);
+    return bodyclock_timeline_iso_to_day(s.c_str());
+}
+
+JNIEXPORT jstring JNICALL BC(nativeTimelineLastError)(JNIEnv* env, jobject) {
+    return from_utf8(env, bodyclock_timeline_last_error());
+}
+
+//------------------------------------------------------------------------------
 // Recognition (SenseVoice) and the prosody measurements
 //------------------------------------------------------------------------------
 

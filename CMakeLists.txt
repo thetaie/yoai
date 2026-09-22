@@ -657,6 +657,12 @@ if(BODYCLOCK_BUILD_CLI)
     add_executable(bodyclock-timeline-test tests/timeline_test.cpp)
     target_link_libraries(bodyclock-timeline-test PRIVATE bodyclock_core)
 
+    # The same store through the door a HOST uses, which is a separate thing to
+    # get wrong: the rules can be perfect while a JSON key is spelled
+    # differently than bodyclock.h says, and a host only ever reads the header.
+    add_executable(bodyclock-timeline-abi-test tests/timeline_abi_test.cpp)
+    target_link_libraries(bodyclock-timeline-abi-test PRIVATE bodyclock_core)
+
     # Builds whether or not BODYCLOCK_ASR is on. Without it the front-end checks
     # still run and still mean something -- the filterbank is the half that has
     # one right answer -- and the transcription half says it is not compiled in.

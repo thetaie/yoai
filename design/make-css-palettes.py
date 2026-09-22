@@ -12,51 +12,18 @@ disagree about almost everything except the hex values: ArkTS wants a typed
 table it can index, CSS wants custom properties a cascade can override, and the
 one thing worth keeping identical -- the colors -- is identical either way.
 
-Token names are the app's, not the design system's, so the rename table below is
-the same one the ArkTS generator applies. The CSS spelling swaps underscores for
-dashes and takes a `--bc-` prefix, which is mechanical: bg_page is --bc-bg-page.
+Token names are the app's, not the design system's, and the rename table lives
+in palette_tokens.py so every host applies the same one. The CSS spelling swaps
+underscores for dashes and takes a `--bc-` prefix, which is mechanical: bg_page
+is --bc-bg-page.
 """
-import json
 import pathlib
 
+from palette_tokens import FAMILIES, FIELDS, ORDER, family_of, load
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SRC = ROOT / "design/palettes.json"
 DST = ROOT / "desktop/src/renderer/src/palettes.css"
 
-# design name -> app token name. Must agree with make-arkts-palettes.py: a token
-# that means bg_page on the phone and something else on the desktop is the one
-# failure a generated file is supposed to make impossible.
-RENAME = {
-    "surface-page": "bg_page",
-    "surface-card": "bg_surface",
-    "surface-inverse": "surface_inverse",
-    "text-primary": "text_primary",
-    "text-tertiary": "text_tertiary",
-    "border": "border",
-    "accent": "brand",
-    "accent-soft": "accent_soft",
-    "muted-on-inverse": "muted_on_inverse",
-    "accent-on-inverse": "accent_on_inverse",
-}
-
-FIELDS = [
-    "bg_page", "bg_surface", "bg_bubble", "bg_overlay", "surface_inverse",
-    "text_primary", "text_secondary", "text_tertiary", "text_disabled",
-    "brand", "on_brand", "accent_soft", "muted_on_inverse", "accent_on_inverse",
-    "border", "divider", "scrim",
-    "danger", "success",
-]
-
-FAMILIES = ("amber", "arctic", "quiet")
-
-
-def family_of(key: str) -> str:
-    for f in FAMILIES:
-        if f in key:
-            return f
-    if key in ("quiet-day", "quiet-night"):
-        return "quiet"
-    raise SystemExit(f"cannot place {key!r} in a family")
 
 
 def var_name(field: str) -> str:
@@ -87,30 +54,8 @@ def block(selector: str, colors: dict, ramp: list, indent: str = "  ") -> list:
 
 
 def main() -> None:
-    doc = json.load(open(SRC, encoding="utf-8"))
+    doc, rows, members = load()
     themes = doc["themes"]
-
-    rows = {}
-    for key, t in themes.items():
-        colors = {}
-        for name, value in t.items():
-            if name in ("label", "labelZh", "mode", "note", "state-ramp"):
-                continue
-            colors[RENAME.get(name, name)] = value
-        missing = [f for f in FIELDS if f not in colors]
-        if missing:
-            raise SystemExit(f"{key}: palettes.json has no {missing}")
-        extra = [c for c in colors if c not in FIELDS]
-        if extra:
-            raise SystemExit(f"{key}: unmapped colors {extra}")
-        rows[key] = colors
-
-    members = {}
-    for key, t in themes.items():
-        members.setdefault(family_of(key), {})[t["mode"]] = key
-    for f, pair in members.items():
-        if set(pair) != {"light", "dark"}:
-            raise SystemExit(f"family {f} is not a light/dark pair: {pair}")
 
     default_key = doc["default"]
     if default_key not in themes:
@@ -137,10 +82,7 @@ def main() -> None:
     out += block(":root", rows[default_key], themes[default_key]["state-ramp"])
     out.append("")
 
-    order = ["daylight-amber", "daylight-arctic", "quiet-day",
-             "midnight-amber", "midnight-arctic", "quiet-night"]
-    if sorted(order) != sorted(themes):
-        raise SystemExit("palette set changed; update `order`")
+    order = ORDER
 
     for key in order:
         t = themes[key]

@@ -19,6 +19,7 @@
 #include "platform/bundle.hpp"
 #include "platform/log.hpp"
 #include "platform/membw.hpp"
+#include "store/timeline.hpp"
 #include "voice/omni.hpp"
 #include "voice/prosody.hpp"
 #include "voice/qtts.hpp"
@@ -273,6 +274,121 @@ std::string& providers_buffer() {
 
 bool blank(const char* s) { return s == nullptr || *s == '\0'; }
 
+//------------------------------------------------------------------------------
+// The day log
+//------------------------------------------------------------------------------
+
+using bodyclock::store::Timeline;
+
+std::mutex& timeline_mutex() {
+    static std::mutex m;
+    return m;
+}
+
+// Guarded by timeline_mutex(). A shared_ptr rather than a raw owner so that a
+// read already in flight keeps the store alive across a concurrent
+// bodyclock_timeline_close(): the pointer is copied out under the lock and the
+// COPY is what the call runs against, the same way lookup() copies a registry
+// entry so a turn is unaffected by an edit beside it.
+std::shared_ptr<Timeline>& timeline_slot() {
+    static std::shared_ptr<Timeline> t;
+    return t;
+}
+
+// The directory it was opened with, so re-opening the same one can be the no-op
+// the header promises. Guarded by timeline_mutex().
+std::string& timeline_dir() {
+    static std::string d;
+    return d;
+}
+
+// Thread-local, so one thread's refusal is not reported to another as its own.
+std::string& timeline_error() {
+    static thread_local std::string e;
+    return e;
+}
+
+// One buffer per read, not one shared: the header promises each read's result
+// survives until that SAME function is called again, and a host that holds
+// now()'s object while iterating recent() is doing nothing wrong.
+std::string& timeline_now_buffer() {
+    static thread_local std::string buf;
+    return buf;
+}
+std::string& timeline_recent_buffer() {
+    static thread_local std::string buf;
+    return buf;
+}
+std::string& timeline_day_buffer() {
+    static thread_local std::string buf;
+    return buf;
+}
+std::string& timeline_iso_buffer() {
+    static thread_local std::string buf;
+    return buf;
+}
+
+// The open store, or null with the reason already recorded. Clearing the error
+// here rather than in each entry point is what keeps a stale message from an
+// earlier failure from being read as this call's.
+std::shared_ptr<Timeline> timeline_checked() {
+    timeline_error().clear();
+    std::lock_guard<std::mutex> lock(timeline_mutex());
+    std::shared_ptr<Timeline> t = timeline_slot();
+    if (!t) {
+        timeline_error() = "no day log is open -- call bodyclock_timeline_open first";
+    }
+    return t;
+}
+
+void write_json_string(rapidjson::Writer<rapidjson::StringBuffer>& w,
+                       const std::string& s) {
+    w.String(s.data(), static_cast<rapidjson::SizeType>(s.size()));
+}
+
+// One entry, notes and all. The shape is documented in bodyclock.h; keep the
+// two in step, because a host reads only the header.
+void write_entry(rapidjson::Writer<rapidjson::StringBuffer>& w,
+                 const bodyclock::store::Entry& e) {
+    w.StartObject();
+    w.Key("id");        w.Int64(e.id);
+    w.Key("stateId");   write_json_string(w, e.state_id);
+    w.Key("open");      w.Bool(e.open());
+    w.Key("startedAt"); w.Int64(e.started_at);
+    w.Key("startedTz"); w.Int(e.started_tz);
+    w.Key("endedAt");   w.Int64(e.ended_at);
+    w.Key("endedTz");   w.Int(e.ended_tz);
+    w.Key("localDay");  w.Int(e.local_day);
+    w.Key("localDayEnd"); w.Int(e.local_day_end);
+    w.Key("notes");
+    w.StartArray();
+    for (size_t i = 0; i < e.notes.size(); ++i) {
+        const bodyclock::store::Note& n = e.notes[i];
+        w.StartObject();
+        w.Key("id");   w.Int64(n.id);
+        w.Key("text"); write_json_string(w, n.text);
+        w.Key("at");   w.Int64(n.at);
+        w.EndObject();
+    }
+    w.EndArray();
+    w.EndObject();
+}
+
+// A list read -- recent() and day() differ only in which method they call and
+// which buffer they land in, so the marshalling is written once.
+const char* timeline_entries_json(std::vector<bodyclock::store::Entry>& entries,
+                                  std::string& buffer) {
+    rapidjson::StringBuffer buf;
+    rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+    w.StartArray();
+    for (size_t i = 0; i < entries.size(); ++i) {
+        write_entry(w, entries[i]);
+    }
+    w.EndArray();
+    buffer.assign(buf.GetString(), buf.GetSize());
+    return buffer.c_str();
+}
+
 }  // namespace
 
 //------------------------------------------------------------------------------
@@ -286,6 +402,188 @@ extern "C" const char* bodyclock_version(void) {
 extern "C" void bodyclock_set_log_level(const char* level) {
     if (blank(level)) return;
     bodyclock::platform::set_log_level(level);
+}
+
+//------------------------------------------------------------------------------
+// The day log
+//------------------------------------------------------------------------------
+
+extern "C" int bodyclock_timeline_open(const char* dir) {
+    timeline_error().clear();
+    if (blank(dir)) {
+        timeline_error() = "bodyclock_timeline_open: dir is required";
+        return 1;
+    }
+
+    const std::string want(dir);
+    std::lock_guard<std::mutex> lock(timeline_mutex());
+    if (timeline_slot() && timeline_dir() == want) {
+        return 0;
+    }
+
+    // Built BEFORE the old one is dropped is wrong here: two connections to the
+    // same file would overlap for the length of the migration. The old store
+    // goes first, and a failed open therefore leaves nothing open -- which is
+    // the honest outcome, since the host is about to be told it failed.
+    timeline_slot().reset();
+    timeline_dir().clear();
+
+    std::string err;
+    Timeline* opened = Timeline::open(want, &err);
+    if (!opened) {
+        timeline_error() = err;
+        return 1;
+    }
+    timeline_slot().reset(opened);
+    timeline_dir() = want;
+    return 0;
+}
+
+extern "C" int bodyclock_timeline_opened(void) {
+    std::lock_guard<std::mutex> lock(timeline_mutex());
+    return timeline_slot() ? 1 : 0;
+}
+
+extern "C" void bodyclock_timeline_close(void) {
+    std::lock_guard<std::mutex> lock(timeline_mutex());
+    timeline_slot().reset();
+    timeline_dir().clear();
+}
+
+extern "C" int bodyclock_timeline_switch_to(const char* state_id) {
+    std::shared_ptr<Timeline> t = timeline_checked();
+    if (!t) return 1;
+    std::string err;
+    if (!t->switch_to(blank(state_id) ? std::string() : std::string(state_id), &err)) {
+        timeline_error() = err;
+        return 1;
+    }
+    return 0;
+}
+
+extern "C" int bodyclock_timeline_end(void) {
+    std::shared_ptr<Timeline> t = timeline_checked();
+    if (!t) return 1;
+    std::string err;
+    if (!t->end_current(&err)) {
+        timeline_error() = err;
+        return 1;
+    }
+    return 0;
+}
+
+extern "C" int bodyclock_timeline_end_at(long long at) {
+    std::shared_ptr<Timeline> t = timeline_checked();
+    if (!t) return 1;
+    std::string err;
+    if (!t->end_at(at, &err)) {
+        timeline_error() = err;
+        return 1;
+    }
+    return 0;
+}
+
+extern "C" int bodyclock_timeline_undo(void) {
+    std::shared_ptr<Timeline> t = timeline_checked();
+    if (!t) return 1;
+    std::string err;
+    if (!t->undo(&err)) {
+        timeline_error() = err;
+        return 1;
+    }
+    return 0;
+}
+
+extern "C" int bodyclock_timeline_note_add(const char* text) {
+    std::shared_ptr<Timeline> t = timeline_checked();
+    if (!t) return 1;
+    std::string err;
+    if (!t->note_add(blank(text) ? std::string() : std::string(text), &err)) {
+        timeline_error() = err;
+        return 1;
+    }
+    return 0;
+}
+
+extern "C" const char* bodyclock_timeline_now(void) {
+    std::shared_ptr<Timeline> t = timeline_checked();
+    if (!t) return nullptr;
+
+    bodyclock::store::Now now;
+    std::string err;
+    if (!t->now(&now, &err)) {
+        timeline_error() = err;
+        return nullptr;
+    }
+
+    rapidjson::StringBuffer buf;
+    rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+    w.StartObject();
+    w.Key("current");
+    if (now.has_current) {
+        write_entry(w, now.current);
+    } else {
+        w.Null();
+    }
+    w.Key("lastEnded");
+    if (now.has_last_ended) {
+        write_entry(w, now.last_ended);
+    } else {
+        w.Null();
+    }
+    w.EndObject();
+
+    timeline_now_buffer().assign(buf.GetString(), buf.GetSize());
+    return timeline_now_buffer().c_str();
+}
+
+extern "C" const char* bodyclock_timeline_recent(int hours) {
+    std::shared_ptr<Timeline> t = timeline_checked();
+    if (!t) return nullptr;
+
+    std::vector<bodyclock::store::Entry> entries;
+    std::string err;
+    if (!t->recent(hours, &entries, &err)) {
+        timeline_error() = err;
+        return nullptr;
+    }
+    return timeline_entries_json(entries, timeline_recent_buffer());
+}
+
+extern "C" const char* bodyclock_timeline_day(int local_day) {
+    std::shared_ptr<Timeline> t = timeline_checked();
+    if (!t) return nullptr;
+
+    std::vector<bodyclock::store::Entry> entries;
+    std::string err;
+    if (!t->day(local_day, &entries, &err)) {
+        timeline_error() = err;
+        return nullptr;
+    }
+    return timeline_entries_json(entries, timeline_day_buffer());
+}
+
+// The three below are pure arithmetic on the class, so unlike everything else
+// in this section they do not need a log to be open and cannot fail for having
+// none. They leave timeline_last_error() alone for the same reason: there is
+// nothing for them to report and clearing it would discard the message from the
+// call the host is probably about to ask about.
+extern "C" int bodyclock_timeline_today(void) {
+    return Timeline::today_local_day();
+}
+
+extern "C" const char* bodyclock_timeline_day_to_iso(int local_day) {
+    timeline_iso_buffer() = Timeline::day_to_iso(local_day);
+    return timeline_iso_buffer().c_str();
+}
+
+extern "C" int bodyclock_timeline_iso_to_day(const char* iso) {
+    if (blank(iso)) return -1;
+    return Timeline::iso_to_day(iso);
+}
+
+extern "C" const char* bodyclock_timeline_last_error(void) {
+    return timeline_error().c_str();
 }
 
 //------------------------------------------------------------------------------

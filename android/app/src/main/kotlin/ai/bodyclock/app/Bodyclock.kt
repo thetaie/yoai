@@ -49,6 +49,39 @@ object Bodyclock {
     /** JSON: the read rate in GB/s and what it took to get it. Blocks. */
     external fun nativeMemoryBandwidth(threads: Int, mib: Int, passes: Int): String?
 
+    // --- The day log --------------------------------------------------------
+    //
+    // The exception to the blocking rule above: one indexed SQLite query each,
+    // so none of these is an ANR risk. They are still disk reads and still go
+    // on an IO dispatcher -- see HomeViewModel -- because StrictMode is right
+    // that a file read does not belong on the thread that draws.
+    //
+    // [ai.bodyclock.app.day.Timeline] wraps them; nothing else should call them
+    // directly.
+    //
+    // A write returns 0 on success; a read returns JSON, or null on failure.
+    // Either way the reason is in [nativeTimelineLastError].
+
+    external fun nativeTimelineOpen(dir: String): Int
+    external fun nativeTimelineOpened(): Boolean
+    external fun nativeTimelineClose()
+
+    external fun nativeTimelineSwitchTo(stateId: String): Int
+    external fun nativeTimelineEnd(): Int
+    external fun nativeTimelineEndAt(at: Long): Int
+    external fun nativeTimelineUndo(): Int
+    external fun nativeTimelineNoteAdd(text: String): Int
+
+    external fun nativeTimelineNow(): String?
+    external fun nativeTimelineRecent(hours: Int): String?
+    external fun nativeTimelineDay(localDay: Int): String?
+
+    external fun nativeTimelineToday(): Int
+    external fun nativeTimelineDayToIso(localDay: Int): String?
+    external fun nativeTimelineIsoToDay(iso: String): Int
+
+    external fun nativeTimelineLastError(): String?
+
     // --- Recognition --------------------------------------------------------
 
     external fun nativeVoiceAvailable(): Boolean

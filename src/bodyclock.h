@@ -41,6 +41,133 @@ const char* bodyclock_version(void);
 void bodyclock_set_log_level(const char* level);
 
 //------------------------------------------------------------------------------
+// The day log
+//------------------------------------------------------------------------------
+//
+// The one thing the core persists. The rules -- at most one entry open, a
+// switch leaving no gap, a gap being the absence of a row, each endpoint
+// carrying its own UTC offset -- are in src/store/timeline.hpp and are NOT
+// restated here. What this section adds is only the marshalling: which calls a
+// host can make, what comes back, and how a failure reports itself.
+//
+// One log per process, opened once at startup. It is a singleton rather than a
+// handle because two SQLite connections to one file, each with its own locks,
+// is a data-corruption bug rather than a flexibility -- see the note at the top
+// of timeline.hpp. Every call below is safe from any thread; the reads are
+// short and do not need to be moved off the drawing thread.
+//
+// A write returns 0 on success and non-zero on failure. A read returns a JSON
+// string, or NULL on failure. Either way the reason is in
+// bodyclock_timeline_last_error(), which is worth showing: "an end in the
+// future is refused" is a sentence the screen that asked can act on.
+//
+// TIMES are milliseconds since the Unix epoch, UTC. A DAY is a day number --
+// days since the epoch -- not a date string; see bodyclock_timeline_day_to_iso
+// for the conversion at the edges.
+
+// Open (creating if needed) `dir`/bodyclock.db and bring the schema up to date.
+// `dir` is the host's own sandbox directory and must already exist -- creating
+// it is the host's business, since only the host knows which of its several
+// directories is the one that gets backed up.
+//
+// Returns 0 on success. Calling it twice with the same directory succeeds and
+// does nothing; calling it with a DIFFERENT directory closes the first and
+// opens the second, which is what a test wants and what a shipping app should
+// never do.
+int bodyclock_timeline_open(const char* dir);
+
+// Whether a log is open. Everything below fails while this is 0.
+int bodyclock_timeline_opened(void);
+
+// Close it. Safe when nothing is open. A host does not normally call this --
+// the process ending is enough -- but a test that opens several does.
+void bodyclock_timeline_close(void);
+
+// Make `state_id` the current state as of now, closing whatever was open at the
+// same instant. This is what tapping a cell on the home screen does: it is a
+// SWITCH, not an event, and the previous state's duration falls out of it.
+//
+// Re-tapping the state that is already current succeeds and changes nothing.
+int bodyclock_timeline_switch_to(const char* state_id);
+
+// Close the open entry and open nothing. The time that follows is a gap, and
+// stays one. Succeeds and does nothing when already idle.
+int bodyclock_timeline_end(void);
+
+// The same, but as of an instant that has already passed -- the way out of a
+// state nobody switched away from. `at` must be at or after the entry's start
+// and not in the future; both are refused rather than clamped.
+int bodyclock_timeline_end_at(long long at);
+
+// Reopen the entry closed most recently, absorbing the gap since. Only while
+// idle: once something else is open there is nothing unambiguous to undo.
+int bodyclock_timeline_undo(void);
+
+// Attach a note to the open entry. Fails while idle -- a note belongs to
+// something.
+int bodyclock_timeline_note_add(const char* text);
+
+// What is happening now and what stopped most recently, as one object:
+//
+//   {"current": <entry>|null, "lastEnded": <entry>|null}
+//
+// Both null is a fresh install, not an error. `lastEnded` is what the idle
+// screen offers to undo.
+//
+// An <entry> is:
+//
+//   {"id": 12, "stateId": "work", "open": false,
+//    "startedAt": 1758500000000, "startedTz": 480,
+//    "endedAt":   1758510000000, "endedTz":   480,
+//    "localDay": 20353, "localDayEnd": 20353,
+//    "notes": [{"id": 3, "text": "noodles", "at": 1758501000000}]}
+//
+// `endedAt` is 0 and `endedTz` and `localDayEnd` are meaningless while `open`
+// is true. Both offsets are minutes east of UTC at THAT endpoint, and they
+// differ across a flight or a daylight-saving switch -- placing an entry on a
+// local-time bar means converting each end with its own.
+//
+// The buffer is owned by the core and stays valid until this thread's next
+// bodyclock_timeline_now() call. Copy it to keep it.
+const char* bodyclock_timeline_now(void);
+
+// Everything still going on, or finished within the last `hours` hours, newest
+// first, as a JSON array of entries.
+//
+// A rolling window, deliberately not a day: this answers "what have I been
+// doing", which has no reason to stop at midnight. Everything that COMPARES
+// uses bodyclock_timeline_day() instead -- two windows overlap and cannot be
+// compared to each other.
+//
+// Same buffer rules as above, with its own buffer.
+const char* bodyclock_timeline_recent(int hours);
+
+// Every entry that TOUCHES `local_day`, oldest first, as a JSON array.
+//
+// Touches, not starts in: a night's sleep belongs to the morning it ends in as
+// well. Splitting an entry at midnight for a 00-24 bar is the caller's job,
+// which is why both endpoints carry their own offset.
+//
+// Same buffer rules as above, with its own buffer.
+const char* bodyclock_timeline_day(int local_day);
+
+// Today, by the device's clock right now. The one call that consults the
+// current timezone; every past day was numbered when it was lived.
+int bodyclock_timeline_today(void);
+
+// Day number <-> "YYYY-MM-DD", for the edges that speak to people.
+// bodyclock_timeline_iso_to_day returns -1 when the string does not parse.
+//
+// The returned string is owned by the core and valid until this thread's next
+// bodyclock_timeline_day_to_iso() call.
+const char* bodyclock_timeline_day_to_iso(int local_day);
+int         bodyclock_timeline_iso_to_day(const char* iso);
+
+// Why the last day-log call failed, or "" when the last one succeeded. Never
+// NULL. Thread-local, so one thread's failure is not another's.
+const char* bodyclock_timeline_last_error(void);
+
+//------------------------------------------------------------------------------
 // Provider registry
 //------------------------------------------------------------------------------
 //
