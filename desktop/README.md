@@ -67,6 +67,14 @@ npm run dev
 
 which needs the addon built once and then leaves it alone.
 
+`postinstall` in package.json runs `install-electron`, and it is not boilerplate.
+The npm package `electron` is a few hundred kilobytes of JavaScript; the runtime
+is a 250 MB binary fetched separately, and as of 44.4.5 that fetch is **no longer
+the electron package's own postinstall** — the package declares no scripts at all
+and ships an `install-electron` bin instead. Without this line, `npm install`
+leaves `node_modules/electron/dist` missing and every command that starts the app
+fails with `Error: Electron uninstall`, which names neither npm nor a download.
+
 ### On-device models
 
 The GGUF lane is off by default here for the same reason it is off in the root
