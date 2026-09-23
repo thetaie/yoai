@@ -20,9 +20,13 @@
 #              Needs a llama.cpp checkout too, whether or not `llama` is asked
 #              for: it compiles llama.cpp's ggml. See the lane below for why.
 #   app        just the Electron bundles (out/)
-#   clean      discard build/ first. Needed to change the lane set: CMake caches
-#              it, so adding `llama` to a tree configured without it has no
-#              effect. The SDKs under sdk/ are NOT discarded -- see below.
+#   clean      discard build/ first. ADDING a lane no longer needs it -- the
+#              addon is reconfigured every run, so `llama` on an existing tree
+#              takes effect by itself. DROPPING one does: a lane that is not
+#              asked for is not passed as OFF, it is not passed at all, and
+#              CMake keeps the cached value. So `./build.sh addon` on a tree
+#              built with `llama qtts` rebuilds it with both still on. The SDKs
+#              under sdk/ are NOT discarded either way.
 #
 # Env overrides:
 #   VCPKG_ROOT        vcpkg checkout (default: a sibling of the repo, used only
@@ -207,6 +211,23 @@ if [ -n "$DO_ADDON" ]; then
       fi
       echo "[build] qtts backend: Vulkan"
       QTTS_BACKEND=(-DGGML_VULKAN=ON)
+      # SPIRV-Headers named explicitly, because ggml's own CMAKE_PREFIX_PATH
+      # append of VULKAN_SDK does not find it and the failure reads like a
+      # missing SDK rather than a layout difference. find_package's config
+      # search looks under <prefix>/lib/cmake/<name>*/ -- a directory NAMED for
+      # the package -- and the LunarG SDK puts SPIRV-HeadersConfig.cmake
+      # straight into lib/cmake with no such directory. Distro packages use the
+      # upstream layout and need no help, so both are probed and neither
+      # present leaves the flag off: ggml's own error names the package and is
+      # better than a flag pointing somewhere empty.
+      if [ -n "${VULKAN_SDK:-}" ]; then
+        for d in "$VULKAN_SDK"/{lib,Lib}/cmake/SPIRV-Headers "$VULKAN_SDK"/{lib,Lib}/cmake; do
+          if [ -f "$d/SPIRV-HeadersConfig.cmake" ]; then
+            QTTS_BACKEND+=("-DSPIRV-Headers_DIR=$d")
+            break
+          fi
+        done
+      fi
     fi
 
     QBUILD="$SDK_DIR/qtts"
@@ -250,13 +271,29 @@ if [ -n "$DO_ADDON" ]; then
   # installs a shim there called `rc`. That is harmless here and fatal on
   # Windows, where CMake picks it up as the resource compiler -- see build.cmd.
   # The same spelling on both platforms keeps the two scripts comparable.
-  node "$DESKTOP_DIR/node_modules/cmake-js/bin/cmake-js" compile \
-    --directory "$DESKTOP_DIR/native" \
-    --out "$BUILD_DIR" \
-    --runtime electron \
-    --runtime-version "$ELECTRON_VER" \
-    --CDCMAKE_BUILD_TYPE=Release \
-    "${CMAKE_JS_ARGS[@]}"
+  #
+  # configure AND build, the same list to both, because `compile` on its own
+  # drops every --CD flag on a build directory that already has a cache.
+  # cmake-js configures only when there is none, so a lane switched on by an
+  # argument to this script stays OFF in the cache -- and NOTHING SAYS SO. The
+  # addon still links, still exports the same entry points (see binding.cpp on
+  # the tts half) and only answers nativeLocalAvailable() with false at
+  # runtime, which reads as a missing model rather than an ignored flag. Same
+  # as the "configured every run" note on the two SDK trees above.
+  CMAKE_JS_COMMON=(
+    --directory "$DESKTOP_DIR/native"
+    --out "$BUILD_DIR"
+    --runtime electron
+    --runtime-version "$ELECTRON_VER"
+    --CDCMAKE_BUILD_TYPE=Release
+    # The [@]+ dance, and not a plain "${CMAKE_JS_ARGS[@]}", for the bash 3.2
+    # that macOS ships: there, `set -u` treats an empty array's [@] as unset,
+    # and this array IS empty on a machine with no vcpkg and no lane asked for.
+    "${CMAKE_JS_ARGS[@]+"${CMAKE_JS_ARGS[@]}"}"
+  )
+  for cmd in configure build; do
+    node "$DESKTOP_DIR/node_modules/cmake-js/bin/cmake-js" "$cmd" "${CMAKE_JS_COMMON[@]}"
+  done
 
   # A single-config generator writes it at the root of the output directory, a
   # multi-config one under Release/. Both are checked because the module loader

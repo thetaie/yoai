@@ -24,9 +24,12 @@ rem              lane: audio in, a spoken answer out, no text in between.
 rem              Implies addon. A second inference engine and 3.8 GB of
 rem              weights -- see design/voice.md before turning it on.
 rem   app        just the Electron bundles (out\)
-rem   clean      discard build\ first. Needed to change the lane set: CMake
-rem              caches it, so adding `llama` to a tree configured without it
-rem              has no effect.
+rem   clean      discard build\ first. ADDING a lane no longer needs it -- the
+rem              addon is reconfigured every run, so `llama` on an existing tree
+rem              takes effect by itself. DROPPING one does: a lane that is not
+rem              asked for is not passed as OFF, it is not passed at all, and
+rem              CMake keeps the cached value. So `build.cmd addon` on a tree
+rem              built with `llama qtts` rebuilds it with both still on.
 rem
 rem Env overrides:
 rem   VS_DIR       Visual Studio install root
@@ -165,21 +168,33 @@ rem
 rem Quoting: the whole --CD argument goes inside the quotes so a path with a
 rem space survives as one token. `set "NAME=..."` would put the quotes in the
 rem value instead, handing CMake a directory whose name contains them.
-node "%DESKTOP_DIR%\node_modules\cmake-js\bin\cmake-js" compile ^
-    --directory "%DESKTOP_DIR%\native" ^
-    --out "%BUILD_DIR%" ^
-    --runtime electron ^
-    --runtime-version !ELECTRON_VER! ^
-    --generator Ninja ^
-    "--CDCMAKE_MAKE_PROGRAM=%NINJA%" ^
-    --CDCMAKE_BUILD_TYPE=Release ^
-    "--CDCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" ^
-    --CDVCPKG_TARGET_TRIPLET=x64-windows ^
-    "--CDVCPKG_INSTALLED_DIR=%PROJECT_DIR%\vcpkg_installed" ^
-    !LLAMA_ON! !LLAMA_DIR! ^
-    !QTTS_ON! !QTTS_DIR_ARG! ^
-    !MNN_ON! !MNN_DIR_ARG! !MNN_VK_ON!
-if errorlevel 1 exit /b 1
+rem
+rem configure AND build, the same list to both, because `compile` on its own
+rem drops every --CD flag below on a build directory that already has a cache.
+rem cmake-js configures only when there is none, so a lane switched on by an
+rem argument to this script stays OFF in the cache -- and NOTHING SAYS SO. The
+rem addon still links, still exports the same entry points (see binding.cpp on
+rem the tts half) and only answers nativeLocalAvailable() with false at runtime,
+rem which reads as a missing model rather than an ignored flag. Same as the
+rem "configured every run" note under :llama_sdk: CMake is idempotent and quick
+rem when nothing changed, and `build` then does the incremental work.
+for %%C in (configure build) do (
+    node "%DESKTOP_DIR%\node_modules\cmake-js\bin\cmake-js" %%C ^
+        --directory "%DESKTOP_DIR%\native" ^
+        --out "%BUILD_DIR%" ^
+        --runtime electron ^
+        --runtime-version !ELECTRON_VER! ^
+        --generator Ninja ^
+        "--CDCMAKE_MAKE_PROGRAM=%NINJA%" ^
+        --CDCMAKE_BUILD_TYPE=Release ^
+        "--CDCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" ^
+        --CDVCPKG_TARGET_TRIPLET=x64-windows ^
+        "--CDVCPKG_INSTALLED_DIR=%PROJECT_DIR%\vcpkg_installed" ^
+        !LLAMA_ON! !LLAMA_DIR! ^
+        !QTTS_ON! !QTTS_DIR_ARG! ^
+        !MNN_ON! !MNN_DIR_ARG! !MNN_VK_ON!
+    if errorlevel 1 exit /b 1
+)
 
 rem Ninja writes it at the root of the output directory; a multi-config
 rem generator would put it under Release\. Both are checked because the module
@@ -211,12 +226,12 @@ rem Arc 0.63x, and below 1 is a threshold rather than a slope: a stream needs a
 rem pre-buffer of duration x (RTF - 1), which at 0.63 is nothing and at 1.13 is
 rem eight seconds for a minute of audio.
 rem
-rem Far fewer flags than harmony\build.cmd's cross build needs. Three of the
-rem four obstacles there were artefacts of cross-compiling -- SPIRV-Headers
-rem re-rooted into the sysroot, a nested host build inheriting the generator
-rem but not CMAKE_MAKE_PROGRAM, and a sysroot carrying Vulkan's C headers but
-rem not the C++ ones. On the host, find_package(Vulkan) and ggml's own
-rem CMAKE_PREFIX_PATH append of VULKAN_SDK both just work.
+rem Far fewer flags than harmony\build.cmd's cross build needs. Two of the four
+rem obstacles there were artefacts of cross-compiling -- a nested host build
+rem inheriting the generator but not CMAKE_MAKE_PROGRAM, and a sysroot carrying
+rem Vulkan's C headers but not the C++ ones. On the host, find_package(Vulkan)
+rem just works. SPIRV-Headers does NOT, and that one is not about cross
+rem compiling at all -- see the probe below.
 rem
 rem One thing does carry over: ggml builds vulkan-shaders-gen for the host and
 rem runs it over 151 shaders, and MSVC fails that nested configure with
@@ -235,6 +250,22 @@ if not exist "!QTTS_SRC!\src\qwen.h" (
 if not defined VULKAN_SDK (
     echo qtts needs a Vulkan SDK ^(VULKAN_SDK is unset^) for glslc and vulkan.hpp.>&2
     exit /b 1
+)
+
+rem SPIRV-Headers is named explicitly, because ggml's own `list(APPEND
+rem CMAKE_PREFIX_PATH $ENV{VULKAN_SDK})` does not find it and the failure reads
+rem like a missing SDK rather than a layout difference. find_package's config
+rem search looks under <prefix>\Lib\cmake\<name>*\ -- a directory NAMED for the
+rem package -- and the LunarG SDK puts SPIRV-HeadersConfig.cmake straight into
+rem Lib\cmake with no such directory. Both layouts exist in the wild, so both
+rem are probed, and neither present leaves the flag off: ggml's own error names
+rem the package and is better than a flag pointing somewhere empty.
+set "QVK=!VULKAN_SDK:\=/!"
+set "QSPIRV="
+if exist "!VULKAN_SDK!\Lib\cmake\SPIRV-Headers\SPIRV-HeadersConfig.cmake" (
+    set QSPIRV="-DSPIRV-Headers_DIR=!QVK!/Lib/cmake/SPIRV-Headers"
+) else if exist "!VULKAN_SDK!\Lib\cmake\SPIRV-HeadersConfig.cmake" (
+    set QSPIRV="-DSPIRV-Headers_DIR=!QVK!/Lib/cmake"
 )
 
 rem ONE ggml for both lanes, and llama.cpp's is the one. qwentts.cpp builds a
@@ -296,6 +327,7 @@ rem and quick when nothing changed; the same applies to :llama_sdk below.
         "-DGGML_SOURCE_DIR=!GGML_SRC:\=/!/ggml" ^
         -DBUILD_SHARED_LIBS=OFF ^
         -DQWEN_SHARED=OFF ^
+        !QSPIRV! ^
         -DGGML_VULKAN=ON
     if errorlevel 1 exit /b 1
 )

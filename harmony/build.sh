@@ -724,12 +724,19 @@ build_qtts() {
         [ -d "$vkbin" ] || vkbin="$VULKAN_SDK/Bin"
         [ -d "$vkinc" ] || vkinc="$VULKAN_SDK/Include"
         [ -d "$vklib" ] || vklib="$VULKAN_SDK/Lib"
+        # And it lays SPIRV-Headers out two ways as well: the upstream layout
+        # puts the config in a directory named for the package, which is the
+        # only shape find_package looks for, and the LunarG SDK drops it
+        # straight into cmake/ where nothing finds it. Naming the directory
+        # covers both, since this flag is passed either way.
+        local vkspirv="$vklib/cmake/SPIRV-Headers"
+        [ -f "$vkspirv/SPIRV-HeadersConfig.cmake" ] || vkspirv="$vklib/cmake"
         cfg+=(
           -DGGML_VULKAN=ON
           -DVulkan_GLSLC_EXECUTABLE="$vkbin/glslc"
           -DVulkan_INCLUDE_DIR="$vkinc"
           -DVulkan_LIBRARY="$native/sysroot/usr/lib/aarch64-linux-ohos/libvulkan.so"
-          -DSPIRV-Headers_DIR="$vklib/cmake/SPIRV-Headers"
+          -DSPIRV-Headers_DIR="$vkspirv"
           -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH
         )
         # ninja on PATH because the nested host configure inherits the generator

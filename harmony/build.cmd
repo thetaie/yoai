@@ -881,7 +881,14 @@ if defined QTTS_VULKAN (
     set "QCFG=!QCFG! -DVulkan_GLSLC_EXECUTABLE=!QVK!/Bin/glslc.exe"
     set "QCFG=!QCFG! -DVulkan_INCLUDE_DIR=!QVK!/Include"
     set "QCFG=!QCFG! -DVulkan_LIBRARY=!QSYSROOT!/usr/lib/aarch64-linux-ohos/libvulkan.so"
-    set "QCFG=!QCFG! -DSPIRV-Headers_DIR=!QVK!/Lib/cmake/SPIRV-Headers"
+    rem The SDK lays SPIRV-Headers out two ways: the upstream layout puts the
+    rem config in a directory named for the package, which is the only shape
+    rem find_package looks for, and the LunarG SDK drops it straight into
+    rem Lib\cmake where nothing finds it. Naming the directory covers both,
+    rem since this flag is passed either way.
+    set "QSPIRV=!QVK!/Lib/cmake/SPIRV-Headers"
+    if not exist "!VULKAN_SDK!\Lib\cmake\SPIRV-Headers\SPIRV-HeadersConfig.cmake" set "QSPIRV=!QVK!/Lib/cmake"
+    set "QCFG=!QCFG! -DSPIRV-Headers_DIR=!QSPIRV!"
     set "QCFG=!QCFG! -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH"
     for %%D in ("!NINJA!") do set "PATH=%%~dpD;!PATH!"
     echo [qtts] vulkan backend ON, SDK !VULKAN_SDK!
