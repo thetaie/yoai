@@ -325,6 +325,20 @@ int bodyclock_local_load(const char* id);
 // bodyclock_memory_bandwidth below is for.
 int bodyclock_local_set_threads(const char* id, int threads);
 
+// Forget the conversation: drop the KV cache and the token sequence prefix reuse
+// is computed against. The weights stay resident. Returns 0 on success, 1 when
+// the id is not an on-device model.
+//
+// **Starting a new conversation should call this**, and a shorter prompt is not
+// a substitute. A turn is stateless -- the host replays the whole transcript --
+// so a one-message prompt looks like a fresh start, and what makes it one is the
+// cache being rewound to where the old and new prompts diverge. A model whose
+// memory cannot rewind that far refuses, and llama.cpp's hybrid models refuse by
+// default: llama_context_params::n_rs_seq, the number of recurrent-state
+// snapshots, is 0 unless asked for. Removing a whole sequence is the operation
+// that never fails, and this is the way to ask for it.
+int bodyclock_local_forget(const char* id);
+
 // How fast this machine reads memory, measured WITHOUT a language model.
 //
 // Returns a JSON object -- threads, bytes, passes, seconds, gbPerSecond (in

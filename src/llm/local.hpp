@@ -257,6 +257,20 @@ public:
     /// applied when a turn builds its context, not when the weights are read.
     void setThreads(int n);
 
+    /// Forget the conversation: drop the KV cache and the token sequence the
+    /// prefix reuse is computed against. The weights stay resident.
+    ///
+    /// **This is what starting a new conversation should call**, and it is not
+    /// the same as sending a shorter prompt. Turns are stateless -- the whole
+    /// transcript is replayed -- so a caller may reasonably expect a one-message
+    /// prompt to mean a fresh context. It does not by itself: what is left over
+    /// is removed by rewinding the cache to the point where the old and new
+    /// prompts diverge, and a model whose memory cannot rewind that far refuses,
+    /// which costs the reuse and, before that refusal was checked, the
+    /// conversation's privacy from the next one. Saying so explicitly is cheaper
+    /// and cannot be refused: removing a whole sequence always succeeds.
+    void forget();
+
     /// True once the model is resident (i.e. after a successful first turn).
     bool loaded() const;
 

@@ -201,6 +201,15 @@ export function registerHandlers(): void {
         content: String(m.content)
       }))
 
+      // What the model is actually given, at the one point where the page's
+      // intent becomes the core's input. The renderer replays the whole
+      // transcript every turn and the core keeps no session state, so a reply
+      // that remembers a conversation the screen has cleared is visible here
+      // and nowhere else: the roles say how many turns came along.
+      console.log(
+        `[chat] ${wire.length} message(s): ${wire.map((m) => `${m.role}/${m.content.length}`).join(' ')}`
+      )
+
       // Assigned below and read inside the callback. Safe in that order: the
       // addon queues every event onto this thread, which is inside nativeChat
       // until it returns, so no event can be delivered before the id exists.
@@ -236,6 +245,8 @@ export function registerHandlers(): void {
   handle<[number], void>(CHANNELS.chatCancel, (turnId) => {
     core().nativeChatCancel(Number(turnId))
   })
+
+  handle<[], number>(CHANNELS.chatForget, () => models.forgetAll())
 
   //----------------------------------------------------------------------------
   // Speech output

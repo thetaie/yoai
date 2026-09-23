@@ -133,6 +133,11 @@ export function App(): JSX.Element {
     if (streaming) {
       return
     }
+    // The engines are told as well as the screen. Clearing the transcript is
+    // enough for a remote provider, which is handed the whole conversation every
+    // turn and keeps nothing; an on-device one keeps a KV cache, and the next
+    // prompt having one message in it does not by itself empty it.
+    void window.bodyclock.chat.forget().catch(() => undefined)
     setSessionId(newSessionId())
     setThread([])
     setUsage(null)

@@ -39,6 +39,7 @@ export interface BodyclockNative {
   nativeLocalSet(id: string, modelPath: string, optionsJson: string): number
   nativeLocalLoad(id: string, onDone: NativeHandler): void
   nativeLocalSetThreads(id: string, threads: number): number
+  nativeLocalForget(id: string): number
 
   nativeChat(
     providerId: string,

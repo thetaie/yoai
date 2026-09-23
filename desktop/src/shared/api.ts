@@ -49,6 +49,8 @@ export const CHANNELS = {
   chatSettingsSet: 'chat:setSettings',
   chatStart: 'chat:start',
   chatCancel: 'chat:cancel',
+  /** A new conversation: drop what the on-device engines still hold. */
+  chatForget: 'chat:forget',
   /** Main -> renderer, one message per streamed event. */
   chatEvent: 'chat:event',
 
@@ -281,6 +283,15 @@ export interface BodyclockApi {
     setSettings(patch: Partial<ChatSettings>): Promise<ChatSettings>
     start(providerId: string, messages: WireMessage[], systemPrompt: string): Promise<number>
     cancel(turnId: number): Promise<void>
+    /**
+     * Start a new conversation, as far as the engines are concerned: drop what
+     * the on-device ones still hold. Resolves to how many were cleared.
+     *
+     * A turn replays the whole transcript, so this is not what makes the next
+     * prompt correct -- it is what stops the last conversation being in the
+     * cache underneath it. See src/bodyclock.h on bodyclock_local_forget.
+     */
+    forget(): Promise<number>
     /** Subscribe to every turn's events. Returns the unsubscribe function. */
     onEvent(listener: (ev: ChatEvent) => void): () => void
   }

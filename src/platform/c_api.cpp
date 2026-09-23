@@ -722,6 +722,19 @@ extern "C" int bodyclock_local_set_threads(const char* id, int threads) {
     return 0;
 }
 
+extern "C" int bodyclock_local_forget(const char* id) {
+    if (blank(id)) return 1;
+
+    std::shared_ptr<LocalClient> client = local_client_for(id);
+    if (!client) {
+        bodyclock::platform::log_warn("bodyclock_local_forget: %s is not an on-device model", id);
+        return 1;
+    }
+    client->forget();
+    bodyclock::platform::log_info("on-device context cleared: %s", id);
+    return 0;
+}
+
 extern "C" const char* bodyclock_memory_bandwidth(int threads, int mib, int passes) {
     bodyclock::platform::MemoryBandwidth m;
     if (!bodyclock::platform::measure_memory_bandwidth(threads, mib, passes, &m)) {

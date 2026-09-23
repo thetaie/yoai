@@ -74,6 +74,7 @@ const api: BodyclockApi = {
     start: (providerId: string, messages: WireMessage[], systemPrompt: string) =>
       ipcRenderer.invoke(CHANNELS.chatStart, providerId, messages, systemPrompt) as Promise<number>,
     cancel: (turnId) => ipcRenderer.invoke(CHANNELS.chatCancel, turnId) as Promise<void>,
+    forget: () => ipcRenderer.invoke(CHANNELS.chatForget) as Promise<number>,
 
     onEvent: (listener: (ev: ChatEvent) => void) => {
       // The IpcRendererEvent is dropped rather than forwarded: it carries a

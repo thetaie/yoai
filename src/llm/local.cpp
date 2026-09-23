@@ -286,6 +286,11 @@ void LocalClient::setThreads(int n) {
     impl_->opt.n_threads = n;
 }
 
+void LocalClient::forget() {
+    std::lock_guard<std::mutex> lock(impl_->turn);   // never mid-turn
+    impl_->drop_cache();
+}
+
 bool LocalClient::loaded() const { return impl_->model != nullptr; }
 
 bool LocalClient::load(std::string& err) {
@@ -563,6 +568,21 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
      * Positions are not passed: llama_batch_get_one tracks them from the
      * sequence's current end, which after the removal below is precisely
      * `reuse`.
+     *
+     * **The removal can refuse, and its answer is not advisory.** llama.h:
+     * "Returns false if a partial sequence cannot be removed. Removing a whole
+     * sequence never fails" -- a memory that cannot be rewound to an arbitrary
+     * position, a sliding-window or recurrent one, is where it says no. Dropping
+     * that answer on the floor does not leave the cache alone: the old tokens
+     * stay AND the new prompt is appended after them, because positions come
+     * from the sequence's end. The model is then handed the previous
+     * conversation followed by this one, which is exactly what "the new
+     * conversation still remembers the last one" looks like from the outside --
+     * the screen is clear, the prompt has one message in it, and the reply
+     * answers a question nobody asked twice.
+     *
+     * So a refusal falls back to the removal that cannot fail, and the prompt is
+     * prefilled whole. That costs the reuse and nothing else.
      */
     std::size_t reuse = 0;
     const std::size_t max_reuse =
@@ -570,8 +590,17 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
     while (reuse < max_reuse && impl_->cached[reuse] == tokens[reuse]) {
         ++reuse;
     }
-    llama_memory_seq_rm(llama_get_memory(ctx), 0,
-                        static_cast<llama_pos>(reuse), -1);
+    if (reuse > 0 &&
+        !llama_memory_seq_rm(llama_get_memory(ctx), 0,
+                             static_cast<llama_pos>(reuse), -1)) {
+        platform::log_info(
+            "local: this memory will not rewind to %zu, prefilling the whole prompt", reuse);
+        reuse = 0;
+    }
+    if (reuse == 0) {
+        // The whole sequence, which llama.h promises never fails.
+        llama_memory_seq_rm(llama_get_memory(ctx), 0, -1, -1);
+    }
 
     clk::time_point t0 = clk::now();
     llama_batch batch = llama_batch_get_one(tokens.data() + reuse,
@@ -678,6 +707,7 @@ LocalClient::LocalClient(LocalOptions opt) : impl_(new Impl(std::move(opt))) {}
 LocalClient::~LocalClient() = default;
 
 void LocalClient::setThreads(int) {}
+void LocalClient::forget() {}
 bool LocalClient::loaded() const { return false; }
 
 bool LocalClient::load(std::string& err) {

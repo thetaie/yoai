@@ -213,6 +213,28 @@ export function syncToCore(): number {
  * the ABI needs -- unlike the TTS one -- and the addon runs it on a worker
  * thread. Nothing waits on the result; it is logged and dropped.
  */
+/**
+ * Forget every on-device model's conversation. The weights stay resident.
+ *
+ * Called when a new conversation starts, and not once per turn: a turn already
+ * carries its whole transcript, so the only moment the cache holds something the
+ * next prompt has no business seeing is this one.
+ *
+ * All of them rather than the active one, because switching models is a way to
+ * leave a conversation behind too, and the one being left is the one that still
+ * has it. Each call is a cache drop against a model that is loaded, or a
+ * no-op-with-a-warning against one that is not.
+ */
+export function forgetAll(): number {
+  let cleared = 0
+  for (const cfg of list()) {
+    if (isLocal(cfg) && core().nativeLocalForget(cfg.id) === 0) {
+      cleared++
+    }
+  }
+  return cleared
+}
+
 export function autoPreload(): void {
   const s = read()
   const cfg = s.configured.find((m) => m.id === s.active)

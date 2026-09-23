@@ -313,6 +313,19 @@ napi_value NativeLocalSetThreads(napi_env env, napi_callback_info info) {
     return Int32(env, bodyclock_local_set_threads(id.c_str(), n));
 }
 
+// nativeLocalForget(id: string): number  (0 = ok)
+//
+// Synchronous and cheap for the same reason: it drops a cache and leaves the
+// weights alone. What it is for is in bodyclock.h -- a new conversation is an
+// instruction, not something to be inferred from a shorter prompt.
+napi_value NativeLocalForget(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    const std::string id = ArgUtf8(env, argc, argv, 0);
+    return Int32(env, bodyclock_local_forget(id.c_str()));
+}
+
 //------------------------------------------------------------------------------
 // Chat
 //------------------------------------------------------------------------------
@@ -1107,6 +1120,7 @@ NAPI_MODULE_INIT() {
         {"nativeLocalSet",        nullptr, NativeLocalSet,        nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeLocalLoad",       nullptr, NativeLocalLoad,       nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeLocalSetThreads", nullptr, NativeLocalSetThreads, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeLocalForget",     nullptr, NativeLocalForget,     nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChat",            nullptr, NativeChat,            nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChatCancel",      nullptr, NativeChatCancel,      nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChatCancelAll",   nullptr, NativeChatCancelAll,   nullptr, nullptr, nullptr, napi_default, nullptr},
