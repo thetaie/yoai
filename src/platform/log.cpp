@@ -20,6 +20,10 @@
 #include <os/log.h>
 #define BODYCLOCK_USE_OSLOG 1
 #endif
+#elif defined(_WIN32)
+#include <vector>
+
+#include <windows.h>
 #endif
 
 namespace bodyclock { namespace platform {
@@ -66,6 +70,40 @@ void emit(os_log_type_t type, const char* fmt, va_list ap) {
 // in-flight turn -- cannot interleave one record's bytes with another's.
 std::mutex g_emit_mutex;
 
+// One assembled record, out.
+//
+// **A Windows console is not a byte sink.** It renders whatever arrives through
+// the active code page, which on a Chinese install is CP936, so UTF-8 comes out
+// as the mojibake this project spent an evening reading -- and only from here,
+// because Node writes its own lines through the wide API and is never affected.
+// WriteConsoleW takes UTF-16 and bypasses the code page, and `stdio: 'inherit'`
+// in electron-vite means this process holds the user's console directly, so
+// fixing it here fixes what they actually read.
+//
+// A REDIRECTED stderr -- a pipe, a file -- is a byte sink and keeps the plain
+// UTF-8 write, which is what anything reading a log file wants and what every
+// other platform gets. GetConsoleMode is what tells the two apart.
+void write_record(const char* line) {
+#if defined(_WIN32)
+    const HANDLE h    = GetStdHandle(STD_ERROR_HANDLE);
+    DWORD        mode = 0;
+    if (h != nullptr && h != INVALID_HANDLE_VALUE && GetConsoleMode(h, &mode) != 0) {
+        const int n = MultiByteToWideChar(CP_UTF8, 0, line, -1, nullptr, 0);
+        if (n > 1) {
+            std::vector<wchar_t> wide(static_cast<std::size_t>(n));
+            if (MultiByteToWideChar(CP_UTF8, 0, line, -1, wide.data(), n) == n) {
+                DWORD written = 0;
+                // n - 1: the count is of wchar_t INCLUDING the terminator, and
+                // the console would draw that as a glyph.
+                WriteConsoleW(h, wide.data(), static_cast<DWORD>(n - 1), &written, nullptr);
+                return;
+            }
+        }
+    }
+#endif
+    std::fputs(line, stderr);
+}
+
 // Desktop stderr path. The mobile branches need no timestamp: logcat, hilog and
 // os_log stamp their own entries. Here we prepend a local-time stamp so
 // tail-able log files and CLI output are sortable / correlate-able.
@@ -93,14 +131,17 @@ void emit(const char* level, const char* fmt, va_list ap) {
         static_cast<long long>(ms));
 
     // Render the message body, then write the whole record ("[ts] [level] msg\n")
-    // with a single fprintf under the lock. Separate prefix/body/newline writes
-    // would let another thread's record splice into the middle of this one; one
-    // write of the assembled line keeps each record intact and correctly ordered.
+    // in one call under the lock. Separate prefix/body/newline writes would let
+    // another thread's record splice into the middle of this one; one write of
+    // the assembled line keeps each record intact and correctly ordered.
     char msg[4096];
     std::vsnprintf(msg, sizeof(msg), fmt, ap);
 
+    char line[4352];
+    std::snprintf(line, sizeof(line), "[%s] [%s] %s\n", ts, level, msg);
+
     std::lock_guard<std::mutex> lock(g_emit_mutex);
-    std::fprintf(stderr, "[%s] [%s] %s\n", ts, level, msg);
+    write_record(line);
 }
 #endif
 

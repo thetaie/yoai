@@ -1070,11 +1070,11 @@ void Reader::Impl::drain_pending(bool closing) {
         // asterisks aloud, or runs away generating, looks like a synthesis
         // fault until the text that caused it can be seen.
         //
-        // **On a console that is not UTF-8 this comes out as mojibake**, and it
-        // is the terminal rather than the text: these are correct UTF-8 bytes
-        // printed through a code page that is not. Windows defaults to 936,
-        // where the bytes of 知道 render as 鐭ラ亾. `chcp 65001` fixes the
-        // display; nothing here needs fixing.
+        // This used to come out as mojibake on a Windows console, which is a
+        // code page rendering correct UTF-8 bytes rather than anything wrong
+        // with the text. platform/log.cpp now writes a record through
+        // WriteConsoleW when stderr is a console, so the code page is out of
+        // the path and `chcp 65001` is no longer needed to read this line.
         platform::log_info("reader: piece %d, %d char(s): %s",
                            static_cast<int>(pieces.size()) - 1,
                            static_cast<int>(chars_in(spoken)), spoken.c_str());
