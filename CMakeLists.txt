@@ -375,6 +375,24 @@ macro(bodyclock_require_ggml _why)
         # engine initialises it. There is no runtime way to ask ggml whether the
         # Vulkan backend was compiled in early enough to matter.
         target_compile_definitions(bodyclock_core PRIVATE BODYCLOCK_QTTS_VULKAN)
+        # And the C header, so that same file can ask Vulkan what KIND of GPU
+        # this is before ggml creates one -- the tuning it sets is for a GPU
+        # that shares system memory and costs a discrete card dearly. Only the C
+        # header is wanted: OHOS's sysroot ships that one and not the C++
+        # bindings. When it is not found the probe compiles out and the tuning
+        # is applied unconditionally, which is what this did before it existed.
+        unset(VULKAN_HEADER_DIR CACHE)
+        find_path(VULKAN_HEADER_DIR vulkan/vulkan.h
+                  HINTS "$ENV{VULKAN_SDK}/Include" "$ENV{VULKAN_SDK}/include")
+        if(VULKAN_HEADER_DIR)
+            target_include_directories(bodyclock_core PRIVATE "${VULKAN_HEADER_DIR}")
+            target_compile_definitions(bodyclock_core PRIVATE BODYCLOCK_QTTS_VULKAN_PROBE)
+            message(STATUS "bodyclock_core: Vulkan device probe ON -> ${VULKAN_HEADER_DIR}")
+        else()
+            message(WARNING
+                "bodyclock_core: no vulkan/vulkan.h found, so the discrete-GPU probe is off "
+                "and the integrated-GPU tuning in src/voice/qtts.cpp applies everywhere.")
+        endif()
         message(STATUS "bodyclock_core: ggml Vulkan backend ON -> ${GGML_VULKAN_LIB}")
     endif()
 endmacro()

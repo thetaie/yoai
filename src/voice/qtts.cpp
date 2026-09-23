@@ -12,6 +12,10 @@
 #include <cstring>
 #include <vector>
 #include <qwen.h>
+
+#ifdef BODYCLOCK_QTTS_VULKAN_PROBE
+#    include <vulkan/vulkan.h>
+#endif
 #endif
 
 namespace bodyclock {
@@ -66,6 +70,18 @@ void set_env_default(const char* name, const char* value) {
     _putenv_s(name, value);
 #else
     setenv(name, value, 1);
+#endif
+}
+
+// Taking a variable OUT of the environment, which is a different operation from
+// setting it to "0" and the only one that works on the three below: ggml reads
+// two of them for PRESENCE -- `prefer_host_memory = getenv(...) != nullptr` --
+// so "0" is still a yes. An empty value is how the Windows CRT spells removal.
+void unset_env(const char* name) {
+#if defined(_WIN32)
+    _putenv_s(name, "");
+#else
+    unsetenv(name);
 #endif
 }
 
@@ -195,7 +211,104 @@ bool read_reference_wav(const std::string& path, std::vector<float>* out, std::s
 }
 
 #ifdef BODYCLOCK_QTTS_VULKAN
+#ifdef BODYCLOCK_QTTS_VULKAN_PROBE
+// What kind of memory does this machine's GPU have?
+//
+// THREE answers and not two, because "the probe failed" and "the GPU shares
+// system memory" are the same word in a boolean and cost thirty times different
+// amounts to confuse. That confusion is exactly what happened: a probe that
+// returned false silently on the first load of a process put a gigabyte of
+// weights in system RAM, and since ggml reads the environment only when it
+// CREATES a device, the correct answers from every later load arrived too late
+// to move them.
+enum class GpuMemory {
+    Shared,     // integrated: the GPU reads the DRAM the CPU does
+    Dedicated,  // a discrete card, with memory of its own across a bus
+    Unknown     // the probe could not say, and says which way it failed
+};
+
+// Asked with a throwaway instance rather than of ggml, because ggml reads the
+// three variables below when it CREATES a device and never again, so the answer
+// is needed before there is a ggml device to ask. An instance the loader throws
+// away again costs a few milliseconds against a model load of a second.
+//
+// "Any discrete device present" makes the answer Dedicated, rather than asking
+// which device ggml will pick, because ggml picks later and by the same rule --
+// its device list puts discrete ahead of integrated and it takes the first GPU.
+// On a machine with both, both of us say discrete.
+GpuMemory vulkan_gpu_memory() {
+    VkApplicationInfo app{};
+    app.sType      = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    app.apiVersion = VK_API_VERSION_1_0;
+
+    VkInstanceCreateInfo ci{};
+    ci.sType            = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    ci.pApplicationInfo = &app;
+
+    VkInstance     instance = VK_NULL_HANDLE;
+    const VkResult rc       = vkCreateInstance(&ci, nullptr, &instance);
+    if (rc != VK_SUCCESS) {
+        platform::log_warn("qtts: GPU probe: vkCreateInstance failed (%d)", static_cast<int>(rc));
+        return GpuMemory::Unknown;
+    }
+
+    uint32_t       count = 0;
+    const VkResult n_rc  = vkEnumeratePhysicalDevices(instance, &count, nullptr);
+    if (n_rc != VK_SUCCESS || count == 0) {
+        platform::log_warn("qtts: GPU probe: no physical devices (%d, count %u)",
+                           static_cast<int>(n_rc), count);
+        vkDestroyInstance(instance, nullptr);
+        return GpuMemory::Unknown;
+    }
+
+    std::vector<VkPhysicalDevice> devices(count);
+    const VkResult                e_rc = vkEnumeratePhysicalDevices(instance, &count, devices.data());
+    if (e_rc != VK_SUCCESS) {
+        platform::log_warn("qtts: GPU probe: enumerate failed (%d)", static_cast<int>(e_rc));
+        vkDestroyInstance(instance, nullptr);
+        return GpuMemory::Unknown;
+    }
+
+    bool discrete   = false;
+    bool integrated = false;
+    for (VkPhysicalDevice dev : devices) {
+        VkPhysicalDeviceProperties props{};
+        vkGetPhysicalDeviceProperties(dev, &props);
+        platform::log_info("qtts: GPU probe: %s (type %d)", props.deviceName,
+                           static_cast<int>(props.deviceType));
+        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+            discrete = true;
+        } else if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
+            integrated = true;
+        }
+    }
+    vkDestroyInstance(instance, nullptr);
+
+    // A CPU or virtual implementation -- SwiftShader, lavapipe -- is neither,
+    // and reaches Unknown rather than Shared. The tuning is about a real GPU's
+    // memory and has never been measured against a software one.
+    if (discrete) {
+        return GpuMemory::Dedicated;
+    }
+    return integrated ? GpuMemory::Shared : GpuMemory::Unknown;
+}
+#endif
+
 // The Vulkan backend's environment, set before the engine builds a backend.
+//
+// **All three are for a GPU that shares system memory**, and all three are
+// wrong on one that does not -- so a discrete card is asked about first and
+// gets ggml's own defaults. The one measured here cost 89.6 ms a frame on an
+// RTX 3090 for a 1.7B `Q4_K_M` talker, against 44.8 on a laptop's Arc iGPU:
+// PREFER_HOST_MEMORY had put a gigabyte of weights and 896 MB of KV cache in
+// system RAM, so every decode step crossed PCIe instead of reading the 936 GB/s
+// beside the chip.
+//
+// **Neither of the two booleans can be turned off from outside**, which is why
+// this is a branch in the code rather than a documented override. ggml reads
+// them for PRESENCE and not value -- `prefer_host_memory = getenv(...) !=
+// nullptr` -- so `GGML_VK_PREFER_HOST_MEMORY=0` in the environment still turns
+// it on. Only SUBALLOCATION_BLOCK_SIZE, which is parsed, can be overridden.
 //
 // **HarmonyOS kills an app that holds too much GPU memory**, with
 // `GPU_LEAK_KILL`, and it did: a 1.1 GB model was accounted 8.57 GB of GPU
@@ -221,9 +334,8 @@ bool read_reference_wav(const std::string& path, std::vector<float>* out, std::s
 // reserved and no allocation knob will help.
 //
 // Set here rather than in the build because these are properties of the device
-// the code is running on, not of how it was compiled, and because an override
-// from outside stays possible -- setenv's final 0 means anything already in the
-// environment wins.
+// the code is running on, not of how it was compiled -- which is the same
+// reason the discrete case is decided here too, at the only moment that knows.
 // DISABLE_MMVQ is the one of these three that is not about the phone, and the
 // only one measured to do anything. MMVQ is ggml's quantized mat-vec path, a
 // performance optimization -- and on this Intel driver turning it OFF made the
@@ -239,6 +351,50 @@ bool read_reference_wav(const std::string& path, std::vector<float>* out, std::s
 // of what disabling a lower precision should do -- unexplained, and enough not
 // to touch it.
 void apply_vulkan_env() {
+#if defined(__ANDROID__) || defined(__OHOS__)
+    // A phone's GPU reads the same DRAM the CPU does. That is not something to
+    // find out at runtime -- there is no phone where it is false -- so the probe
+    // does not run here at all and cannot fail here either.
+#else
+    // On a desktop the tuning has to be EARNED: only a GPU proven to share
+    // system memory gets it, and both of the other answers -- a discrete card,
+    // and a probe that could not say -- take ggml's defaults.
+    //
+    // The asymmetry is the whole design. Being wrong on an integrated GPU costs
+    // about 10% (design/voice.md has 78.3 against 71.0 ms a frame at `Q8_0`).
+    // Being wrong on a discrete card costs a factor of thirty, measured here:
+    // 2.8 ms a frame against 108.6. So Unknown lands on the cheap side.
+    //
+    // It is Unknown that this is really about. A boolean probe answered false
+    // for "integrated" and false for "I failed", and one silent failure on the
+    // first load of a process was enough: ggml reads the environment when it
+    // CREATES a device, so the correct answers from every later load arrived
+    // after the device they would have changed.
+#if defined(BODYCLOCK_QTTS_VULKAN_PROBE)
+    const GpuMemory mem = vulkan_gpu_memory();
+#else
+    const GpuMemory mem = GpuMemory::Unknown;
+#endif
+    if (mem != GpuMemory::Shared) {
+        // REMOVED, not just left unset, and that distinction cost an afternoon.
+        // Declining to set them does nothing about the two ways they arrive
+        // anyway: inherited from whatever launched the process -- a shell that
+        // once exported them for an experiment is enough -- and left behind by
+        // an earlier load in this one.
+        //
+        // This runs on EVERY load and not only the first, because ggml holds its
+        // device through a weak_ptr: when the last engine lets go the device is
+        // destroyed, and the next load builds a new one that reads all of this
+        // again.
+        unset_env("GGML_VK_PREFER_HOST_MEMORY");
+        unset_env("GGML_VK_SUBALLOCATION_BLOCK_SIZE");
+        unset_env("GGML_VK_DISABLE_MMVQ");
+        platform::log_info("qtts: %s -- ggml's Vulkan defaults, not the shared-memory tuning",
+                           mem == GpuMemory::Dedicated ? "discrete GPU" : "GPU memory unknown");
+        return;
+    }
+    platform::log_info("qtts: integrated GPU -- the shared-memory tuning");
+#endif
     set_env_default("GGML_VK_PREFER_HOST_MEMORY", "1");
     set_env_default("GGML_VK_SUBALLOCATION_BLOCK_SIZE", "67108864");
     set_env_default("GGML_VK_DISABLE_MMVQ", "1");
