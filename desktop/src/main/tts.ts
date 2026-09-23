@@ -108,6 +108,24 @@ function write(s: Stored): void {
 }
 
 /** True when this build has the engine at all (`build.cmd qtts` turns it on). */
+/**
+ * The two model files, for a lane that needs the same pair.
+ *
+ * Exposed rather than copied because they ARE the same files: reader.ts drives
+ * a second engine over this one's talker and tokenizer, and a second pair of
+ * pickers would be two places to keep right.
+ */
+export function paths(): { talkerPath: string; tokenizerPath: string } {
+  const s = read()
+  return { talkerPath: s.talkerPath, tokenizerPath: s.tokenizerPath }
+}
+
+/** The voice, by the same three routes, for the same reason as paths(). */
+export function voiceSettings(): { voice: string; speaker: string; seed: number } {
+  const s = read()
+  return { voice: s.voice, speaker: s.speaker, seed: s.seed }
+}
+
 export function available(): boolean {
   try {
     return core().nativeTtsAvailable() === 1

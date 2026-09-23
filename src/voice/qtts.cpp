@@ -342,13 +342,19 @@ struct Qtts::Impl {
     std::string speaker;
     std::vector<float> reference;   // mono 24 kHz, empty when none
     std::string reference_text;
+    // Clone mode A: the reference reduced to a speaker vector. Empty when the
+    // reference is mode B or absent. The two are mutually exclusive by
+    // construction -- setting either clears the other -- because qwen.h makes
+    // them mutually exclusive in the parameters.
+    std::vector<float> ref_spk_emb;
     // Cached at load, because say() has to know the checkpoint's kind to decide
     // which parameters are legal, and asking the engine per call would mean a
     // string compare against a pointer that only changes when the model does.
     std::string model_type;
     std::string error;
-    long long   seed;
-    int         top_k;      // 0 leaves qwentts.cpp's own default alone
+    long long    seed;
+    int          top_k;      // 0 leaves qwentts.cpp's own default alone
+    QttsSampling sampling;
     int         threads;    // 0 leaves its thread heuristic alone
     bool        streaming;
     LevelTrace  level;
@@ -525,6 +531,7 @@ bool Qtts::set_reference(const std::string& wav_path, const std::string& transcr
 
     m->reference.swap(pcm);
     m->reference_text = transcript;
+    m->ref_spk_emb.clear();   // mutually exclusive; see qwen.h
     // The frame count as well as the duration, because the frames are what it
     // costs: the reference sits in the talker's context for every step, so this
     // many frames of attention are added to each one. Asked of the model rather
@@ -535,9 +542,62 @@ bool Qtts::set_reference(const std::string& wav_path, const std::string& transcr
     return true;
 }
 
+bool Qtts::set_reference_voice(const std::string& wav_path) {
+    Impl* m = impl_;
+    m->error.clear();
+    if (wav_path.empty()) {
+        m->error = "a reference voice needs a WAV";
+        return false;
+    }
+    if (!m->ctx) {
+        // Not a detail that can be worked around by reordering the call later:
+        // the extraction runs the model's speaker encoder, so the model has to
+        // be there. Said plainly because the other setters are all load-order
+        // independent and this one is not.
+        m->error = "set_reference_voice needs a loaded model -- call it after load()";
+        return false;
+    }
+
+    std::vector<float> pcm;
+    std::string why;
+    if (!read_reference_wav(wav_path, &pcm, &why)) {
+        m->error = why;
+        platform::log_error("qtts: reference voice %s -- %s", wav_path.c_str(), why.c_str());
+        return false;
+    }
+
+    qt_voice_ref ref;
+    std::memset(&ref, 0, sizeof(ref));
+    const qt_status rc = qt_extract_voice_ref(m->ctx, &pcm[0], static_cast<int>(pcm.size()), &ref);
+    if (rc != QT_STATUS_OK || !ref.ref_spk_emb || ref.ref_spk_dim <= 0) {
+        const char* engine = qt_last_error();
+        m->error = std::string("could not extract a speaker embedding: ") +
+                   (engine && *engine ? engine : status_name(rc));
+        qt_voice_ref_free(&ref);
+        platform::log_error("qtts: %s", m->error.c_str());
+        return false;
+    }
+
+    // The embedding is copied out and everything else is dropped -- the codes
+    // in particular, which are what mode B would have carried and what makes it
+    // expensive. Nothing here keeps the recording.
+    m->ref_spk_emb.assign(ref.ref_spk_emb, ref.ref_spk_emb + ref.ref_spk_dim);
+    qt_voice_ref_free(&ref);
+
+    m->reference.clear();
+    m->reference_text.clear();
+
+    platform::log_info("qtts: reference voice from %.2f s of %s -- %d-dimension embedding, "
+                       "no context cost",
+                       static_cast<double>(pcm.size()) / sample_rate(), wav_path.c_str(),
+                       static_cast<int>(m->ref_spk_emb.size()));
+    return true;
+}
+
 void Qtts::clear_reference() {
     impl_->reference.clear();
     impl_->reference_text.clear();
+    impl_->ref_spk_emb.clear();
 }
 
 float Qtts::reference_seconds() const {
@@ -561,6 +621,14 @@ void Qtts::set_seed(long long seed) {
 
 void Qtts::set_top_k(int top_k) {
     impl_->top_k = top_k;
+}
+
+void Qtts::set_sampling(const QttsSampling& sampling) {
+    impl_->sampling = sampling;
+}
+
+const QttsSampling& Qtts::sampling() const {
+    return impl_->sampling;
 }
 
 void Qtts::set_threads(int n) {
@@ -636,9 +704,32 @@ bool Qtts::say(const std::string& text, QttsAudioSink sink, void* user_data, Qtt
         p.ref_audio_24k = &m->reference[0];
         p.ref_n_samples = static_cast<int>(m->reference.size());
         p.ref_text      = m->reference_text.c_str();
+    } else if (is_base && !m->ref_spk_emb.empty()) {
+        // Mode A. No ref_codes and no ref_text, which is exactly what selects
+        // it -- and what keeps the reference out of the per-frame attention.
+        p.ref_spk_emb = &m->ref_spk_emb[0];
+        p.ref_spk_dim = static_cast<int>(m->ref_spk_emb.size());
     }
 
     p.seed = static_cast<int64_t>(m->seed);
+
+    // Both stacks, every field. qt_tts_default_params has already seeded `p`
+    // from sampling-defaults.h and QttsSampling's own defaults are the same
+    // values, so this is a no-op until somebody changes one -- which is why it
+    // is assigned unconditionally rather than guarded field by field. A guard
+    // would also make "temperature 0", meaning argmax, unreachable.
+    p.temperature           = m->sampling.temperature;
+    p.top_k                 = m->sampling.top_k;
+    p.top_p                 = m->sampling.top_p;
+    p.repetition_penalty    = m->sampling.repetition_penalty;
+    p.subtalker_temperature = m->sampling.subtalker_temperature;
+    p.subtalker_top_k       = m->sampling.subtalker_top_k;
+    p.subtalker_top_p       = m->sampling.subtalker_top_p;
+
+    // set_top_k() last, because it is the older and narrower of the two doors
+    // onto the same field and a caller that used it meant it. > 0 only: that
+    // setter's contract is that 0 leaves the engine's choice alone, and the
+    // engine's choice now arrives through the struct above.
     if (m->top_k > 0) {
         p.top_k = m->top_k;
     }
@@ -767,6 +858,11 @@ bool Qtts::set_reference(const std::string&, const std::string&) {
     return false;
 }
 
+bool Qtts::set_reference_voice(const std::string&) {
+    impl_->error = "this build has no qwentts.cpp (BODYCLOCK_QTTS off)";
+    return false;
+}
+
 void Qtts::clear_reference() {}
 
 float Qtts::reference_seconds() const { return 0.0f; }
@@ -774,6 +870,14 @@ float Qtts::reference_seconds() const { return 0.0f; }
 void Qtts::set_seed(long long) {}
 
 void Qtts::set_top_k(int) {}
+
+void Qtts::set_sampling(const QttsSampling&) {}
+
+// The defaults, which is what a build with no engine would have used anyway.
+const QttsSampling& Qtts::sampling() const {
+    static const QttsSampling kDefaults;
+    return kDefaults;
+}
 
 void Qtts::set_threads(int) {}
 

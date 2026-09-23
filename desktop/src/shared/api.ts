@@ -74,6 +74,17 @@ export const CHANNELS = {
   /** Main -> renderer: PCM chunks, then the reply and its timings. */
   omniEvent: 'omni:event',
 
+  readerStatus: 'reader:status',
+  readerLoad: 'reader:load',
+  readerUnload: 'reader:unload',
+  readerSet: 'reader:set',
+  readerPickReference: 'reader:pickReference',
+  readerBegin: 'reader:begin',
+  readerFeed: 'reader:feed',
+  readerFinish: 'reader:finish',
+  /** Main -> renderer: PCM chunks in reading order, then the timings. */
+  readerEvent: 'reader:event',
+
   openExternal: 'shell:openExternal'
 } as const
 
@@ -187,6 +198,36 @@ export interface OmniEvent {
   error?: string
 }
 
+/** What the reading lane can do right now. */
+export interface ReaderStatus {
+  available: boolean
+  loaded: boolean
+  /** "voice_design", "base" or "custom_voice"; '' before a load. */
+  modelType: string
+  /**
+   * The recording every piece is anchored to. Base checkpoints only.
+   *
+   * Without one the pieces drift in register -- one sentence in sixteen came
+   * out five semitones low, heard as the voice changing mid-reply.
+   */
+  referenceWav: string
+  /** 0 means the core's measured default of 30. */
+  minChars: number
+  /** Route replies through this lane instead of speaking them at the end. */
+  enabled: boolean
+}
+
+/** One event from a reply being read as it is written. Audio is 24 kHz mono. */
+export interface ReaderEvent {
+  type: 'audio' | 'end' | 'error'
+  pcm?: Float32Array
+  /** On 'audio': which piece these samples belong to, so seams can be logged. */
+  sentence?: number
+  /** On 'end': the timings, as JSON. See bodyclock.h. */
+  stats?: string
+  error?: string
+}
+
 export interface BodyclockApi {
   /** Whether the addon loaded, and what it can do. Read once at startup. */
   coreStatus(): Promise<CoreStatus>
@@ -290,6 +331,29 @@ export interface BodyclockApi {
     /** False when the engine is not loaded or is already answering. */
     ask(prompt: string): Promise<boolean>
     onEvent(listener: (ev: OmniEvent) => void): () => void
+  }
+
+  /**
+   * Reading a reply aloud while the model is still writing it.
+   *
+   * A second engine over the speech lane's own two GGUFs, so loading this one
+   * unloads that one. What it buys is the seconds a single utterance cannot
+   * recover: the text is what the engine would otherwise be waiting for.
+   */
+  reader: {
+    status(): Promise<ReaderStatus>
+    load(): Promise<string>
+    unload(): Promise<void>
+    set(patch: { enabled?: boolean; minChars?: number }): Promise<ReaderStatus>
+    /** Pick the reference recording. Mono 16-bit at 24 kHz, or it is refused. */
+    pickReference(): Promise<string | null>
+    /** Open a stream. False when the engine is not loaded or one is open. */
+    begin(): Promise<boolean>
+    /** Add text. Returns at once; the audio arrives through onEvent. */
+    feed(delta: string): Promise<boolean>
+    /** No more text. The 'end' event follows once the last sample is out. */
+    finish(): Promise<void>
+    onEvent(listener: (ev: ReaderEvent) => void): () => void
   }
 
   /** Open a vendor's sign-up page in the user's browser, never in a window here. */

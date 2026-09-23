@@ -23,6 +23,7 @@
 #include "voice/omni.hpp"
 #include "voice/prosody.hpp"
 #include "voice/qtts.hpp"
+#include "voice/reader.hpp"
 #include "voice/sensevoice.hpp"
 
 #include <chrono>
@@ -1628,4 +1629,221 @@ extern "C" int bodyclock_bundle_extract(const char* bundle_path,
         on_progress ? bundle_progress_bridge : 0,
         on_progress ? &bridge : 0);
     return ok ? 0 : 1;
+}
+
+
+//------------------------------------------------------------------------------
+// Reading a reply aloud while it is still being written
+//------------------------------------------------------------------------------
+
+namespace {
+
+// A SECOND engine instance over the same weights as the lane above, which is
+// why bodyclock.h says to load one or the other. Kept separate rather than
+// folded into tts() because that lane works and this one is being judged; the
+// day it wins, the other goes rather than the two being merged.
+std::mutex& reader_mutex() {
+    static std::mutex m;
+    return m;
+}
+
+bodyclock::voice::Reader& reader() {
+    static bodyclock::voice::Reader r;
+    return r;
+}
+
+std::string& reader_buffer() {
+    static thread_local std::string buf;
+    return buf;
+}
+
+// NOT thread_local, for the reason tts_error() is not: the engine is one object
+// and a host that begins on one thread and asks why on another should be told.
+std::string& reader_error() {
+    static std::string buf;
+    return buf;
+}
+
+std::string& reader_model_type() {
+    static std::string buf;
+    return buf;
+}
+
+struct ReaderSinkBridge {
+    bodyclock_reader_audio_handler handler;
+    void*                          user_data;
+};
+
+// Held for the length of the stream, because begin() returns and the sink is
+// called from threads the Reader owns. A single stream at a time, which the
+// Reader enforces on its own side by refusing a second begin().
+ReaderSinkBridge& reader_bridge() {
+    static ReaderSinkBridge bridge = {0, 0};
+    return bridge;
+}
+
+bool reader_sink(const float* pcm, size_t n_samples, int sentence, bool last, void* user_data) {
+    ReaderSinkBridge* bridge = static_cast<ReaderSinkBridge*>(user_data);
+    if (!bridge || !bridge->handler) {
+        return true;
+    }
+    return bridge->handler(pcm, static_cast<int>(n_samples), sentence, last ? 1 : 0,
+                           bridge->user_data) != 0;
+}
+
+}  // namespace
+
+extern "C" int bodyclock_reader_available(void) {
+    return bodyclock::voice::Reader::available() ? 1 : 0;
+}
+
+extern "C" int bodyclock_reader_load(const char* talker_path, const char* codec_path,
+                                     int voices) {
+    if (blank(talker_path) || blank(codec_path)) {
+        reader_error() = "talker_path and codec_path are both required";
+        bodyclock::platform::log_warn("bodyclock_reader_load: %s", reader_error().c_str());
+        return 1;
+    }
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    if (!reader().load(talker_path, codec_path, voices)) {
+        reader_error() = reader().last_error();
+        return 1;
+    }
+    reader_error().clear();
+    reader_model_type() = reader().model_type();
+    return 0;
+}
+
+extern "C" int bodyclock_reader_loaded(void) {
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    return reader().loaded() ? 1 : 0;
+}
+
+extern "C" void bodyclock_reader_unload(void) {
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    reader().unload();
+    reader_model_type().clear();
+}
+
+extern "C" const char* bodyclock_reader_model_type(void) {
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    reader_model_type() = reader().model_type();
+    return reader_model_type().c_str();
+}
+
+extern "C" void bodyclock_reader_set_voice(const char* instruct) {
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    reader().set_voice(instruct ? instruct : "");
+}
+
+extern "C" void bodyclock_reader_set_speaker(const char* name) {
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    reader().set_speaker(name ? name : "");
+}
+
+extern "C" int bodyclock_reader_set_reference_voice(const char* wav_path) {
+    if (blank(wav_path)) {
+        reader_error() = "a reference voice needs a WAV";
+        return 1;
+    }
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    if (!reader().set_reference_voice(wav_path)) {
+        reader_error() = reader().last_error();
+        return 1;
+    }
+    reader_error().clear();
+    return 0;
+}
+
+extern "C" void bodyclock_reader_set_seed(long long seed) {
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    reader().set_seed(seed);
+}
+
+extern "C" void bodyclock_reader_set_split(int min_chars, int max_chars, int tail_chars) {
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    // Each field independently, so a host can set one and leave the measured
+    // defaults in place for the others.
+    bodyclock::voice::SplitOptions opt = reader().split();
+    if (min_chars > 0) {
+        opt.min_chars = static_cast<size_t>(min_chars);
+    }
+    if (max_chars > 0) {
+        opt.max_chars = static_cast<size_t>(max_chars);
+    }
+    if (tail_chars > 0) {
+        opt.tail_chars = static_cast<size_t>(tail_chars);
+    }
+    reader().set_split(opt);
+}
+
+extern "C" void bodyclock_reader_set_clause_cuts(int on) {
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    bodyclock::voice::SplitOptions opt = reader().split();
+    opt.clause_cuts = (on != 0);
+    reader().set_split(opt);
+}
+
+extern "C" void bodyclock_reader_set_threads(int threads) {
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    reader().set_threads(threads);
+}
+
+extern "C" int bodyclock_reader_begin(bodyclock_reader_audio_handler on_audio,
+                                      void* user_data) {
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    reader_bridge().handler   = on_audio;
+    reader_bridge().user_data = user_data;
+    if (!reader().begin(on_audio ? reader_sink : 0, on_audio ? &reader_bridge() : 0)) {
+        reader_error() = reader().last_error();
+        return 0;
+    }
+    reader_error().clear();
+    return 1;
+}
+
+extern "C" int bodyclock_reader_feed(const char* delta) {
+    if (delta == 0 || *delta == 0) {
+        return 1;   // nothing to add is not a failure
+    }
+    // **No lock.** feed() is called from the thread producing the text, often
+    // once per token, while the engines are running behind the Reader's own
+    // mutex -- taking this one would serialise the two for no reason. The
+    // Reader guards its own state; what this mutex protects is the singleton's
+    // configuration, and feed() changes none of it.
+    return reader().feed(delta) ? 1 : 0;
+}
+
+extern "C" const char* bodyclock_reader_finish(void) {
+    bodyclock::voice::ReaderResult result;
+    // Also without the lock: finish() BLOCKS for the rest of the speech, and
+    // holding the configuration mutex for that long would freeze every status
+    // call a host makes meanwhile. The omni lane learned this the hard way --
+    // a status read from the renderer stalled the whole main thread.
+    const bool ok = reader().finish(&result);
+    if (!ok) {
+        reader_error() = reader().last_error();
+        return 0;
+    }
+    reader_error().clear();
+
+    rapidjson::StringBuffer buf;
+    rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+    w.StartObject();
+    w.Key("sentences");         w.Int(result.sentences);
+    w.Key("speechSeconds");     w.Double(result.speech_seconds);
+    w.Key("seconds");           w.Double(result.elapsed);
+    w.Key("realtime");
+    w.Double(result.speech_seconds > 0.0f ? result.elapsed / result.speech_seconds : 0.0);
+    w.Key("firstAudioSeconds"); w.Double(result.first_audio_seconds);
+    w.Key("starvedSeconds");    w.Double(result.starved_seconds);
+    w.Key("heldSeconds");       w.Double(result.held_seconds);
+    w.EndObject();
+
+    reader_buffer().assign(buf.GetString(), buf.GetSize());
+    return reader_buffer().c_str();
+}
+
+extern "C" const char* bodyclock_reader_last_error(void) {
+    return reader_error().c_str();
 }

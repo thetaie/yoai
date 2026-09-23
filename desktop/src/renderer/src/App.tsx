@@ -17,6 +17,7 @@ import {
 } from '@shared/store'
 import { newSessionId, runTurn } from './chatEngine'
 import * as omni from './omni'
+import * as reader from './reader'
 import * as tts from './tts'
 import { Composer } from './components/Composer'
 import { Settings } from './components/Settings'
@@ -315,10 +316,25 @@ export function App(): JSX.Element {
       }
 
       const { systemPrompt } = await window.bodyclock.chat.settings()
+
+      // The reading lane, decided BEFORE the turn starts because it has to be
+      // open before the first token arrives. Asked fresh for the same reason
+      // the speak flag is: the models load in the background.
+      const reading = await reader.ready()
+      if (reading) {
+        await reader.begin()
+      }
+
       cancelerRef.current = runTurn(activeId, withUser, systemPrompt, {
         onDelta: (t) => {
           textRef.current += t
           setStreamText(textRef.current)
+          // The same delta the transcript gets. Not awaited: this runs once per
+          // token, and an IPC round trip per token would put the page's own
+          // rendering behind the main process.
+          if (reading) {
+            reader.feed(t)
+          }
         },
         onThinking: (t) => {
           thinkRef.current += t
@@ -361,7 +377,15 @@ export function App(): JSX.Element {
           //
           // Skipped when the user stopped the turn: they asked for silence.
           const reply = textRef.current
-          if (!aborted && reply.length > 0) {
+          if (reading) {
+            // The stream has to be closed either way -- there are engines and
+            // threads behind it -- but on an abort the audio is dropped rather
+            // than played, which the player's stop() below does.
+            void reader.finish().catch(() => undefined)
+            if (aborted) {
+              void tts.stop()
+            }
+          } else if (!aborted && reply.length > 0) {
             void (async () => {
               const st = await window.bodyclock.tts.status()
               if (st.available && st.loaded && st.autoSpeak) {

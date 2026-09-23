@@ -75,6 +75,35 @@ const JUDGE_SECONDS = 0.25
  */
 const GUARD = 0.05
 
+/**
+ * How close to the end of what is already scheduled a chunk is released even
+ * though nothing has arrived behind it.
+ *
+ * One chunk is always held back, so that the chunk being scheduled has a known
+ * successor and therefore cannot be the edge of a hole. That only works while
+ * the producer is ahead; when it stalls, the held chunk has to go out anyway or
+ * the speaker runs dry early for no reason. This is how long before the
+ * scheduled audio ends that happens -- and the chunk released this way is the
+ * one whose tail gets shaped, because a hole may follow it.
+ */
+const RESERVE_SECONDS = 0.2
+
+/**
+ * The ramp put on both sides of a hole.
+ *
+ * A chunk is an arbitrary slice of the waveform: its last sample is wherever
+ * the engine's buffer happened to end, at full speech amplitude. When the next
+ * chunk is late, the output steps from that value to zero and then back up to
+ * another arbitrary value -- two discontinuities, and a click at each. Measured
+ * on this lane, a reply ran at 0.96x with 0.92 s of starvation spread over a
+ * handful of spots, which is heard as crackle rather than as pauses.
+ *
+ * 4 ms is short enough not to be heard as a dip in the speech and long enough
+ * that the step becomes a ramp. It is applied ONLY at a hole; an ordinary chunk
+ * boundary is sample-exact and must not be touched.
+ */
+const EDGE_SECONDS = 0.004
+
 export interface Player {
   /** Queue one chunk of mono 24 kHz samples. */
   push(pcm: Float32Array): void
@@ -84,6 +113,16 @@ export interface Player {
   stop(): void
   /** Whether anything is scheduled and has not finished. */
   playing(): boolean
+  /**
+   * Seconds of audio this stream should have in hand before it starts.
+   *
+   * Per lane, because the cushion has to cover what that lane stalls for and
+   * the lanes stall for different things. Speech output waits for nothing once
+   * it has the text; the reading lane waits for the language model between
+   * every piece. Set before begin, and reset to the default when the stream
+   * ends, so a lane that does not ask gets PRIME_SECONDS.
+   */
+  prime(seconds: number): void
 }
 
 /**
@@ -106,6 +145,19 @@ export function createPlayer(): Player {
   let pending: Float32Array[] = []
   let pendingSeconds = 0
   let started = false
+  /** Seconds of audio to gather first, which the lane may raise. */
+  let primeSeconds = PRIME_SECONDS
+
+  /**
+   * Chunks that have arrived but are not scheduled yet; see RESERVE_SECONDS.
+   *
+   * At most one is normally held. It is the reserve that lets a hole be shaped:
+   * a chunk with a successor in hand is known not to be followed by one.
+   */
+  let queue: Float32Array[] = []
+  /** Set when the last chunk out was tail-shaped, so the next one fades in. */
+  let fadeInNext = false
+  let timer: ReturnType<typeof setTimeout> | null = null
 
   /** How the producer is doing, for the decision REALTIME_MARGIN describes. */
   let firstPushAt = 0
@@ -147,20 +199,43 @@ export function createPlayer(): Player {
     window.addEventListener(ev, unlock, { once: true, capture: true })
   }
 
-  const schedule = (pcm: Float32Array): void => {
+  const schedule = (pcm: Float32Array, fadeIn: boolean, fadeOut: boolean): void => {
     const c = ensure()
+
+    // Asked BEFORE the samples are shaped, because an underrun is the other
+    // way a hole opens in front of this chunk and it wants the same ramp. The
+    // reserve shapes the holes it can see coming; this catches the rest. Safe
+    // to ask this early: begin() moves nextAt past currentTime before anything
+    // is scheduled, so it is never true on a stream's first chunk.
+    const late = nextAt < c.currentTime
 
     const buf = c.createBuffer(1, pcm.length, SAMPLE_RATE)
     // getChannelData().set() rather than copyToChannel(): the samples arrive
     // over IPC as a plain Float32Array, whose buffer type TypeScript will not
     // narrow to the ArrayBuffer copyToChannel now demands. Same copy either way.
-    buf.getChannelData(0).set(pcm)
+    const data = buf.getChannelData(0)
+    data.set(pcm)
+
+    // Shaped in the AudioBuffer rather than in `pcm`, which belongs to the
+    // caller and is the same array the statistics were taken from.
+    if (fadeIn || fadeOut || late) {
+      const edge = Math.min(Math.round(EDGE_SECONDS * SAMPLE_RATE), data.length)
+      for (let i = 0; i < edge; i++) {
+        const g = i / edge
+        if (fadeIn || late) {
+          data[i] *= g
+        }
+        if (fadeOut) {
+          data[data.length - 1 - i] *= g
+        }
+      }
+    }
 
     const src = c.createBufferSource()
     src.buffer = buf
     src.connect(c.destination)
 
-    if (nextAt < c.currentTime) {
+    if (late) {
       // Its slot has already gone past: the speech has a hole exactly here.
       // Reported rather than silently patched, because a hole means the
       // producer is losing ground and the only useful response is to know it.
@@ -188,6 +263,66 @@ export function createPlayer(): Player {
     }
   }
 
+  // Function declarations rather than consts: arm() rearms from release() and
+  // release() is what arm()'s timer calls, so one of the two has to be hoisted.
+  /** Wake up just before the scheduled audio runs out, and let the reserve go. */
+  function arm(): void {
+    if (timer !== null) {
+      clearTimeout(timer)
+      timer = null
+    }
+    if (queue.length === 0 || ctx === null) {
+      return
+    }
+    const wait = (nextAt - ctx.currentTime - RESERVE_SECONDS) * 1000
+    timer = setTimeout(
+      () => {
+        timer = null
+        release(true)
+      },
+      wait > 0 ? wait : 0
+    )
+  }
+
+  /**
+   * Schedule what can be scheduled safely, holding one chunk back.
+   *
+   * `stalled` says the wait is over: the held chunk goes out even though
+   * nothing has arrived behind it, and because it may now be the last thing
+   * heard before a hole, its tail is ramped down. Whatever comes next is ramped
+   * up to match. While the producer is ahead this never fires and the chunk
+   * boundaries stay sample-exact, which is the case that must not be touched.
+   */
+  function release(stalled: boolean): void {
+    while (queue.length > 0 && (stalled || queue.length > 1)) {
+      const pcm = queue.shift()
+      if (pcm === undefined) {
+        break
+      }
+      // A chunk with nothing behind it is the one a hole can follow.
+      const exposed = queue.length === 0
+      schedule(pcm, fadeInNext, exposed)
+      fadeInNext = exposed
+    }
+    arm()
+  }
+
+  /** Everything left, with no tail shaping: the stream ended, it did not stall. */
+  const drain = (): void => {
+    while (queue.length > 0) {
+      const pcm = queue.shift()
+      if (pcm === undefined) {
+        break
+      }
+      schedule(pcm, fadeInNext, false)
+      fadeInNext = false
+    }
+    if (timer !== null) {
+      clearTimeout(timer)
+      timer = null
+    }
+  }
+
   /** Begin, with everything gathered so far laid end to end. */
   const begin = (): void => {
     const c = ensure()
@@ -198,10 +333,11 @@ export function createPlayer(): Player {
     // one. stop() sets nextAt to 0, so an interrupted stream still starts now.
     nextAt = Math.max(nextAt, c.currentTime + GUARD)
     for (const p of pending) {
-      schedule(p)
+      queue.push(p)
     }
     pending = []
     pendingSeconds = 0
+    release(false)
   }
 
   /**
@@ -210,18 +346,26 @@ export function createPlayer(): Player {
    * One utterance is one stream, and every stream is judged on its own: the
    * producer's rate is a property of the lane that is running now, so a reply
    * spoken by omni must not leave its verdict behind for the next one spoken by
-   * the speech lane. They share this player because the speaker is one.
+   * the speech lane. They share this player because the speaker is one. The
+   * prime goes back to the default for the same reason.
    */
   const endStream = (): void => {
     started = false
     pending = []
     pendingSeconds = 0
+    queue = []
+    fadeInNext = false
+    if (timer !== null) {
+      clearTimeout(timer)
+      timer = null
+    }
     firstPushAt = 0
     firstBlockSeconds = 0
     blocksIn = 0
     totalSeconds = 0
     underruns = 0
     verdict = null
+    primeSeconds = PRIME_SECONDS
   }
 
   /**
@@ -250,14 +394,15 @@ export function createPlayer(): Player {
         firstBlockSeconds = seconds
       }
       if (started) {
-        schedule(pcm)
+        queue.push(pcm)
+        release(false)
         return
       }
 
       pending.push(pcm)
       pendingSeconds += seconds
 
-      if (verdict === 'hold' || pendingSeconds < PRIME_SECONDS) {
+      if (verdict === 'hold' || pendingSeconds < primeSeconds) {
         return
       }
       const rate = producerRate()
@@ -280,6 +425,7 @@ export function createPlayer(): Player {
     },
 
     flush(): void {
+      const wasStreaming = started
       // Everything held, and anything shorter than the prime, which would
       // otherwise never be heard at all.
       if (!started && pending.length > 0) {
@@ -289,9 +435,20 @@ export function createPlayer(): Player {
             `gathered over ${waited} s in ${blocksIn} block(s)`
         )
         begin()
-      } else if (started) {
+      }
+      // The reserve exists to shape a hole, and there is nothing left to hold
+      // it against.
+      drain()
+      if (wasStreaming) {
+        // The SUSTAINED rate, which is the one that decided how this sounded
+        // and is not the one the verdict was taken on. That was measured on the
+        // first two blocks -- the engine's own speed -- while this includes
+        // everything the lane waits for between blocks. On the reading lane the
+        // two are far apart: 1.4x at the verdict, 0.96x over the reply.
+        const elapsed = (performance.now() - firstPushAt) / 1000
         console.log(
-          `[audio] streamed ${totalSeconds.toFixed(1)} s in ${blocksIn} block(s), ` +
+          `[audio] streamed ${totalSeconds.toFixed(1)} s in ${blocksIn} block(s) ` +
+            `over ${elapsed.toFixed(1)} s (${(totalSeconds / elapsed).toFixed(2)}x sustained), ` +
             `${underruns} underrun(s)`
         )
       }
@@ -317,7 +474,11 @@ export function createPlayer(): Player {
     },
 
     playing(): boolean {
-      return live.length > 0
+      return live.length > 0 || queue.length > 0
+    },
+
+    prime(seconds: number): void {
+      primeSeconds = Number.isFinite(seconds) && seconds > 0 ? seconds : PRIME_SECONDS
     }
   }
 }

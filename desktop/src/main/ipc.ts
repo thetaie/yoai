@@ -12,7 +12,14 @@
  */
 import { BrowserWindow, dialog, ipcMain, shell, WebContents } from 'electron'
 import { basename } from 'node:path'
-import { CHANNELS, ChatSettings, OmniStatus, PickedModel, TtsStatus } from '../shared/api'
+import {
+  CHANNELS,
+  ChatSettings,
+  OmniStatus,
+  PickedModel,
+  ReaderStatus,
+  TtsStatus
+} from '../shared/api'
 import { ChatMessage, WireMessage } from '../shared/chat'
 import { KIND_LOCAL, ModelConfig } from '../shared/provider'
 import { CoreStatus, InterfacePrefs } from '../shared/store'
@@ -21,6 +28,7 @@ import * as chat from './chat'
 import * as keystore from './keystore'
 import * as models from './models'
 import * as omni from './omni'
+import * as reader from './reader'
 import * as prefs from './prefs'
 import * as sessions from './sessions'
 import * as tts from './tts'
@@ -383,6 +391,71 @@ export function registerHandlers(): void {
       }
     })
   })
+
+  //----------------------------------------------------------------------------
+  // Reading a reply while it is still being written
+  //----------------------------------------------------------------------------
+
+  handle<[], ReaderStatus>(CHANNELS.readerStatus, () => reader.status())
+  handle<[], string>(CHANNELS.readerLoad, () => reader.load())
+  handle<[], void>(CHANNELS.readerUnload, () => reader.unload())
+
+  handle<[{ enabled?: boolean; minChars?: number }], ReaderStatus>(CHANNELS.readerSet, (patch) => {
+    if (typeof patch?.enabled === 'boolean') reader.setEnabled(patch.enabled)
+    if (typeof patch?.minChars === 'number') reader.setMinChars(patch.minChars)
+    return reader.status()
+  })
+
+  handle<[], string | null>(CHANNELS.readerPickReference, async () => {
+    const win = BrowserWindow.getFocusedWindow()
+    const opts = {
+      title: 'Pick the reference recording',
+      properties: ['openFile' as const],
+      filters: [{ name: 'WAV', extensions: ['wav'] }]
+    }
+    const result = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+    if (result.canceled || result.filePaths.length === 0) {
+      return null
+    }
+    reader.setReferenceWav(result.filePaths[0])
+    return result.filePaths[0]
+  })
+
+  // The stream itself. begin() installs a sink that forwards to the window that
+  // asked; feed() and finish() are fire-and-forget from the renderer's side,
+  // and the audio comes back on readerEvent either way.
+  ipcMain.handle(CHANNELS.readerBegin, (event) => {
+    const sender = event.sender
+    const askedAt = Date.now()
+    let forwarded = 0
+
+    return reader.begin(
+      (pcm, sentence) => {
+        if (sender.isDestroyed()) {
+          return
+        }
+        forwarded++
+        if (forwarded === 1) {
+          console.log(`[reader] first audio forwarded at ${Date.now() - askedAt} ms`)
+        }
+        sender.send(CHANNELS.readerEvent, { type: 'audio', pcm, sentence })
+      },
+      (stats, error) => {
+        if (sender.isDestroyed()) {
+          return
+        }
+        if (error.length > 0) {
+          sender.send(CHANNELS.readerEvent, { type: 'error', error })
+          return
+        }
+        console.log(`[reader] ${stats}`)
+        sender.send(CHANNELS.readerEvent, { type: 'end', stats })
+      }
+    )
+  })
+
+  handle<[string], boolean>(CHANNELS.readerFeed, (delta) => reader.feed(String(delta ?? '')))
+  handle<[], void>(CHANNELS.readerFinish, () => reader.finish())
 
   //----------------------------------------------------------------------------
   // Shell

@@ -20,7 +20,7 @@ import {
   modelId,
   modelLabel
 } from '@shared/provider'
-import type { OmniStatus, TtsStatus } from '@shared/api'
+import type { ReaderStatus, OmniStatus, TtsStatus } from '@shared/api'
 import type { CoreStatus, InterfacePrefs } from '@shared/store'
 import { FAMILY_LABEL, S } from '../strings'
 import * as tts from '../tts'
@@ -76,6 +76,11 @@ export function Settings({
   } | null>(null)
   const [prompt, setPrompt] = useState<string | null>(null)
   const [ttsStatus, setTtsStatus] = useState<TtsStatus | null>(null)
+  const [readerStatus, setReaderStatus] = useState<ReaderStatus | null>(null)
+  const [readerBusy, setReaderBusy] = useState(false)
+  const [readerNote, setReaderNote] = useState<{ text: string; tone: 'danger' | 'success' } | null>(
+    null
+  )
   const [omniStatus, setOmniStatus] = useState<OmniStatus | null>(null)
   const [omniBusy, setOmniBusy] = useState(false)
   /**
@@ -180,6 +185,7 @@ export function Settings({
 
   const refreshOmni = async (): Promise<void> => {
     setOmniStatus(await window.bodyclock.omni.status())
+    setReaderStatus(await window.bodyclock.reader.status())
   }
 
   useEffect(() => {
@@ -208,6 +214,37 @@ export function Settings({
   const unloadOmni = async (): Promise<void> => {
     await window.bodyclock.omni.unload()
     await refreshOmni()
+  }
+
+  const pickReaderRef = async (): Promise<void> => {
+    if ((await window.bodyclock.reader.pickReference()) !== null) {
+      setReaderStatus(await window.bodyclock.reader.status())
+    }
+  }
+
+  const loadReader = async (): Promise<void> => {
+    setReaderBusy(true)
+    setReaderNote(null)
+    const reason = await window.bodyclock.reader.load()
+    setReaderBusy(false)
+    setReaderStatus(await window.bodyclock.reader.status())
+    // Loading this one unloads the speech lane, so that status is stale now.
+    setTtsStatus(await window.bodyclock.tts.status())
+    setReaderNote(
+      reason.length === 0
+        ? { text: S.settingsReaderLoaded, tone: 'success' }
+        : { text: reason, tone: 'danger' }
+    )
+  }
+
+  const unloadReader = async (): Promise<void> => {
+    await window.bodyclock.reader.unload()
+    setReaderStatus(await window.bodyclock.reader.status())
+    setReaderNote(null)
+  }
+
+  const setReader = async (patch: { enabled?: boolean; minChars?: number }): Promise<void> => {
+    setReaderStatus(await window.bodyclock.reader.set(patch))
   }
 
   const setOmni = async (patch: { ditSteps?: number; enabled?: boolean }): Promise<void> => {
@@ -714,6 +751,82 @@ export function Settings({
                   {S.settingsOmniEnabled}
                 </label>
                 <span className="field-note">{S.settingsOmniEnabledNote}</span>
+              </div>
+            </>
+          )}
+        </section>
+
+        {/*------------------------------------------------------------------*/}
+        <section className="section">
+          <h3>{S.settingsReader}</h3>
+          <p>{S.settingsReaderIntro}</p>
+          {readerStatus !== null && !readerStatus.available ? (
+            <p className="field-note" data-tone="danger">
+              {S.settingsReaderUnavailable}
+            </p>
+          ) : (
+            <>
+              <div className="card">
+                <div className="row">
+                  <span className="row-label">
+                    {S.settingsReaderRef}
+                    <div className="path">
+                      {readerStatus !== null && readerStatus.referenceWav.length > 0
+                        ? readerStatus.referenceWav
+                        : S.settingsReaderRefNone}
+                    </div>
+                  </span>
+                  <button className="btn" onClick={() => void pickReaderRef()}>
+                    {S.settingsReaderRefPick}
+                  </button>
+                </div>
+              </div>
+              <span className="field-note">{S.settingsReaderRefNote}</span>
+
+              <div className="row" style={{ marginTop: 10, gap: 8 }}>
+                {readerStatus?.loaded === true ? (
+                  <button className="btn" onClick={() => void unloadReader()}>
+                    {S.settingsReaderUnload}
+                  </button>
+                ) : (
+                  <button className="btn" disabled={readerBusy} onClick={() => void loadReader()}>
+                    {readerBusy ? S.settingsReaderLoading : S.settingsReaderLoad}
+                  </button>
+                )}
+                {readerNote !== null && (
+                  <span className="field-note" data-tone={readerNote.tone}>
+                    {readerNote.text}
+                  </span>
+                )}
+              </div>
+
+              {readerStatus !== null && (
+                <div className="field" style={{ marginTop: 12 }}>
+                  <label htmlFor="readerMin">{S.settingsReaderMin}</label>
+                  <input
+                    id="readerMin"
+                    className="control"
+                    type="number"
+                    defaultValue={readerStatus.minChars}
+                    onBlur={(e) =>
+                      void setReader({ minChars: Number.parseInt(e.target.value, 10) })
+                    }
+                  />
+                  <span className="field-note">{S.settingsReaderMinNote}</span>
+                </div>
+              )}
+
+              <div className="field" style={{ marginTop: 12 }}>
+                <label htmlFor="readerOn" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    id="readerOn"
+                    type="checkbox"
+                    checked={readerStatus?.enabled === true}
+                    onChange={(e) => void setReader({ enabled: e.target.checked })}
+                  />
+                  {S.settingsReaderEnabled}
+                </label>
+                <span className="field-note">{S.settingsReaderEnabledNote}</span>
               </div>
             </>
           )}

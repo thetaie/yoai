@@ -56,6 +56,24 @@ namespace voice {
 
 // What one synthesis produced. Every duration is wall clock from a steady clock
 // -- see the note in omni.hpp for why that is spelled out.
+// Both sampling stacks, with qwentts.cpp's own defaults.
+//
+// The values here MATCH sampling-defaults.h, so a default-constructed one
+// changes nothing -- which is the point: this struct was added to turn one
+// field down, not to re-tune the engine. See Qtts::set_sampling.
+struct QttsSampling {
+    // The talker, drawing c0: what is said, and its rhythm.
+    float temperature        = 0.9f;
+    int   top_k              = 50;
+    float top_p              = 1.0f;
+    float repetition_penalty = 1.05f;
+
+    // The sub-talker, drawing the acoustic codes: timbre and register.
+    float subtalker_temperature = 0.9f;
+    int   subtalker_top_k       = 50;
+    float subtalker_top_p       = 1.0f;
+};
+
 struct QttsResult {
     // Seconds of audio, at 24000 Hz.
     float speech_seconds = 0.0f;
@@ -256,6 +274,33 @@ public:
     //
     // Returns false with last_error() set if the file will not load.
     bool set_reference(const std::string& wav_path, const std::string& transcript);
+
+    // The same recording, WITHOUT its transcript: the voice as a single
+    // embedding rather than as audio held in context.
+    //
+    // qwen.h calls these clone mode A and mode B, and the difference is the
+    // whole cost of the feature. Mode B keeps the reference's codes in the
+    // talker's context, so every generated frame attends over them -- measured
+    // on this desktop at RTF 1.97 against VoiceDesign's 1.16, which is why the
+    // Base checkpoint was set aside. **Mode A had never been measured, and it
+    // is nearly free**: back to back on one passage, RTF 0.57 against the
+    // custom_voice checkpoint's 0.57. The recording becomes a speaker vector,
+    // so nothing is added to the per-frame work -- only the extraction, once,
+    // which took about 4.5 s for a 17-second reference.
+    //
+    // It is also the fix upstream gives for a symptom this project has now
+    // measured: a passage cut into sentences drifts in register between them,
+    // because each say() is conditioned on a speaker token and no acoustic
+    // history. A qwentts.cpp wrapper reports the same thing on sentence-by-
+    // sentence cloning and fixes it with `xvec_only`, which is this mode.
+    //
+    // **Base only**, like set_reference, and it must be called AFTER load():
+    // the extraction runs the model's own speaker encoder. The embedding is
+    // kept, the recording is not, so a long reference costs nothing beyond this
+    // call -- which is the other half of why the two modes are not the same
+    // feature at two prices.
+    bool set_reference_voice(const std::string& wav_path);
+
     void clear_reference();
 
     // Seconds of reference currently held, 0 when none.
@@ -270,6 +315,55 @@ public:
     // setter is safe to expose where on Base it would have been a trap.
     void set_seed(long long seed);
     void set_top_k(int top_k);
+
+    // The whole sampler, which is TWO samplers and was being ignored.
+    //
+    // The engine draws on two stacks with independent settings: the talker
+    // draws c0 -- the semantic stream, what is said and its rhythm -- and the
+    // SUB-TALKER draws the acoustic codes, which is where timbre and register
+    // are decided. Everything here was left at qwentts.cpp's defaults until a
+    // split passage made the second stack matter:
+    //
+    //   temperature 0.9, top_k 50, top_p 1.0, repetition_penalty 1.05
+    //   subtalker_temperature 0.9, subtalker_top_k 50, subtalker_top_p 1.0
+    //
+    // **0.9 on the acoustic stack is a wide draw, and one utterance can afford
+    // it where a split passage cannot.** Within one say() the trajectory drawn
+    // at the start is what the rest continues from, so the register holds by
+    // autoregression. Across separate say() calls there is no shared context:
+    // each piece redraws the acoustic trajectory from nothing, and one piece in
+    // sixteen came back five semitones low -- a whole sentence in a different
+    // voice. See src/voice/reader.hpp for that measurement.
+    //
+    // **Turning the sub-talker down does NOT fix that, and it was measured
+    // rather than assumed.** Four seeds, one passage of four pieces, the widest
+    // gap between any two pieces' pitch:
+    //
+    //   subtalker_temperature   seed 23   101     202     777    mean
+    //   0.9 (default)           5.06 st   2.77    2.39    2.14   3.09
+    //   0.0 (argmax)            2.84      4.77    5.10    4.85   4.39
+    //
+    // Argmax is WORSE on average, and it produced a fresh 4.5-semitone
+    // excursion on a seed the default handled. The one seed where narrowing
+    // helped was a reshuffle: the two stacks share a random stream, so changing
+    // the sub-talker's temperature moves the talker's draw too -- visible as
+    // the utterance changing LENGTH, which a sub-talker setting cannot do.
+    //
+    // So the register excursion is not the width of the draw. At argmax there
+    // is no draw and it still happens, which points at what is missing rather
+    // than at what is loose: each say() is conditioned on a speaker token and
+    // nothing acoustic, so nothing holds the register where the last piece put
+    // it. The fix for that is a reference, not a narrower sampler.
+    //
+    // These stay because they are the engine's real surface and were invisible
+    // before, and because a narrower draw is still the right default for a
+    // split passage on the axes it does control.
+    //
+    // temperature 0 is argmax on that stack. top_k <= 0 and top_p >= 1 disable
+    // the respective cutoff. set_top_k() above is the talker's alone and is
+    // kept because bodyclock_tts_set_top_k is part of the C ABI.
+    void set_sampling(const QttsSampling& sampling);
+    const QttsSampling& sampling() const;
 
     // Speak `text`. BLOCKS until the whole utterance is generated.
     //

@@ -201,6 +201,11 @@ add_library(bodyclock_core STATIC
     # A THIRD, for the speaking half alone at a third of the cost, on text
     # somebody else wrote. Stubs out without BODYCLOCK_QTTS.
     src/voice/qtts.cpp
+    # And a passage over the top of it: split into sentences, several engines at
+    # once, emitted in order. No engine of its own, so it builds everywhere --
+    # without BODYCLOCK_QTTS its load() fails the way qtts.cpp's does, and the
+    # sentence splitter is plain text processing that works regardless.
+    src/voice/reader.cpp
 )
 
 target_include_directories(bodyclock_core PUBLIC src)
@@ -680,4 +685,10 @@ if(BODYCLOCK_BUILD_CLI)
     # rather than report.
     add_executable(bodyclock-bundle-test tests/bundle_test.cpp)
     target_link_libraries(bodyclock-bundle-test PRIVATE bodyclock_core)
+
+    # The sentence splitter, which needs no engine. It has a test because its
+    # predecessor failed in the one way nothing reports: the reply was read
+    # aloud and simply did not say everything.
+    add_executable(bodyclock-reader-test tests/reader_test.cpp)
+    target_link_libraries(bodyclock-reader-test PRIVATE bodyclock_core)
 endif()

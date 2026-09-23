@@ -871,6 +871,140 @@ const char* bodyclock_tts_say(const char* text,
 // Why the last load or say failed. "" after a success. Owned by the core.
 const char* bodyclock_tts_last_error(void);
 
+//
+//------------------------------------------------------------------------------
+// Reading a reply aloud while it is still being written
+//------------------------------------------------------------------------------
+//
+// The lane above speaks text that already exists, and that is the whole of what
+// is wrong with it for a conversation: a reply takes seconds to write, so the
+// wait a person sits through is the language model's, not the engine's, and no
+// amount of streaming inside the engine recovers it. This one takes the reply a
+// token at a time, cuts it into sentences, and starts speaking the first while
+// the model is still writing the third.
+//
+// It is a SECOND engine instance over the same two GGUFs, not a mode of the one
+// above, so **only one of the two should be loaded at a time** -- together they
+// hold the weights twice. A host that offers both switches by unloading.
+//
+// What splitting costs and what holds it together is in src/voice/reader.hpp,
+// measured: a pinned seed, a reference voice to anchor the register, a minimum
+// on the last piece, and the edge shaping that makes a join sound like a pause
+// rather than like two files played back to back.
+//
+// Threading: begin() returns at once and the work runs on threads this lane
+// owns; feed() returns at once; finish() BLOCKS until the last sample is out.
+
+// Whether this build has the speech engine compiled in. Same engine as the
+// lane above, so this answers the same as bodyclock_tts_available().
+int bodyclock_reader_available(void);
+
+// Read the two GGUFs into `voices` engines. BLOCKS. `voices` below 1 is 1.
+//
+// **Each voice is another copy of the weights**, and on this desktop a second
+// one measured slightly SLOWER rather than faster -- see reader.hpp. 1 is the
+// number to pass until a device says otherwise.
+int bodyclock_reader_load(const char* talker_path, const char* codec_path, int voices);
+int bodyclock_reader_loaded(void);
+void bodyclock_reader_unload(void);
+
+// What the loaded talker is: "voice_design", "base" or "custom_voice".
+const char* bodyclock_reader_model_type(void);
+
+// The voice, by the same three routes the lane above documents: a written
+// instruct, a named speaker, or -- only on a `base` checkpoint -- a recording
+// reduced to a speaker embedding.
+//
+// **The third is the one that matters here.** Every piece is a separate
+// generation, and with nothing acoustic in common they drift in register: one
+// sentence in sixteen came out five semitones low, which is heard as the voice
+// changing mid-reply. Anchoring every piece to one embedding removed it on
+// four seeds out of four and cost nothing measurable in speed. reader.hpp has
+// the numbers.
+void bodyclock_reader_set_voice(const char* instruct);
+void bodyclock_reader_set_speaker(const char* name);
+int bodyclock_reader_set_reference_voice(const char* wav_path);
+
+// Sampling. The seed defaults to a FIXED one rather than the engine's -1,
+// because -1 is redrawn per piece and a passage cut into four then draws four
+// times -- which is what made sentence-by-sentence synthesis sound stitched the
+// first time this project tried it.
+void bodyclock_reader_set_seed(long long seed);
+
+// Where the cuts fall, in CHARACTERS. <= 0 leaves a field alone.
+//
+//   min_chars    below this a piece is not cut even at a full stop. 30 by
+//                default, and in the streaming case it is also how much text
+//                the model must have written before anything can be spoken.
+//   max_chars    above this a piece is cut anyway, at the last comma.
+//   tail_chars   the LAST piece has its own, higher minimum: a short final
+//                utterance is the one the engine ends without a release, which
+//                is heard as the reply being cut off. Lengthening it is free --
+//                by then the listener is already listening.
+void bodyclock_reader_set_split(int min_chars, int max_chars, int tail_chars);
+
+// Whether a comma ends a piece once min_chars is reached, the way a full stop
+// does. Off by default.
+//
+// **On for anything that reads text as it is written.** Otherwise a comma is
+// only a fallback at max_chars, and a reply whose single full stop is at the
+// end cannot be spoken until all of it has been written -- measured, a
+// 45-character reply had both its pieces dispatched in the same millisecond.
+// What it costs is the unit: a clause rather than a sentence, which is shorter
+// than the one that sounded best. See src/voice/reader.hpp.
+void bodyclock_reader_set_clause_cuts(int on);
+
+// Worker threads per engine for the NEXT load. <= 0 leaves the engine's choice.
+void bodyclock_reader_set_threads(int threads);
+
+// Generated audio, in reading order. `pcm` is mono float at 24000 Hz.
+//
+// `sentence` is which piece these samples belong to, so a host can see where
+// the seams are. `last` arrives on a call of its own with `n_samples` 0, once,
+// matching the speech lane above. Return non-zero to continue, 0 to stop.
+typedef int (*bodyclock_reader_audio_handler)(const float* pcm,
+                                         int n_samples,
+                                         int sentence,
+                                         int last,
+                                         void* user_data);
+
+// Start reading. Returns 1 when the engines are running, 0 otherwise.
+//
+// `on_audio` NULL generates and discards, as in the lane above.
+int bodyclock_reader_begin(bodyclock_reader_audio_handler on_audio, void* user_data);
+
+// Add text. Returns at once. Whatever has become a complete sentence is
+// dispatched; the last fragment is held back, because another token could
+// extend it and a piece handed to an engine cannot be taken back.
+int bodyclock_reader_feed(const char* delta);
+
+// No more text. BLOCKS until the last sample has been handed over.
+//
+// Returns a JSON object, owned by the core and valid until this thread's next
+// call, or NULL on failure (see bodyclock_reader_last_error()):
+//
+//   sentences           pieces the reply was cut into.
+//   speechSeconds       seconds of audio handed over.
+//   seconds             seconds of computation, from begin().
+//   realtime            seconds / speechSeconds. **NOT the engine's ratio on
+//                       a stream**: `seconds` runs from begin(), so it also
+//                       contains however long the writer took between
+//                       sentences. One turn measured 2.01 here while the
+//                       engine reported 0.67 for the same audio, and the gap
+//                       was the language model rather than the speech.
+//   firstAudioSeconds   when the first samples went out, from begin(). Also
+//                       not what a person waits: the text had to be written
+//                       first, and on a stream that is most of it.
+//   starvedSeconds      what a listener would have heard as silence: how long
+//                       playback would have run dry, with the pieces arriving
+//                       when they did. 0 means the engines stayed ahead.
+//   heldSeconds         the most audio ever held back waiting for an earlier
+//                       piece, which is also the memory.
+const char* bodyclock_reader_finish(void);
+
+// Why the last call returned 0 or NULL. Empty after a success.
+const char* bodyclock_reader_last_error(void);
+
 //------------------------------------------------------------------------------
 // Model bundles
 //------------------------------------------------------------------------------

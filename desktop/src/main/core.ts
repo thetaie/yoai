@@ -74,6 +74,37 @@ export interface BodyclockNative {
   nativeTtsCancel(): number
   nativeTtsLastError(): string
 
+  //--- Reading a reply while it is still being written -------------------------
+  // A SECOND engine over the same two GGUFs as the lane above, so only one of
+  // them should be loaded: together they hold the weights twice. See
+  // src/bodyclock.h and src/voice/reader.hpp.
+  nativeReaderAvailable(): number
+  nativeReaderLoad(
+    talkerPath: string,
+    tokenizerPath: string,
+    voices: number,
+    onDone: NativeHandler
+  ): void
+  nativeReaderLoaded(): number
+  nativeReaderUnload(): void
+  nativeReaderModelType(): string
+  nativeReaderSetVoice(instruct: string): void
+  nativeReaderSetSpeaker(name: string): void
+  /** '' on success, else the reason. Base checkpoints only; runs the speaker encoder. */
+  nativeReaderSetReferenceVoice(wavPath: string): string
+  nativeReaderSetSeed(seed: number): void
+  /** A field <= 0 is left at the measured default. */
+  nativeReaderSetSplit(minChars: number, maxChars: number, tailChars: number): void
+  /** A comma ends a piece once min_chars is reached. Off by default. */
+  nativeReaderSetClauseCuts(on: boolean): void
+  nativeReaderSetThreads(threads: number): void
+  /** 1 when the stream opened, 0 when one was already open. */
+  nativeReaderBegin(onAudio: NativeReaderHandler): number
+  nativeReaderFeed(delta: string): number
+  /** Returns at once; onDone fires when the last sample has gone out. */
+  nativeReaderFinish(onDone: NativeHandler): void
+  nativeReaderLastError(): string
+
   //--- Omni (MNN + Qwen2.5-Omni) -----------------------------------------------
   // Present on every build, stubbed without the lane, exactly like the TTS
   // entries above.
@@ -100,6 +131,19 @@ export interface BodyclockNative {
  * are ordered and splitting them would let the terminal one overtake a chunk.
  */
 export type NativeTtsHandler = (type: string, payload: Float32Array | string) => void
+
+/**
+ * The reading lane's audio handler.
+ *
+ * A third argument the other lanes do not have: which PIECE these samples
+ * belong to. The binding passes it only for this lane, so the speech and omni
+ * callbacks keep the arity they were written against.
+ */
+export type NativeReaderHandler = (
+  type: string,
+  payload: Float32Array | string,
+  sentence?: number
+) => void
 
 /**
  * Where the addon might be, most specific first.

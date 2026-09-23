@@ -132,7 +132,27 @@ export const S = {
   // Data and diagnostics
   settingsCore: '内核',
   settingsClearHistory: '清空所有对话记录',
-  settingsClearHistoryMsg: '所有本机对话记录都会被删除，无法恢复。'
+  settingsClearHistoryMsg: '所有本机对话记录都会被删除，无法恢复。',
+
+  // Reading a reply while it is still being written
+  settingsReader: '边写边读',
+  settingsReaderIntro:
+    '大模型每吐出一句完整的话就送去合成，不必等整段写完。用的是上面那对模型文件，但另开一份引擎——载入它会卸掉上面那条。',
+  settingsReaderUnavailable: '这个构建没有语音引擎。',
+  settingsReaderLoad: '载入',
+  settingsReaderLoading: '载入中…',
+  settingsReaderUnload: '卸载',
+  settingsReaderLoaded: '已载入',
+  settingsReaderRef: '参考录音',
+  settingsReaderRefPick: '选择',
+  settingsReaderRefNone: '未选择',
+  settingsReaderRefNote:
+    '单声道 16 位 24 kHz 的 .wav，只用 base 模型。每一句都锚到同一段录音上，否则句与句之间会换音区——实测十六句里有一句低了五个半音。',
+  settingsReaderMin: '攒够多少字再开口',
+  settingsReaderMinNote:
+    '0 表示用默认的 16。这个数决定的不是引擎快慢（出声都在 0.2 秒左右），而是大模型要先写多少字——本机模型实测 3.7 到 9.1 tok/s，36 个字就要等 6.4 秒。调大更自然（实测 30 比 12 好听），调小出声更早。',
+  settingsReaderEnabled: '用这条链读回复',
+  settingsReaderEnabledNote: '开启后，回复不再等写完才朗读，而是边写边读。'
 } as const
 
 /** Picker labels for the three palette families, keyed the way prefs stores them. */

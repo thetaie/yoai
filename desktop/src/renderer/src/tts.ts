@@ -223,7 +223,7 @@ function stripMarkdown(text: string): string {
  * transcript keeps its emoji and its formatting; only what reaches the engine
  * loses them.
  */
-function forSpeech(text: string): string {
+export function forSpeech(text: string): string {
   return stripMarkdown(text)
     .replace(NOT_SPOKEN, '')
     .replace(/[ \t]{2,}/g, ' ')

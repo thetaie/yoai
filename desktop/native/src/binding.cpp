@@ -423,6 +423,10 @@ struct AudioEvent {
     std::string        type;      // "audio" | "text" | "end" | "error"
     std::string        content;   // the reply, stats JSON, or the error. Empty for audio.
     std::vector<float> pcm;       // 24 kHz mono, only for "audio".
+    // Which piece these samples belong to, for the reading lane. -1 on every
+    // event the other two produce, and CallJsAudio then passes two arguments
+    // exactly as before -- so this field costs their callbacks nothing.
+    int                sentence = -1;
 };
 
 // At most one utterance at a time. The core serialises on its own mutex, so a
@@ -462,6 +466,14 @@ void CallJsAudio(napi_env env, napi_value js_callback, void* /*context*/, void* 
         napi_create_string_utf8(env, ev->content.c_str(), NAPI_AUTO_LENGTH, &argv[1]);
     }
 
+    // A third argument only when there is one to give, so the speech and omni
+    // lanes' callbacks keep the arity they were written against.
+    if (ev->sentence >= 0) {
+        napi_value argv3[3] = {argv[0], argv[1], nullptr};
+        napi_create_int32(env, ev->sentence, &argv3[2]);
+        napi_call_function(env, undefined, js_callback, 3, argv3, nullptr);
+        return;
+    }
     napi_call_function(env, undefined, js_callback, 2, argv, nullptr);
 }
 
@@ -650,6 +662,247 @@ napi_value NativeTtsSay(napi_env env, napi_callback_info info) {
 napi_value NativeTtsCancel(napi_env env, napi_callback_info /*info*/) {
     g_tts_cancel.store(true, std::memory_order_relaxed);
     return Int32(env, g_tts_busy.load(std::memory_order_relaxed) ? 1 : 0);
+}
+
+//------------------------------------------------------------------------------
+// Reading a reply aloud while it is still being written
+//------------------------------------------------------------------------------
+//
+// A second engine over the same weights as the speech lane, so a host loads one
+// or the other -- see bodyclock.h. It reuses the audio machinery above because
+// the output side is identical: 24 kHz mono float in chunks, then a JSON
+// summary. What is new is the INPUT: text arrives a token at a time, and the
+// call that ends the reply blocks for the rest of the speech.
+
+// Called by the engines on their own threads, once per block, in reading order.
+int OnReaderAudio(const float* pcm, int n_samples, int sentence, int /*last*/,
+                  void* user_data) {
+    if (pcm == nullptr || n_samples <= 0) return 1;
+    napi_threadsafe_function tsfn = static_cast<napi_threadsafe_function>(user_data);
+    AudioEvent* ev = new AudioEvent{"audio", "", std::vector<float>(pcm, pcm + n_samples),
+                                    sentence};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    return 1;
+}
+
+void ReaderLoadWorker(std::string talker, std::string codec, int voices,
+                      napi_threadsafe_function tsfn) {
+    const int rc = bodyclock_reader_load(talker.c_str(), codec.c_str(), voices);
+    AudioEvent* ev = new AudioEvent{rc == 0 ? "end" : "error",
+                                    rc == 0 ? "" : bodyclock_reader_last_error(),
+                                    {}, -1};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+}
+
+// **On a worker, because finish() blocks for the rest of the speech.** The
+// audio channel is released here rather than by the caller: this is the only
+// place that knows the stream is over.
+void ReaderFinishWorker(napi_threadsafe_function audio_tsfn,
+                        napi_threadsafe_function done_tsfn) {
+    const char* stats = bodyclock_reader_finish();
+    AudioEvent* ev = stats != nullptr
+                         ? new AudioEvent{"end", stats, {}, -1}
+                         : new AudioEvent{"error", bodyclock_reader_last_error(), {}, -1};
+    napi_call_threadsafe_function(done_tsfn, ev, napi_tsfn_blocking);
+    napi_release_threadsafe_function(done_tsfn, napi_tsfn_release);
+    if (audio_tsfn != nullptr) {
+        napi_release_threadsafe_function(audio_tsfn, napi_tsfn_release);
+    }
+}
+
+// Held between begin() and finish(): the audio channel outlives the call that
+// created it, which is the whole difference from nativeTtsSay.
+napi_threadsafe_function g_reader_audio = nullptr;
+
+napi_value NativeReaderAvailable(napi_env env, napi_callback_info /*info*/) {
+    return Int32(env, bodyclock_reader_available());
+}
+
+// nativeReaderLoad(talker, codec, voices, onDone: (type, content) => void): void
+napi_value NativeReaderLoad(napi_env env, napi_callback_info info) {
+    size_t argc = 4;
+    napi_value argv[4] = {nullptr, nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 4) {
+        napi_throw_error(env, nullptr,
+                         "nativeReaderLoad(talker, codec, voices, onDone) needs four arguments");
+        return nullptr;
+    }
+
+    std::string talker = ToUtf8(env, argv[0]);
+    std::string codec  = ToUtf8(env, argv[1]);
+    std::int32_t voices = 1;
+    napi_get_value_int32(env, argv[2], &voices);
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "bodyclock_reader_load", NAPI_AUTO_LENGTH, &work_name);
+
+    napi_threadsafe_function tsfn = nullptr;
+    if (napi_create_threadsafe_function(env, argv[3], nullptr, work_name, 0, 1,
+                                        nullptr, nullptr, nullptr, CallJsAudio,
+                                        &tsfn) != napi_ok) {
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+    std::thread(ReaderLoadWorker, std::move(talker), std::move(codec),
+                static_cast<int>(voices), tsfn).detach();
+    return nullptr;
+}
+
+napi_value NativeReaderLoaded(napi_env env, napi_callback_info /*info*/) {
+    return Int32(env, bodyclock_reader_loaded());
+}
+
+napi_value NativeReaderUnload(napi_env env, napi_callback_info /*info*/) {
+    bodyclock_reader_unload();
+    return nullptr;
+}
+
+napi_value NativeReaderModelType(napi_env env, napi_callback_info /*info*/) {
+    return Utf8(env, bodyclock_reader_model_type());
+}
+
+napi_value NativeReaderSetVoice(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    bodyclock_reader_set_voice(ArgUtf8(env, argc, argv, 0).c_str());
+    return nullptr;
+}
+
+napi_value NativeReaderSetSpeaker(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    bodyclock_reader_set_speaker(ArgUtf8(env, argc, argv, 0).c_str());
+    return nullptr;
+}
+
+// Returns the empty string on success, or the reason. Synchronous: extracting
+// the embedding runs the model's speaker encoder once, about 4.5 s for a
+// 22-second reference, which is a load-time cost rather than a per-reply one.
+napi_value NativeReaderSetReferenceVoice(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    const std::string path = ArgUtf8(env, argc, argv, 0);
+    const int rc = bodyclock_reader_set_reference_voice(path.c_str());
+    return Utf8(env, rc == 0 ? "" : bodyclock_reader_last_error());
+}
+
+napi_value NativeReaderSetSeed(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    double seed = 23.0;
+    if (argc >= 1) {
+        napi_get_value_double(env, argv[0], &seed);
+    }
+    bodyclock_reader_set_seed(static_cast<long long>(seed));
+    return nullptr;
+}
+
+// nativeReaderSetSplit(minChars, maxChars, tailChars): void. A field <= 0 is
+// left at the measured default.
+napi_value NativeReaderSetSplit(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value argv[3] = {nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    std::int32_t a = 0, b = 0, c = 0;
+    if (argc >= 1) napi_get_value_int32(env, argv[0], &a);
+    if (argc >= 2) napi_get_value_int32(env, argv[1], &b);
+    if (argc >= 3) napi_get_value_int32(env, argv[2], &c);
+    bodyclock_reader_set_split(a, b, c);
+    return nullptr;
+}
+
+napi_value NativeReaderSetClauseCuts(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    bool on = false;
+    if (argc >= 1) napi_get_value_bool(env, argv[0], &on);
+    bodyclock_reader_set_clause_cuts(on ? 1 : 0);
+    return nullptr;
+}
+
+napi_value NativeReaderSetThreads(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    std::int32_t n = 0;
+    if (argc >= 1) napi_get_value_int32(env, argv[0], &n);
+    bodyclock_reader_set_threads(n);
+    return nullptr;
+}
+
+// nativeReaderBegin(onAudio: (type, payload, sentence) => void): number
+napi_value NativeReaderBegin(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 1) {
+        napi_throw_error(env, nullptr, "nativeReaderBegin(onAudio) needs one argument");
+        return nullptr;
+    }
+    if (g_reader_audio != nullptr) {
+        return Int32(env, 0);   // a stream is already open
+    }
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "bodyclock_reader", NAPI_AUTO_LENGTH, &work_name);
+    if (napi_create_threadsafe_function(env, argv[0], nullptr, work_name, 0, 1,
+                                        nullptr, nullptr, nullptr, CallJsAudio,
+                                        &g_reader_audio) != napi_ok) {
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+    if (bodyclock_reader_begin(OnReaderAudio, g_reader_audio) != 1) {
+        napi_release_threadsafe_function(g_reader_audio, napi_tsfn_release);
+        g_reader_audio = nullptr;
+        return Int32(env, 0);
+    }
+    return Int32(env, 1);
+}
+
+// nativeReaderFeed(delta: string): number. Returns at once.
+napi_value NativeReaderFeed(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    const std::string delta = ArgUtf8(env, argc, argv, 0);
+    return Int32(env, bodyclock_reader_feed(delta.c_str()));
+}
+
+// nativeReaderFinish(onDone: (type, content) => void): void
+napi_value NativeReaderFinish(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 1) {
+        napi_throw_error(env, nullptr, "nativeReaderFinish(onDone) needs one argument");
+        return nullptr;
+    }
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "bodyclock_reader_finish", NAPI_AUTO_LENGTH, &work_name);
+    napi_threadsafe_function done = nullptr;
+    if (napi_create_threadsafe_function(env, argv[0], nullptr, work_name, 0, 1,
+                                        nullptr, nullptr, nullptr, CallJsAudio,
+                                        &done) != napi_ok) {
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+
+    napi_threadsafe_function audio = g_reader_audio;
+    g_reader_audio = nullptr;
+    std::thread(ReaderFinishWorker, audio, done).detach();
+    return nullptr;
+}
+
+napi_value NativeReaderLastError(napi_env env, napi_callback_info /*info*/) {
+    return Utf8(env, bodyclock_reader_last_error());
 }
 
 napi_value NativeTtsLastError(napi_env env, napi_callback_info /*info*/) {
@@ -859,6 +1112,22 @@ NAPI_MODULE_INIT() {
         {"nativeChatCancelAll",   nullptr, NativeChatCancelAll,   nullptr, nullptr, nullptr, napi_default, nullptr},
 
         {"nativeTtsAvailable",    nullptr, NativeTtsAvailable,    nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderAvailable", nullptr, NativeReaderAvailable, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderLoad", nullptr, NativeReaderLoad, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderLoaded", nullptr, NativeReaderLoaded, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderUnload", nullptr, NativeReaderUnload, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderModelType", nullptr, NativeReaderModelType, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetVoice", nullptr, NativeReaderSetVoice, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetSpeaker", nullptr, NativeReaderSetSpeaker, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetReferenceVoice", nullptr, NativeReaderSetReferenceVoice, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetSeed", nullptr, NativeReaderSetSeed, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetSplit", nullptr, NativeReaderSetSplit, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetClauseCuts", nullptr, NativeReaderSetClauseCuts, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetThreads", nullptr, NativeReaderSetThreads, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderBegin", nullptr, NativeReaderBegin, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderFeed", nullptr, NativeReaderFeed, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderFinish", nullptr, NativeReaderFinish, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderLastError", nullptr, NativeReaderLastError, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsLoad",         nullptr, NativeTtsLoad,         nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsLoaded",       nullptr, NativeTtsLoaded,       nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsUnload",       nullptr, NativeTtsUnload,       nullptr, nullptr, nullptr, napi_default, nullptr},

@@ -20,6 +20,8 @@ import {
   OmniEvent,
   OmniStatus,
   PickedModel,
+  ReaderEvent,
+  ReaderStatus,
   TtsEvent,
   TtsStatus
 } from '../shared/api'
@@ -123,6 +125,25 @@ const api: BodyclockApi = {
       ipcRenderer.on(CHANNELS.omniEvent, wrapped)
       return () => {
         ipcRenderer.removeListener(CHANNELS.omniEvent, wrapped)
+      }
+    }
+  },
+
+  reader: {
+    status: () => ipcRenderer.invoke(CHANNELS.readerStatus) as Promise<ReaderStatus>,
+    load: () => ipcRenderer.invoke(CHANNELS.readerLoad) as Promise<string>,
+    unload: () => ipcRenderer.invoke(CHANNELS.readerUnload) as Promise<void>,
+    set: (patch) => ipcRenderer.invoke(CHANNELS.readerSet, patch) as Promise<ReaderStatus>,
+    pickReference: () => ipcRenderer.invoke(CHANNELS.readerPickReference) as Promise<string | null>,
+    begin: () => ipcRenderer.invoke(CHANNELS.readerBegin) as Promise<boolean>,
+    feed: (delta: string) => ipcRenderer.invoke(CHANNELS.readerFeed, delta) as Promise<boolean>,
+    finish: () => ipcRenderer.invoke(CHANNELS.readerFinish) as Promise<void>,
+
+    onEvent: (listener: (ev: ReaderEvent) => void) => {
+      const wrapped = (_event: unknown, ev: ReaderEvent): void => listener(ev)
+      ipcRenderer.on(CHANNELS.readerEvent, wrapped)
+      return () => {
+        ipcRenderer.removeListener(CHANNELS.readerEvent, wrapped)
       }
     }
   },
