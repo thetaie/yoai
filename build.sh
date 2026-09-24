@@ -8,8 +8,12 @@
 # Dependencies come from vcpkg when it is there, and from the system's own
 # packages when it is not -- see the comment above the vcpkg block below.
 #
-# With no arguments this prints usage() and builds nothing, so running the
-# script to find out what it does is safe.
+# With no arguments it configures if needed and builds, like every other build
+# script in this repo. help, -h or --help prints usage().
+#
+# `tts` assembles a qwentts.cpp SDK into build/qtts-sdk/ and configures with
+# -DBODYCLOCK_QTTS=ON -- speech output for the tools in cli/, without the
+# desktop app.
 #
 # `asr` assembles a desktop ggml SDK into build/llama-sdk/ from a llama.cpp
 # checkout and configures with -DBODYCLOCK_ASR=ON. Only ggml is built --
@@ -19,24 +23,28 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: ./build.sh <command> [command ...]
+Usage: ./build.sh [clean] [asr] [tts]
 
 Builds the core library, the desktop tools in cli/ and the tests in tests/,
-into build/. This is not the desktop app -- that is desktop/build.sh.
+into build/: configures if needed, then builds. This is not the desktop
+app -- that is desktop/build.sh.
 
-Commands:
-  build    configure if needed, then build
-  asr      the same, with speech recognition compiled in. Needs a llama.cpp
-           checkout for ggml; see LLAMA_SRC
-  clean    delete build/ first, then build
+  asr      also compile speech recognition in. Needs a llama.cpp checkout
+           for ggml; see LLAMA_SRC
+  tts      also compile speech output (Qwen3-TTS) in. Needs qwentts.cpp
+           and llama.cpp checkouts; uses the GPU when there is one
+  clean    delete build/ first
+  help     this text; also -h or --help
 
-Commands combine, e.g. ./build.sh clean asr
+They combine, e.g. ./build.sh clean asr tts
 
 Environment, each also as YOAI_<NAME> in the environment or in .env,
 which wins -- see .env.example:
   VCPKG_ROOT        vcpkg checkout (default: ../vcpkg, used only if it exists)
   OPENSSL_ROOT_DIR  where to find OpenSSL, when the default search misses it
-  LLAMA_SRC         llama.cpp checkout for asr (default: ../llama.cpp)
+  LLAMA_SRC         llama.cpp checkout for asr and tts (default: ../llama.cpp)
+  QTTS_SRC          qwentts.cpp checkout for tts (default: ../qwentts.cpp)
+  VULKAN_SDK        Vulkan SDK, for tts on the GPU; optional
 EOF
 }
 
@@ -65,23 +73,17 @@ third_verify() {
   fi
 }
 
-# Help exits 0: asking for it is not an error.
-if [ $# -eq 0 ]; then
-  usage
-  exit 0
-fi
-
 DO_CLEAN=""
 DO_ASR=""
+DO_TTS=""
 for arg in "$@"; do
   case "$arg" in
-    # `build` sets nothing: every command builds, and this one only asks for
-    # the defaults.
-    build) ;;
     clean) DO_CLEAN=1 ;;
     asr)   DO_ASR=1 ;;
+    tts)   DO_TTS=1 ;;
+    # Help exits 0: asking for it is not an error.
     help|-h|--help) usage; exit 0 ;;
-    *) echo "Unknown argument \"$arg\". Run ./build.sh with no arguments for help." >&2; exit 1 ;;
+    *) echo "Unknown argument \"$arg\". Run ./build.sh --help for the options." >&2; exit 1 ;;
   esac
 done
 
@@ -89,7 +91,7 @@ done
 # After the arguments, so the help text still prints when a configured path
 # is wrong. The names are the paths this script reads: each one that is
 # configured has to exist.
-yoai_load_env VCPKG_ROOT OPENSSL_ROOT_DIR LLAMA_SRC || exit 1
+yoai_load_env VCPKG_ROOT OPENSSL_ROOT_DIR LLAMA_SRC QTTS_SRC VULKAN_SDK || exit 1
 
 if [ -n "$DO_CLEAN" ]; then
   rm -rf "$BUILD_DIR"
@@ -131,6 +133,20 @@ else
   fi
 fi
 
+# CMake caches which lanes are on, so adding `asr` or `tts` to a tree that was
+# configured without it would change nothing. Said here, before any SDK is
+# built, rather than after minutes of building one.
+if [ -f "$BUILD_DIR/CMakeCache.txt" ]; then
+  if [ -n "$DO_ASR" ] && ! grep -q "BODYCLOCK_ASR:BOOL=ON" "$BUILD_DIR/CMakeCache.txt"; then
+    echo "[build] build/ was configured without asr; re-run as: ./build.sh clean asr" >&2
+    exit 1
+  fi
+  if [ -n "$DO_TTS" ] && ! grep -q "BODYCLOCK_QTTS:BOOL=ON" "$BUILD_DIR/CMakeCache.txt"; then
+    echo "[build] build/ was configured without tts; re-run as: ./build.sh clean tts" >&2
+    exit 1
+  fi
+fi
+
 # A desktop ggml SDK, shaped like the one harmony/build.sh assembles per ABI:
 # include/ plus lib/. Recognition links ggml and nothing else, so only the three
 # ggml targets are built -- libllama is not needed and is not asked for.
@@ -169,13 +185,91 @@ if [ -n "$DO_ASR" ]; then
   CMAKE_ARGS+=(-DBODYCLOCK_ASR=ON -DLLAMA_CPP_DIR="$LSDK")
 fi
 
-# CMake caches everything above, so adding `asr` to a build tree that was
-# configured without it has no effect. Re-run with `clean` to change the set.
+# A qwentts.cpp SDK for this build, so the core can speak without the desktop
+# app. qwentts.cpp and llama.cpp are both required: qwentts compiles llama.cpp's
+# ggml through GGML_SOURCE_DIR, so the core carries one ggml however many lanes
+# are on. The GPU backend is not required -- see build.cmd's :qtts_sdk for the
+# numbers -- and a build without one says so.
+if [ -n "$DO_TTS" ]; then
+  QTTS_SRC="${QTTS_SRC:-$(cd .. && pwd)/qwentts.cpp}"
+  if [ ! -f "$QTTS_SRC/src/qwen.h" ]; then
+    echo "no qwentts.cpp at $QTTS_SRC." >&2
+    echo "clone it at the pinned commit, submodule and patch included:" >&2
+    echo "  third/sync.sh clone qwentts.cpp" >&2
+    echo "or point QTTS_SRC at an existing checkout." >&2
+    exit 1
+  fi
+  third_verify qwentts.cpp QTTS_SRC "$QTTS_SRC"
+  LLAMA_SRC="${LLAMA_SRC:-$(cd .. && pwd)/llama.cpp}"
+  if [ ! -f "$LLAMA_SRC/ggml/CMakeLists.txt" ]; then
+    echo "tts compiles llama.cpp's ggml, and there is none at $LLAMA_SRC/ggml." >&2
+    echo "  third/sync.sh clone llama.cpp" >&2
+    echo "or point LLAMA_SRC at an existing checkout." >&2
+    exit 1
+  fi
+  third_verify llama.cpp LLAMA_SRC "$LLAMA_SRC"
+
+  # The backend, per platform, as in desktop/build.sh: Metal on macOS, which
+  # ggml turns on by itself for Apple; Vulkan elsewhere when there is one.
+  QTTS_BACKEND=()
+  QTTS_VULKAN=""
+  if [ "$(uname -s)" = "Darwin" ]; then
+    echo "[build] tts backend: Metal, which ggml enables for Apple by itself"
+  elif [ -n "${VULKAN_SDK:-}" ] || command -v glslc >/dev/null 2>&1; then
+    echo "[build] tts backend: Vulkan"
+    QTTS_VULKAN=1
+    QTTS_BACKEND=(-DGGML_VULKAN=ON)
+    if [ -n "${VULKAN_SDK:-}" ]; then
+      for d in "$VULKAN_SDK"/{lib,Lib}/cmake/SPIRV-Headers "$VULKAN_SDK"/{lib,Lib}/cmake; do
+        if [ -f "$d/SPIRV-HeadersConfig.cmake" ]; then
+          QTTS_BACKEND+=("-DSPIRV-Headers_DIR=$d")
+          break
+        fi
+      done
+    fi
+  else
+    echo "[build] warning: no Vulkan found, so tts is built for the CPU only." >&2
+    echo "[build]   It works, slower: RTF 1.13 against 0.63 on the GPU where measured." >&2
+    echo "[build]   For the GPU: apt install libvulkan-dev glslc (Debian/Ubuntu), or set" >&2
+    echo "[build]   YOAI_VULKAN_SDK in .env; then ./build.sh clean tts." >&2
+    QTTS_BACKEND=(-DGGML_VULKAN=OFF)
+  fi
+
+  QBUILD="$BUILD_DIR/qtts"
+  QSDK="$BUILD_DIR/qtts-sdk"
+  echo "[build] qwentts.cpp from $QTTS_SRC, ggml from $LLAMA_SRC/ggml"
+  # Configured every run, with the backend passed each time, so it follows the
+  # machine rather than whatever the first run cached.
+  cmake -S "$QTTS_SRC" -B "$QBUILD" \
+    -DCMAKE_BUILD_TYPE=Release \
+    "-DGGML_SOURCE_DIR=$LLAMA_SRC/ggml" \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DQWEN_SHARED=OFF \
+    ${QTTS_BACKEND[@]+"${QTTS_BACKEND[@]}"}
+  # qwen-core only: qwen-tts, qwen-codec and tts-server all want a main().
+  cmake --build "$QBUILD" --parallel --target qwen-core
+
+  # Laid out from empty every run, and a Vulkan archive left in the tree by an
+  # earlier build is taken out when this one is not using it: the core links
+  # whatever the SDK directory holds.
+  rm -rf "$QSDK"
+  mkdir -p "$QSDK/include" "$QSDK/lib"
+  cp "$QTTS_SRC"/src/qwen*.h "$QSDK/include/"
+  find "$QBUILD" \( -name 'libqwen-core.*' -o -name 'libggml*.*' \) -exec cp {} "$QSDK/lib/" \;
+  if [ -z "$QTTS_VULKAN" ]; then
+    rm -f "$QSDK"/lib/libggml-vulkan.*
+  fi
+  if ! ls "$QSDK"/lib/libqwen-core.* >/dev/null 2>&1; then
+    echo "[build] qwentts built, but no qwen-core library landed in $QSDK/lib" >&2
+    exit 1
+  fi
+  echo "[build] tts SDK at $QSDK"
+
+  CMAKE_ARGS+=(-DBODYCLOCK_QTTS=ON -DQTTS_DIR="$QSDK")
+fi
+
 if [ ! -f "$BUILD_DIR/build.ninja" ] && [ ! -f "$BUILD_DIR/Makefile" ]; then
   cmake -S . -B "$BUILD_DIR" "${CMAKE_ARGS[@]}"
-elif [ -n "$DO_ASR" ] && ! grep -q "BODYCLOCK_ASR:BOOL=ON" "$BUILD_DIR/CMakeCache.txt" 2>/dev/null; then
-  echo "[build] build/ was configured without asr; re-run as: ./build.sh clean asr" >&2
-  exit 1
 fi
 
 cmake --build "$BUILD_DIR" --parallel

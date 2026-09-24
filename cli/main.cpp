@@ -1,4 +1,4 @@
-// bodyclock-cli -- a desktop harness for the core's C ABI.
+// yoai-cli -- a desktop harness for the core's C ABI.
 //
 // Not a product: it exists so the library can be exercised on a workstation,
 // against a real provider, without a phone in the loop. It talks to the core
@@ -6,7 +6,7 @@
 // transcript, stream the events back -- so a turn that works here has proven the
 // same path the HarmonyOS module uses.
 //
-//   bodyclock-cli --base-url URL --key KEY --model NAME ["one question"]
+//   yoai-cli --base-url URL --key KEY --model NAME ["one question"]
 //
 // Each flag falls back to an environment variable (BODYCLOCK_BASE_URL, BODYCLOCK_API_KEY,
 // BODYCLOCK_MODEL), which is the sane way to pass a key: a flag lands in the shell
@@ -44,7 +44,7 @@ std::string from_env(const char* name) {
 
 void usage() {
     std::cerr <<
-        "usage: bodyclock-cli [options] [\"question\"]\n"
+        "usage: yoai-cli [options] [\"question\"]\n"
         "\n"
         "  --base-url URL   OpenAI-compatible API root, no /chat/completions\n"
         "                   (env BODYCLOCK_BASE_URL)\n"
@@ -71,7 +71,7 @@ bool parse_args(int argc, char** argv, Options* opt) {
         // out of bounds.
         auto next = [&](const char* what) -> const char* {
             if (i + 1 >= argc) {
-                std::cerr << "bodyclock-cli: " << what << " needs a value\n";
+                std::cerr << "yoai-cli: " << what << " needs a value\n";
                 return nullptr;
             }
             return argv[++i];
@@ -99,7 +99,7 @@ bool parse_args(int argc, char** argv, Options* opt) {
             usage();
             return false;
         } else if (!a.empty() && a[0] == '-') {
-            std::cerr << "bodyclock-cli: unknown option " << a << "\n";
+            std::cerr << "yoai-cli: unknown option " << a << "\n";
             return false;
         } else {
             opt->question = a;
@@ -109,7 +109,7 @@ bool parse_args(int argc, char** argv, Options* opt) {
     bodyclock_set_log_level(debug ? "debug" : "warn");
 
     if (opt->base_url.empty() || opt->api_key.empty() || opt->model.empty()) {
-        std::cerr << "bodyclock-cli: --base-url, --key and --model are all required "
+        std::cerr << "yoai-cli: --base-url, --key and --model are all required "
                      "(or their BODYCLOCK_* environment variables)\n\n";
         usage();
         return false;
@@ -230,7 +230,7 @@ int main(int argc, char** argv) {
 
     if (bodyclock_provider_set(kProviderId, opt.base_url.c_str(), opt.api_key.c_str(),
                           opt.model.c_str(), nullptr) != 0) {
-        std::cerr << "bodyclock-cli: could not register the provider\n";
+        std::cerr << "yoai-cli: could not register the provider\n";
         return 1;
     }
 

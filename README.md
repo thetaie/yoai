@@ -66,11 +66,11 @@ install libcurl4-openssl-dev libssl-dev`, or `brew install openssl@3`.
 `build.cmd` wants vcpkg, which is where a Windows machine gets both anyway.
 
 ```
-build.cmd build      # Windows
-./build.sh build     # macOS / Linux
+build.cmd            # Windows
+./build.sh           # macOS / Linux
 ```
 
-With no arguments either script prints its commands and builds nothing.
+`--help` lists the options: `asr` for speech recognition, `clean` to start over.
 
 Paths that differ per machine -- Visual Studio, vcpkg, the llama.cpp checkout
 -- go in `.env` at the root, which git ignores and every C/C++ build script
@@ -82,19 +82,19 @@ Then talk to a real provider without a phone in the loop:
 ```
 rem Windows
 set BODYCLOCK_API_KEY=...
-build\bodyclock-cli.exe --base-url https://open.bigmodel.cn/api/paas/v4 --model glm-4.7-flash
+build\yoai-cli.exe --base-url https://open.bigmodel.cn/api/paas/v4 --model glm-4.7-flash
 ```
 
 ```
 # macOS / Linux
 export BODYCLOCK_API_KEY=...
-./build/bodyclock-cli --base-url https://open.bigmodel.cn/api/paas/v4 --model glm-4.7-flash
+./build/yoai-cli --base-url https://open.bigmodel.cn/api/paas/v4 --model glm-4.7-flash
 ```
 
 With no question argument it goes interactive and keeps the transcript, so
 multi-turn context is exercised too. `--usage` prints the token summary,
 `--debug` turns on core logging. [cli/README.md](cli/README.md) covers every
-desktop tool, including `bodyclock-asr` for speech recognition.
+desktop tool, including `yoai-asr` for speech recognition.
 
 Any OpenAI-compatible endpoint works the same way — only the URL, the key and
 the model name change. Google Gemini is worth spelling out because its
@@ -102,7 +102,7 @@ compatibility layer sits at a path nobody guesses:
 
 ```
 export BODYCLOCK_API_KEY=...          # from https://aistudio.google.com/apikey
-./build/bodyclock-cli --base-url https://generativelanguage.googleapis.com/v1beta/openai \
+./build/yoai-cli --base-url https://generativelanguage.googleapis.com/v1beta/openai \
                  --model gemini-3.6-flash
 ```
 

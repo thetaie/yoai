@@ -1,8 +1,8 @@
 // The sentence splitter, checked against the failures that produced it.
 //
-//     build/bodyclock-reader-test
-//     build/bodyclock-reader-test <talker.gguf> <tokenizer.gguf> [voices] [instruct] [seed]
-//                                 [subtalker_temperature] [reference.wav] [min_chars]
+//     build/yoai-reader-test
+//     build/yoai-reader-test <talker.gguf> <tokenizer.gguf> [voices] [instruct] [seed]
+//                            [subtalker_temperature] [reference.wav] [min_chars]
 //
 // With no arguments this is split_sentences() and SentenceStream alone --
 // plain text processing, so it runs anywhere the core builds and says yes or no

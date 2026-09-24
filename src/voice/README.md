@@ -83,8 +83,8 @@ and `text/` have no engine and work in every build.
 
 ## Tests
 
-`bodyclock-sensevoice-test`, `bodyclock-prosody-test` and
-`bodyclock-reader-test` are plain executables, not registered with CTest; run
+`yoai-sensevoice-test`, `yoai-prosody-test` and
+`yoai-reader-test` are plain executables, not registered with CTest; run
 them directly from the build directory. With no arguments the reader test
 checks `split_sentences` and `SentenceStream`; given a talker and a codec GGUF
 it also reads a passage aloud. The prosody test needs a WAV.

@@ -19,7 +19,7 @@
 //
 // Run it directly, against an EMPTY scratch directory:
 //
-//     build/bodyclock-timeline-abi-test <dir>
+//     build/yoai-timeline-abi-test <dir>
 //
 // Empty because several assertions are about what a fresh install looks like,
 // and a directory with a bodyclock.db already in it fails them for a reason
@@ -70,7 +70,7 @@ bool parse(const char* json, rapidjson::Document* doc) {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::fprintf(stderr, "usage: bodyclock-timeline-abi-test <scratch-dir>\n");
+        std::fprintf(stderr, "usage: yoai-timeline-abi-test <scratch-dir>\n");
         return 2;
     }
     const std::string dir = argv[1];

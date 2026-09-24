@@ -8,7 +8,7 @@
 //
 // Run it directly -- it takes a scratch directory and leaves nothing behind:
 //
-//     build/bodyclock-timeline-test <dir>
+//     build/yoai-timeline-test <dir>
 
 #include "store/timeline.hpp"
 
@@ -105,7 +105,7 @@ long long at_local(int day, int hour, int minute, int tz_minutes) {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::fprintf(stderr, "usage: bodyclock-timeline-test <scratch-dir>\n");
+        std::fprintf(stderr, "usage: yoai-timeline-test <scratch-dir>\n");
         return 2;
     }
     std::string err;

@@ -1,4 +1,4 @@
-// bodyclock-asr -- speech recognition from the command line.
+// yoai-asr -- speech recognition from the command line.
 //
 // Not a product: it exists so the ASR lane can be tried on a workstation
 // against any WAV, without a phone or a test harness in the way. It drives
@@ -7,7 +7,7 @@
 // the tags, and what the stray-capital filter took out -- and the ABI flattens
 // most of that away.
 //
-//   bodyclock-asr <model.gguf> [options] <audio.wav> [more.wav ...]
+//   yoai-asr <model.gguf> [options] <audio.wav> [more.wav ...]
 //
 // The model is loaded once and every file after it goes through the same
 // instance, so a batch pays for the load a single time.
@@ -48,7 +48,7 @@ struct Options {
 
 void usage() {
     std::fprintf(stderr,
-        "usage: bodyclock-asr <model.gguf> [options] <audio.wav> [more.wav ...]\n"
+        "usage: yoai-asr <model.gguf> [options] <audio.wav> [more.wav ...]\n"
         "\n"
         "  -t N        encoder threads (default 4)\n"
         "  --no-itn    no inverse text normalization: numbers stay spoken words,\n"

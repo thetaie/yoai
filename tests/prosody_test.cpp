@@ -4,7 +4,7 @@
 // is the whole point of it -- see design/voice.md. So this runs anywhere the
 // core builds.
 //
-//     build/bodyclock-prosody-test <audio.wav> [more.wav ...]
+//     build/yoai-prosody-test <audio.wav> [more.wav ...]
 //
 // The table it prints is meant to be compared, column by column, against the
 // scratchpad Python that produced the result design/voice.md records. That

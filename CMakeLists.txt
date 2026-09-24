@@ -671,50 +671,50 @@ endif()
 option(BODYCLOCK_BUILD_CLI "Build the desktop CLI harness (cli/)" ${_bodyclock_cli_default})
 
 if(BODYCLOCK_BUILD_CLI)
-    add_executable(bodyclock-cli cli/main.cpp)
-    target_link_libraries(bodyclock-cli PRIVATE bodyclock_core)
+    add_executable(yoai-cli cli/main.cpp)
+    target_link_libraries(yoai-cli PRIVATE bodyclock_core)
 
     # Recognition from the command line: a model, then WAV files. Builds
     # whether or not BODYCLOCK_ASR is on and says which it is, the same way the
     # engine does. tests/ for wav.hpp, the one WAV reader the harnesses share.
-    add_executable(bodyclock-asr cli/asr.cpp)
-    target_link_libraries(bodyclock-asr PRIVATE bodyclock_core)
-    target_include_directories(bodyclock-asr PRIVATE tests)
+    add_executable(yoai-asr cli/asr.cpp)
+    target_link_libraries(yoai-asr PRIVATE bodyclock_core)
+    target_include_directories(yoai-asr PRIVATE tests)
 
     # Rides on the same switch as the CLI, and for the same reason: both are
     # desktop harnesses for the core, and a HAP has nowhere to put an
     # executable. The timeline's rules are the one part of the core that fails
     # silently in the data rather than loudly at runtime, so they get a test.
-    add_executable(bodyclock-timeline-test tests/timeline_test.cpp)
-    target_link_libraries(bodyclock-timeline-test PRIVATE bodyclock_core)
+    add_executable(yoai-timeline-test tests/timeline_test.cpp)
+    target_link_libraries(yoai-timeline-test PRIVATE bodyclock_core)
 
     # The same store through the door a HOST uses, which is a separate thing to
     # get wrong: the rules can be perfect while a JSON key is spelled
     # differently than bodyclock.h says, and a host only ever reads the header.
-    add_executable(bodyclock-timeline-abi-test tests/timeline_abi_test.cpp)
-    target_link_libraries(bodyclock-timeline-abi-test PRIVATE bodyclock_core)
+    add_executable(yoai-timeline-abi-test tests/timeline_abi_test.cpp)
+    target_link_libraries(yoai-timeline-abi-test PRIVATE bodyclock_core)
 
     # Builds whether or not BODYCLOCK_ASR is on. Without it the front-end checks
     # still run and still mean something -- the filterbank is the half that has
     # one right answer -- and the transcription half says it is not compiled in.
-    add_executable(bodyclock-sensevoice-test tests/sensevoice_test.cpp)
-    target_link_libraries(bodyclock-sensevoice-test PRIVATE bodyclock_core)
+    add_executable(yoai-sensevoice-test tests/sensevoice_test.cpp)
+    target_link_libraries(yoai-sensevoice-test PRIVATE bodyclock_core)
 
     # Needs neither a model nor ggml, so it builds in the plain desktop
     # configuration and its table can be checked against the tool that produced
     # the result design/voice.md records.
-    add_executable(bodyclock-prosody-test tests/prosody_test.cpp)
-    target_link_libraries(bodyclock-prosody-test PRIVATE bodyclock_core)
+    add_executable(yoai-prosody-test tests/prosody_test.cpp)
+    target_link_libraries(yoai-prosody-test PRIVATE bodyclock_core)
 
     # One file in, a directory out. Checked against design/pack-mnn-model.py:
     # a truncated weight file is the one failure MNN would answer through
     # rather than report.
-    add_executable(bodyclock-bundle-test tests/bundle_test.cpp)
-    target_link_libraries(bodyclock-bundle-test PRIVATE bodyclock_core)
+    add_executable(yoai-bundle-test tests/bundle_test.cpp)
+    target_link_libraries(yoai-bundle-test PRIVATE bodyclock_core)
 
     # The sentence splitter, which needs no engine. It has a test because its
     # predecessor failed in the one way nothing reports: the reply was read
     # aloud and simply did not say everything.
-    add_executable(bodyclock-reader-test tests/reader_test.cpp)
-    target_link_libraries(bodyclock-reader-test PRIVATE bodyclock_core)
+    add_executable(yoai-reader-test tests/reader_test.cpp)
+    target_link_libraries(yoai-reader-test PRIVATE bodyclock_core)
 endif()

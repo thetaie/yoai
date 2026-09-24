@@ -9,13 +9,13 @@
 // degrade gracefully on features that are merely close. It produces confident
 // text that is wrong, which is indistinguishable from it working.
 //
-//     build/bodyclock-sensevoice-test
+//     build/yoai-sensevoice-test
 //
 // Given a model and audio it transcribes, which needs both and cannot assert
 // much: what a recording says is not a fact this file knows. It prints, and a
 // person reads.
 //
-//     build/bodyclock-sensevoice-test <model.gguf> [-t threads] [-v] <audio.wav> [...]
+//     build/yoai-sensevoice-test <model.gguf> [-t threads] [-v] <audio.wav> [...]
 //
 // It prints the split between the front end and the encoder, which is what
 // answers "is the filterbank worth hand-optimizing" -- and `-t` moves the only

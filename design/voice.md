@@ -753,7 +753,7 @@ effort, and on a coarser cut of this same clip it ranked the segments in the
 ### It is in the core now
 
 `src/voice/prosody/prosody.cpp`, needing neither a model nor ggml — which is the whole
-point of taking arousal from the signal. `bodyclock-prosody-test` prints the
+point of taking arousal from the signal. `yoai-prosody-test` prints the
 table above from a WAV.
 
 **Measured**: against the tool that produced the original result, on the same
@@ -1172,7 +1172,7 @@ are not the analysis boundaries; see the segmentation section.
 `src/voice/` now carries the port: `fbank.*` for the front end and `sensevoice.*`
 for the encoder, behind `-DBODYCLOCK_ASR=ON`, linking the ggml archives and not
 libllama. `build.cmd asr` (or `./build.sh asr`) assembles a desktop ggml SDK and
-turns the lane on; `bodyclock-sensevoice-test` exercises it.
+turns the lane on; `yoai-sensevoice-test` exercises it.
 
 The front end is a separate file for a reason: it is arithmetic with one right
 answer, it needs no model, and getting it subtly wrong is the worst failure
@@ -2451,7 +2451,7 @@ expressed through this API at all.
 
 **"Holds identity" has a number now, and one sample that does not fit.** Pitch
 of the generated takes, all the same sentence, measured with this repo's own
-`bodyclock-prosody-test` rather than by ear — which is the point, since the
+`yoai-prosody-test` rather than by ear — which is the point, since the
 tool that judges the app's recordings can judge its output too:
 
 | | baseline F0 |
