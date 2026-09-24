@@ -22,3 +22,4 @@
 # language stats stops one dependency bump from burying an actual review.
 third/sqlite3/sqlite3.c -diff linguist-vendored
 third/sqlite3/sqlite3.h -diff linguist-vendored
+third/rapidjson/include/** linguist-vendored

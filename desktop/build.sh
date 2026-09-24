@@ -116,9 +116,9 @@ fi
 if [ -n "$DO_ADDON" ]; then
   CMAKE_JS_ARGS=()
 
-  # Same policy as the root build: vcpkg is one way to get curl/openssl/
-  # rapidjson, not a requirement -- the CMakeLists resolves all three with plain
-  # find_package, which a distro's own packages satisfy. A VCPKG_ROOT the caller
+  # Same policy as the root build: vcpkg is one way to get curl and openssl,
+  # not a requirement -- the CMakeLists resolves both with plain find_package,
+  # which a distro's own packages satisfy. A VCPKG_ROOT the caller
   # set is a request, not a hint, so a wrong path is an error rather than a
   # silent fall back to something else.
   VCPKG_EXPLICIT="${VCPKG_ROOT:+yes}"

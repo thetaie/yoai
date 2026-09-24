@@ -9,7 +9,6 @@
       "features": ["openssl"]
     },
     "openssl",
-    "rapidjson",
     "zlib"
   ]
 }

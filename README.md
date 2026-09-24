@@ -59,11 +59,11 @@ which is why the ABI stays this small.
 
 ### Desktop (to exercise the core)
 
-Needs CMake, a C++11 compiler, and libcurl / OpenSSL / RapidJSON. `build.sh`
-takes those from vcpkg when a checkout is there and from the system's own
-packages when it is not — `apt install libcurl4-openssl-dev libssl-dev
-rapidjson-dev`, or `brew install openssl@3 rapidjson`. `build.cmd` wants vcpkg,
-which is where a Windows machine gets all three anyway.
+Needs CMake, a C++11 compiler, and libcurl / OpenSSL; RapidJSON and SQLite are
+vendored in `third/`. `build.sh` takes the two libraries from vcpkg when a
+checkout is there and from the system's own packages when it is not — `apt
+install libcurl4-openssl-dev libssl-dev`, or `brew install openssl@3`.
+`build.cmd` wants vcpkg, which is where a Windows machine gets both anyway.
 
 ```
 build.cmd build      # Windows

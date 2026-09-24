@@ -47,8 +47,8 @@ other should.
 
 ## Building
 
-Needs what the root build needs — CMake, a C++11 compiler, curl / OpenSSL /
-RapidJSON — plus Node 20 or newer.
+Needs what the root build needs — CMake, a C++11 compiler, curl / OpenSSL —
+plus Node 20 or newer.
 
 ```
 build.cmd            # Windows

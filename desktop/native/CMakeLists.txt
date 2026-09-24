@@ -11,8 +11,8 @@ project(bodyclock_addon CXX)
 #
 # Driven by cmake-js, which supplies CMAKE_JS_INC (the Node headers), CMAKE_JS_SRC
 # (the Windows delay-load hook) and CMAKE_JS_LIB, and passes everything else
-# through from ../build.{cmd,sh}: the vcpkg toolchain that resolves curl, OpenSSL
-# and RapidJSON, and the on-device lane's -DBODYCLOCK_ONDEVICE_LLM / -DLLAMA_CPP_DIR.
+# through from ../build.{cmd,sh}: the vcpkg toolchain that resolves curl and
+# OpenSSL, and the on-device lane's -DBODYCLOCK_ONDEVICE_LLM / -DLLAMA_CPP_DIR.
 
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

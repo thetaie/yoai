@@ -79,9 +79,9 @@ x86 host, so that means `build.cmd x86_64` for the native libraries AND adding
 `"x86_64"` to `abiFilters` — the script only produces the libraries, it does not
 decide what goes into the HAP.
 
-`deps` clones vcpkg at the baseline pinned in `../vcpkg.json`, builds `openssl`,
-`curl[openssl]`, `rapidjson` and `zlib` for OHOS, and lays them out under
-`prebuilt/<abi>/`. It has to run at least once: without it, configuring the
+`deps` clones vcpkg at the baseline pinned in `../vcpkg.json`, builds what that
+file lists -- curl with OpenSSL, OpenSSL and zlib -- for OHOS, and lays them out
+under `prebuilt/<abi>/`. It has to run at least once: without it, configuring the
 native module fails on the first `find_package` — deliberately, with a message
 telling you to run this.
 

@@ -38,12 +38,8 @@ find_package(CURL REQUIRED)
 # OpenSSL dependency for the final link to satisfy.
 find_package(OpenSSL REQUIRED)
 
-# Header-only, and packaged inconsistently: vcpkg ships a config file, most
-# distro packages ship only headers.
-find_package(RapidJSON CONFIG QUIET)
-if(NOT RapidJSON_FOUND)
-    find_path(RAPIDJSON_INCLUDE_DIR rapidjson/document.h REQUIRED)
-endif()
+# RapidJSON is not resolved here: it is vendored in third/rapidjson and added
+# to the target below. See there for why.
 
 # SQLite, vendored as the amalgamation in third/sqlite3 rather than
 # resolved like the three above. Two reasons, and neither is about vcpkg:
@@ -216,15 +212,15 @@ target_include_directories(bodyclock_core PUBLIC src)
 # store, not part of what a host sees.
 target_include_directories(bodyclock_core PRIVATE "${_bodyclock_gen_dir}")
 
-if(RapidJSON_FOUND)
-    if(TARGET rapidjson)
-        target_link_libraries(bodyclock_core PUBLIC rapidjson)
-    else()
-        target_include_directories(bodyclock_core PUBLIC ${RAPIDJSON_INCLUDE_DIRS})
-    endif()
-else()
-    target_include_directories(bodyclock_core PUBLIC ${RAPIDJSON_INCLUDE_DIR})
-endif()
+# RapidJSON, vendored: header-only, so a package manager has nothing to build
+# for it. See third/rapidjson/README.md for the version.
+#
+# On the target itself rather than as an interface library, so it comes ahead
+# of every directory a linked package brings in. curl's include/ can hold a
+# RapidJSON of its own -- a vcpkg tree, or a mobile prebuilt/ from before this
+# was vendored -- and two versions in one .so is the crash described under the
+# MNN lane below. MNN is the one exception, and goes BEFORE this on purpose.
+target_include_directories(bodyclock_core PUBLIC third/rapidjson/include)
 
 target_link_libraries(bodyclock_core PUBLIC
     CURL::libcurl
@@ -641,7 +637,7 @@ if(BODYCLOCK_MNN)
     # rapidjson is header-only templates: its member functions are emitted as
     # weak symbols into every object that includes it, and the linker keeps ONE
     # definition of each across the .so. src/llm and src/platform include the
-    # rapidjson this repo already vendors (a recent master); libMNN.a was
+    # rapidjson this repo vendors in third/rapidjson (a 2025 master); libMNN.a was
     # compiled against the 1.1.0 release MNN keeps in 3rd_party. Same mangled
     # names, different struct layouts -- the newer MemoryPoolAllocator holds a
     # SharedData* where 1.1.0 holds chunkHead_ -- so one copy wins the link and

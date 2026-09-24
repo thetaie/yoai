@@ -97,11 +97,11 @@ fi
 
 CMAKE_ARGS=(-DCMAKE_BUILD_TYPE=Release)
 
-# vcpkg is one way to get curl/openssl/rapidjson, not a requirement: the
-# CMakeLists resolves all three with plain find_package, which a distro's own
-# packages satisfy just as well (apt install libcurl4-openssl-dev libssl-dev
-# rapidjson-dev). Cross-compiling for HarmonyOS is the case that really needs
-# vcpkg, and that goes through harmony/build.sh instead.
+# vcpkg is one way to get curl and openssl, not a requirement: the CMakeLists
+# resolves both with plain find_package, which a distro's own packages satisfy
+# just as well (apt install libcurl4-openssl-dev libssl-dev). RapidJSON is
+# vendored in third/. Cross-compiling for HarmonyOS is the case that really
+# needs vcpkg, and that goes through harmony/build.sh instead.
 #
 # A VCPKG_ROOT the caller set is a request, not a hint: a wrong path is an
 # error rather than a silent fall back to the system packages, which would
