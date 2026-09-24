@@ -1,4 +1,4 @@
-#include "voice/reader.hpp"
+#include "voice/tts/reader.hpp"
 
 #include "platform/log.hpp"
 
@@ -11,7 +11,7 @@
 #include <thread>
 #include <vector>
 
-namespace bodyclock {
+namespace yoai {
 namespace voice {
 
 namespace {
@@ -20,160 +20,6 @@ typedef std::chrono::steady_clock clk;
 
 double seconds_since(clk::time_point start) {
     return std::chrono::duration_cast<std::chrono::duration<double> >(clk::now() - start).count();
-}
-
-//------------------------------------------------------------------------------
-// UTF-8
-//------------------------------------------------------------------------------
-
-// Bytes in the sequence starting with `lead`. **1 for anything malformed**, so
-// a stray continuation byte advances the cursor instead of leaving it where it
-// was -- the difference between a garbled piece and a hang.
-std::size_t utf8_len(unsigned char lead) {
-    if (lead < 0x80)          return 1;
-    if ((lead & 0xE0) == 0xC0) return 2;
-    if ((lead & 0xF0) == 0xE0) return 3;
-    if ((lead & 0xF8) == 0xF0) return 4;
-    return 1;
-}
-
-// The codepoint at `i`, with its length. A truncated or malformed sequence
-// decodes as the lead byte itself, which no rule below matches, so it simply
-// becomes an ordinary character.
-unsigned decode(const std::string& s, std::size_t i, std::size_t* len) {
-    const unsigned char lead = static_cast<unsigned char>(s[i]);
-    std::size_t n = utf8_len(lead);
-    if (i + n > s.size()) {
-        n = 1;
-    }
-    *len = n;
-    if (n == 1) {
-        return lead;
-    }
-    static const unsigned kLeadMask[5] = {0, 0, 0x1F, 0x0F, 0x07};
-    unsigned cp = lead & kLeadMask[n];
-    for (std::size_t k = 1; k < n; ++k) {
-        const unsigned char c = static_cast<unsigned char>(s[i + k]);
-        if ((c & 0xC0) != 0x80) {   // not a continuation byte: malformed
-            *len = 1;
-            return lead;
-        }
-        cp = (cp << 6) | (c & 0x3F);
-    }
-    return cp;
-}
-
-bool is_space(unsigned cp) {
-    return cp == ' ' || cp == '\t' || cp == '\r' || cp == '\n' || cp == 0x3000;
-}
-
-bool is_digit(unsigned cp) {
-    return cp >= '0' && cp <= '9';
-}
-
-// Ends a sentence outright. The full-width forms are the ones that matter for
-// this app's text; the ASCII ones are here because a reply mixes them in.
-//
-// '.' is NOT in this set -- see terminates_here().
-bool is_hard_stop(unsigned cp) {
-    return cp == 0x3002     // 。
-        || cp == 0xFF01     // ！
-        || cp == 0xFF1F     // ？
-        || cp == 0xFF1B     // ；
-        || cp == 0x2026     // …
-        || cp == '!' || cp == '?' || cp == ';';
-}
-
-// Punctuation that belongs to the sentence that just ended, so the cut goes
-// AFTER it: a closing quote or bracket left at the head of the next piece is
-// read aloud as a stray character.
-bool is_closer(unsigned cp) {
-    return cp == 0xFF09     // ）
-        || cp == 0x300D     // 」
-        || cp == 0x300F     // 』
-        || cp == 0x201D     // ”
-        || cp == 0x2019     // ’
-        || cp == 0x3011     // 】
-        || cp == 0x300B     // 》
-        || cp == ')' || cp == ']' || cp == '"' || cp == '\'';
-}
-
-// Comma-level. The fallback when a piece has run past max_chars with no full
-// stop in it -- and, with SplitOptions::clause_cuts on, a cut in its own right
-// once the piece is long enough.
-bool is_secondary(unsigned cp) {
-    return cp == 0xFF0C     // ，
-        || cp == 0x3001     // 、
-        || cp == 0xFF1A     // ：
-        || cp == ',' || cp == ':';
-}
-
-// Whether the character at `pos` (which decoded to `cp`, `len` bytes) ends a
-// sentence here.
-//
-// The whole of the subtlety is the ASCII period. "3.14" and "v1.2" are one
-// token each and cutting inside them produces two pieces the engine reads as
-// "three point" and "fourteen". So a '.' ends a sentence only when it is not
-// between two digits -- which keeps "1.5 倍。" working and costs nothing that
-// this app's text actually contains. Abbreviations ("Dr.", "e.g.") are not
-// handled and would cut early; they do not appear in Chinese replies, and the
-// failure is a seam rather than a wrong reading.
-bool terminates_here(const std::string& s, std::size_t pos, unsigned cp, std::size_t len,
-                     unsigned prev_cp) {
-    if (is_hard_stop(cp)) {
-        return true;
-    }
-    if (cp != '.') {
-        return false;
-    }
-    if (is_digit(prev_cp)) {
-        const std::size_t next = pos + len;
-        if (next < s.size() && is_digit(static_cast<unsigned char>(s[next]))) {
-            return false;
-        }
-    }
-    return true;
-}
-
-// Codepoints, which is the unit SplitOptions is expressed in.
-std::size_t chars_in(const std::string& s) {
-    std::size_t n = 0;
-    for (std::size_t i = 0; i < s.size(); ) {
-        std::size_t len;
-        decode(s, i, &len);
-        i += len;
-        ++n;
-    }
-    return n;
-}
-
-// ASCII whitespace plus the ideographic space, from both ends. What reaches the
-// engine, never what the Sentence records.
-std::string trimmed(const std::string& s) {
-    std::size_t b = 0;
-    while (b < s.size()) {
-        std::size_t len;
-        const unsigned cp = decode(s, b, &len);
-        if (!is_space(cp)) {
-            break;
-        }
-        b += len;
-    }
-    std::size_t e = s.size();
-    while (e > b) {
-        // Walk back to the start of the last character, then test it.
-        std::size_t start = e - 1;
-        while (start > b && (static_cast<unsigned char>(s[start]) & 0xC0) == 0x80) {
-            --start;
-        }
-        std::size_t len;
-        const unsigned cp = decode(s, start, &len);
-        if (!is_space(cp)) {
-            break;
-        }
-        e = start;
-    }
-    return s.substr(b, e - b);
 }
 
 //------------------------------------------------------------------------------
@@ -389,161 +235,6 @@ private:
 }  // namespace
 
 //------------------------------------------------------------------------------
-// Splitting
-//------------------------------------------------------------------------------
-
-std::vector<Sentence> split_sentences(const std::string& text, const SplitOptions& opt) {
-    std::vector<Sentence> out;
-    if (text.empty()) {
-        return out;
-    }
-
-    const std::size_t min_chars = opt.min_chars;
-    // A maximum below the minimum would cut every piece before it was allowed
-    // to be cut, which is not a configuration anybody means. The minimum wins,
-    // because it is the one that exists to prevent a specific failure.
-    std::size_t max_chars = opt.max_chars > 0 ? opt.max_chars : 1;
-    if (max_chars < min_chars) {
-        max_chars = min_chars;
-    }
-
-    // Every cut goes through here, so the invariant has one place to hold: a
-    // piece starts where the previous one ended, and `begin` is only ever moved
-    // to the `end` just recorded.
-    std::size_t begin = 0;
-    std::size_t chars = 0;
-    std::size_t last_secondary = 0;   // byte offset just past the last comma
-    unsigned prev_cp = 0;
-    std::size_t i = 0;
-
-    while (i < text.size()) {
-        std::size_t len;
-        const unsigned cp = decode(text, i, &len);
-        const std::size_t cur = i;
-        i += len;
-        ++chars;
-
-        if (is_secondary(cp)) {
-            last_secondary = i;
-        }
-
-        // A newline is a boundary in its own right once the piece is long
-        // enough. A reply with a bulleted list has no full stops in it and
-        // would otherwise be cut only by max_chars, in the middle of items.
-        const bool newline = (cp == '\n');
-        // A comma is a pause, and once a piece is long enough to stand alone
-        // there is nothing to gain by running past one. See clause_cuts.
-        const bool clause = opt.clause_cuts && is_secondary(cp) && chars >= min_chars;
-        if (terminates_here(text, cur, cp, len, prev_cp) || clause ||
-            (newline && chars >= min_chars)) {
-            // Take the closers and any further terminators with it: "好了！」"
-            // and "什么？！" are one ending each.
-            while (i < text.size()) {
-                std::size_t n2;
-                const unsigned cp2 = decode(text, i, &n2);
-                if (!is_closer(cp2) && !is_hard_stop(cp2)) {
-                    break;
-                }
-                i += n2;
-                ++chars;
-            }
-            // And the whitespace after it, so the next piece does not open with
-            // a space. The bytes stay inside THIS piece, which is what keeps
-            // the ranges contiguous.
-            while (i < text.size()) {
-                std::size_t n2;
-                const unsigned cp2 = decode(text, i, &n2);
-                if (!is_space(cp2)) {
-                    break;
-                }
-                i += n2;
-            }
-            if (chars >= min_chars) {
-                Sentence s;
-                s.begin = begin;
-                s.end   = i;
-                s.text  = text.substr(begin, i - begin);
-                out.push_back(s);
-                begin = i;
-                chars = 0;
-                last_secondary = 0;
-            }
-            prev_cp = cp;
-            continue;
-        }
-
-        if (chars >= max_chars) {
-            // No full stop in reach. Cut at the last comma if this piece has
-            // one, and at the character boundary we are standing on if it does
-            // not -- a run-on with no punctuation at all still has to be cut
-            // somewhere, and the seam is the price of not handing the engine an
-            // unbounded utterance.
-            const std::size_t cut = (last_secondary > begin) ? last_secondary : i;
-            Sentence s;
-            s.begin = begin;
-            s.end   = cut;
-            s.text  = text.substr(begin, cut - begin);
-            out.push_back(s);
-            begin = cut;
-            // Rescan from the cut rather than carrying a corrected count
-            // forward: at most max_chars characters are looked at twice, and
-            // the arithmetic that would avoid it is the kind that goes wrong
-            // once and then stays wrong.
-            i = cut;
-            chars = 0;
-            last_secondary = 0;
-            prev_cp = 0;
-            continue;
-        }
-
-        prev_cp = cp;
-    }
-
-    if (begin < text.size()) {
-        // The tail. If it is too short to stand alone, it joins the piece
-        // before it rather than becoming a two-character utterance -- there is
-        // nothing after it to absorb it, which is the case min_chars cannot
-        // handle by waiting.
-        if (chars < min_chars && !out.empty()) {
-            out.back().end  = text.size();
-            out.back().text = text.substr(out.back().begin, text.size() - out.back().begin);
-        } else {
-            Sentence s;
-            s.begin = begin;
-            s.end   = text.size();
-            s.text  = text.substr(begin);
-            out.push_back(s);
-        }
-    }
-
-    // And now the last piece against its OWN minimum, which is higher: a short
-    // final utterance is the one the model does not give a release to. See
-    // SplitOptions::tail_chars for the four measurements.
-    //
-    // Backwards only, and as far as it takes. A passage with nothing long
-    // enough in it becomes one piece, which is the right answer for a passage
-    // that short.
-    while (out.size() >= 2) {
-        const Sentence& last = out.back();
-        std::size_t chars_in_last = 0;
-        for (std::size_t i = 0; i < last.text.size(); ) {
-            std::size_t len;
-            decode(last.text, i, &len);
-            i += len;
-            ++chars_in_last;
-        }
-        if (chars_in_last >= opt.tail_chars) {
-            break;
-        }
-        const std::size_t end = last.end;
-        out.pop_back();
-        out.back().end  = end;
-        out.back().text = text.substr(out.back().begin, end - out.back().begin);
-    }
-    return out;
-}
-
-//------------------------------------------------------------------------------
 // Reader
 //------------------------------------------------------------------------------
 
@@ -594,7 +285,7 @@ struct Reader::Impl {
     ReaderAudioSink          sink;
     void*                    sink_user;
     bool                     running;
-    std::string              pending;    // text not yet settled into a piece
+    SentenceStream           stream;     // text not yet settled into a piece
     clk::time_point          started;
     double                   first_audio;
     double                   starved;
@@ -729,7 +420,28 @@ struct Reader::Impl {
         }
     }
 
-    // Drains the pieces in order on the calling thread. Returns the silence a
+    // Whether the piece just finished was the last one there will ever be.
+    // On a stream that needs `closed` as well as the count: a piece that is
+    // currently last is not the final one if more text is still coming, and
+    // ending the passage on it would fade a join. Only the emitter moves
+    // next_emit, and only it calls this.
+    bool next_emit_is_past_end() {
+        std::lock_guard<std::mutex> lock(mu);
+        return closed && next_emit >= pieces.size();
+    }
+
+    // Queue pieces the stream has settled, so the workers can claim them.
+    // `closing` is set for the last batch, which is where the tail rule can
+    // still reach back into a piece that is queued but not started.
+    void dispatch(const std::vector<std::string>& ready, bool closing);
+
+    // run_emitter on a thread of its own, keeping its two results where
+    // finish() can read them after the join.
+    void stream_emitter() {
+        starved = run_emitter(sink, sink_user, &first_audio, started);
+    }
+
+    // Drains the pieces in order on the emitter thread. Returns the silence a
     // player would have heard.
     //
     // **Not the time this thread spent waiting**, which was the first thing
@@ -742,30 +454,6 @@ struct Reader::Impl {
     // the wall-clock instant at which everything handed over so far would
     // finish playing; audio arriving after it is a hole of exactly that length,
     // and audio arriving before it simply queues.
-    // Whether the piece just finished was the last one. Read under the lock by
-    // the caller's contract: only the emitter moves next_emit, and only it
-    // calls this.
-    // Whether the piece just finished was the last one there will ever be.
-    // On a stream that needs `closed` as well as the count: a piece that is
-    // currently last is not the final one if more text is still coming, and
-    // ending the passage on it would fade a join.
-    bool next_emit_is_past_end() {
-        std::lock_guard<std::mutex> lock(mu);
-        return closed && next_emit >= pieces.size();
-    }
-
-    // Cut whatever text has arrived into pieces the workers can claim.
-    void drain_pending(bool closing);
-
-    // Whether a piece can be dispatched without waiting for what follows it.
-    bool settled_at_end(const std::string& text) const;
-
-    // run_emitter on a thread of its own, keeping its two results where
-    // finish() can read them after the join.
-    void stream_emitter() {
-        starved = run_emitter(sink, sink_user, &first_audio, started);
-    }
-
     double run_emitter(ReaderAudioSink sink, void* user_data, double* first_audio,
                        clk::time_point started) {
         std::vector<float> batch;
@@ -979,86 +667,30 @@ const std::string& Reader::last_error() const {
     return impl_->error;
 }
 
-// Dispatch whatever of `pending` is now settled.
-//
-// A piece is settled when no further text could change where it ends, and a
-// piece handed to an engine cannot be taken back.
-//
-// **Not simply "all but the last one"**, which is what this did first and what
-// cost most of a reply's latency. A piece that already ends at a full stop and
-// is long enough to stand alone is finished whatever arrives next -- the
-// splitter would cut it in the same place either way -- so holding it back
-// bought nothing and waited for the NEXT sentence to begin. Measured on a
-// two-sentence reply, that is what delayed the first word until 605 ms before
-// the writer had finished entirely.
-//
-// The one that genuinely cannot be settled is a piece still mid-sentence: more
-// text extends it, or a full stop three characters later moves its end.
-bool Reader::Impl::settled_at_end(const std::string& text) const {
-    const std::string body = trimmed(text);
-    if (body.empty() || chars_in(body) < split.min_chars) {
-        return false;
-    }
-    // The last character, which needs the start of its own sequence found.
-    std::size_t start = body.size() - 1;
-    while (start > 0 && (static_cast<unsigned char>(body[start]) & 0xC0) == 0x80) {
-        --start;
-    }
-    std::size_t len;
-    const unsigned cp = decode(body, start, &len);
-    if (is_hard_stop(cp) || is_closer(cp)) {
-        return true;
-    }
-    // With clause cuts on, a comma ends a piece as firmly as a full stop does,
-    // so a fragment ending at one is not going to move either.
-    return split.clause_cuts && is_secondary(cp);
-}
-
-void Reader::Impl::drain_pending(bool closing) {
-    if (pending.empty()) {
+void Reader::Impl::dispatch(const std::vector<std::string>& ready, bool closing) {
+    if (ready.empty()) {
         return;
     }
-    // **The tail rule is off until the text is finished**, and leaving it on was
-    // the second thing that kept a stream silent. It exists to stop the LAST
-    // piece of a reply being short, because a short final utterance is the one
-    // the engine ends without a release -- but mid-stream the trailing fragment
-    // is not the last piece of anything, it is the sentence still being
-    // written. Applied to it, the rule merged it backwards on every drain, so
-    // the piece in front of it was never separated out and never dispatched
-    // until the fragment happened to grow past tail_chars.
-    //
-    // Measured on the same passage through both doors: handed over whole it cut
-    // 39 + 47 characters, streamed it cut 62 + 16.
-    SplitOptions opt = split;
-    if (!closing) {
-        opt.tail_chars = 0;
-    }
-    const std::vector<Sentence> cut = split_sentences(pending, opt);
-    std::size_t settled = closing ? cut.size() : (cut.size() > 1 ? cut.size() - 1 : 0);
-    if (!closing && !cut.empty() && settled + 1 == cut.size() &&
-        settled_at_end(cut.back().text)) {
-        ++settled;
-    }
-    if (settled == 0) {
-        return;
-    }
-
-    std::size_t consumed = 0;
     std::lock_guard<std::mutex> lock(mu);
-    for (std::size_t k = 0; k < settled; ++k) {
-        consumed = cut[k].end;
-        const std::string spoken = trimmed(cut[k].text);
-        if (spoken.empty()) {
-            continue;   // whitespace between sentences; nothing to say
-        }
+    for (std::size_t k = 0; k < ready.size(); ++k) {
+        const std::string& spoken = ready[k];
         // The tail rule cannot reach backwards past a piece an engine already
         // has. It still can while the last one is only queued, which is the
         // common case at the end of a reply: the text finishes faster than the
         // speech does. See SplitOptions::tail_chars.
-        const bool short_tail = closing && k + 1 == settled &&
-                                chars_in(spoken) < opt.tail_chars;
+        const bool short_tail = closing && k + 1 == ready.size() &&
+                                count_chars(spoken) < stream.options().tail_chars;
         if (short_tail && !pieces.empty() && next_job < pieces.size()) {
-            pieces.back().text += spoken;
+            // Both sides were trimmed, so the whitespace that separated them
+            // in the reply is gone. Chinese needs none, but two ASCII ends
+            // run together -- "end.Next" -- and the engine reads that as one
+            // word.
+            std::string& prev = pieces.back().text;
+            if (!prev.empty() && static_cast<unsigned char>(prev[prev.size() - 1]) < 0x80 &&
+                static_cast<unsigned char>(spoken[0]) < 0x80) {
+                prev += ' ';
+            }
+            prev += spoken;
             continue;
         }
         Piece piece;
@@ -1077,9 +709,8 @@ void Reader::Impl::drain_pending(bool closing) {
         // the path and `chcp 65001` is no longer needed to read this line.
         platform::log_info("reader: piece %d, %d char(s): %s",
                            static_cast<int>(pieces.size()) - 1,
-                           static_cast<int>(chars_in(spoken)), spoken.c_str());
+                           static_cast<int>(count_chars(spoken)), spoken.c_str());
     }
-    pending.erase(0, consumed);
     cv.notify_all();
 }
 
@@ -1096,7 +727,7 @@ bool Reader::begin(ReaderAudioSink sink, void* user_data) {
     }
 
     m->pieces.clear();
-    m->pending.clear();
+    m->stream.reset(m->split);
     m->next_job    = 0;
     m->next_emit   = 0;
     m->aborted     = false;
@@ -1120,8 +751,8 @@ bool Reader::begin(ReaderAudioSink sink, void* user_data) {
         m->pool.push_back(std::thread(&Impl::run_worker, m, k, want_audio));
     }
     if (want_audio) {
-        // On its own thread here, unlike read(), because begin() returns and
-        // there is no caller left to run it on.
+        // On its own thread, because begin() returns and there is no caller
+        // left to run it on.
         m->emitter = std::thread(&Impl::stream_emitter, m);
     }
     return true;
@@ -1139,8 +770,7 @@ bool Reader::feed(const std::string& delta) {
             return false;
         }
     }
-    m->pending += delta;
-    m->drain_pending(false);
+    m->dispatch(m->stream.feed(delta), false);
     return true;
 }
 
@@ -1154,7 +784,7 @@ bool Reader::finish(ReaderResult* out) {
         return false;
     }
 
-    m->drain_pending(true);
+    m->dispatch(m->stream.finish(), true);
     {
         std::lock_guard<std::mutex> lock(m->mu);
         m->closed = true;
@@ -1225,4 +855,4 @@ bool Reader::read(const std::string& text, ReaderAudioSink sink, void* user_data
 }
 
 }  // namespace voice
-}  // namespace bodyclock
+}  // namespace yoai

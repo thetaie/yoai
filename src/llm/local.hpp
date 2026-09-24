@@ -32,7 +32,7 @@
 #include <string>
 #include <vector>
 
-namespace bodyclock { namespace llm {
+namespace yoai { namespace llm {
 
 struct LocalOptions {
     std::string model_path;      // absolute path to a .gguf

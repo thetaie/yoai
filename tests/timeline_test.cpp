@@ -20,9 +20,9 @@
 #include <string>
 #include <vector>
 
-using bodyclock::store::Timeline;
-using bodyclock::store::Entry;
-using bodyclock::store::Now;
+using yoai::store::Timeline;
+using yoai::store::Entry;
+using yoai::store::Now;
 
 namespace {
 

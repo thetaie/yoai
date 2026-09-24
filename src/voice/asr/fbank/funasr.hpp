@@ -10,7 +10,8 @@
 //
 // No ggml and no model: this is arithmetic over a buffer of samples, so it
 // compiles and can be checked on any platform whether or not the ASR lane is
-// built.
+// built. The FFT is in common.hpp; everything else here is FunASR's convention
+// and stays with it.
 //
 // It is scalar on purpose, and should stay that way.
 //
@@ -41,13 +42,13 @@
 #include <cstddef>
 #include <vector>
 
-namespace bodyclock {
+namespace yoai {
 namespace voice {
 
 // Defaults are SenseVoiceSmall's. They are exposed because a second model on
 // the same front end (Fun-ASR-Nano shares the SAN-M encoder) may differ in the
 // stacking, not so that they can be tuned.
-struct FbankOptions {
+struct FunAsrFbankOptions {
     int   sample_rate  = 16000;
     int   frame_length = 400;      // 25 ms
     int   frame_shift  = 160;      // 10 ms
@@ -65,9 +66,9 @@ struct FbankOptions {
     int   lfr_n        = 6;
 };
 
-class Fbank {
+class FunAsrFbank {
 public:
-    explicit Fbank(const FbankOptions& opt = FbankOptions());
+    explicit FunAsrFbank(const FunAsrFbankOptions& opt = FunAsrFbankOptions());
 
     // `pcm` is mono, at opt.sample_rate, nominally in [-1, 1].
     //
@@ -84,14 +85,14 @@ public:
     // Used to size buffers and to decline a clip up front.
     int frames_for(size_t n) const;
 
-    const FbankOptions& options() const { return opt_; }
+    const FunAsrFbankOptions& options() const { return opt_; }
 
 private:
     // One frame of samples to n_mel log-energies. Separate so the mel stage can
     // be checked on its own against a reference frame.
     void mel_frame(const float* samples, float* out) const;
 
-    FbankOptions       opt_;
+    FunAsrFbankOptions opt_;
     std::vector<float> window_;      // frame_length
     std::vector<float> mel_weights_; // n_mel * n_bins, mostly zero, dense anyway
     std::vector<int>   mel_begin_;   // first non-zero bin per filter
@@ -100,4 +101,4 @@ private:
 };
 
 }  // namespace voice
-}  // namespace bodyclock
+}  // namespace yoai

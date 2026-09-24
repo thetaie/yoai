@@ -15,7 +15,7 @@
     static_assert(__cplusplus >= 201103L, "bodyclock requires C++11 or newer");
 #endif
 
-namespace bodyclock { namespace platform {
+namespace yoai { namespace platform {
 
 // Minimum severity that will be emitted. Anything below the current level is
 // dropped. Mirrors the LOG_LEVEL config values; the threshold is process-wide.

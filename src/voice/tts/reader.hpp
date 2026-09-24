@@ -1,10 +1,12 @@
 // A passage read aloud: split into sentences, synthesized in parallel, emitted
 // in order as it is ready.
 //
-// This sits ON TOP of Qtts rather than beside it. qtts.hpp speaks one utterance
-// and blocks; this takes a whole reply, cuts it, runs several engines over the
-// pieces at once, and hands the audio out in reading order so a player can
-// start on the first sentence while the last is still being generated.
+// This sits ON TOP of Qtts rather than beside it. qwen3_tts.hpp speaks one
+// utterance and blocks; this takes a whole reply, cuts it, runs several engines
+// over the pieces at once, and hands the audio out in reading order so a player
+// can start on the first sentence while the last is still being generated. The
+// cutting itself is voice/text/sentence_stream.hpp, which knows nothing about
+// audio.
 //
 // **It reopens a decision this project made the other way, and the reason that
 // decision was made turns out to have been a different setting.** Synthesizing
@@ -40,16 +42,16 @@
 // occasional bad draw.
 //
 // **This is not splitting making each piece worse. It is splitting multiplying
-// the exposure.** qtts.hpp already records that the engine occasionally draws a
-// take with something wrong in it -- a half five decibels louder than the
-// other -- and that nothing in the API prevents it. One utterance is one draw,
+// the exposure.** qwen3_tts.hpp already records that the engine occasionally
+// draws a take with something wrong in it -- a half five decibels louder than
+// the other -- and that nothing in the API prevents it. One utterance is one draw,
 // and a bad one spoils a reply that is then obviously worth generating again. N
 // pieces are N draws, so the chance of at least one goes up with the count, and
 // the damage lands on one sentence in the middle of a reply that is otherwise
 // right, which is both harder to notice in testing and worse to listen to.
 //
 // **Narrowing the sampler was tried and is not the answer** -- see
-// Reader::set_sampling and the table in qtts.hpp. At argmax on the acoustic
+// Reader::set_sampling and the table in qwen3_tts.hpp. At argmax on the acoustic
 // stack the excursion still happens, and on average it happens more, so this is
 // not a draw that is too wide. It is a draw with nothing to hold it: every
 // piece is conditioned on a speaker token and no acoustic history, so nothing
@@ -152,7 +154,7 @@
 // changed nothing, on a machine with 22 of them.
 //
 // The reasoning that predicted otherwise is still worth reading, because it is
-// right about the first half: qtts.hpp records 4, 6 and 8 threads landing
+// right about the first half: qwen3_tts.hpp records 4, 6 and 8 threads landing
 // within 2% of each other, which is what a stage that has stopped scaling with
 // threads looks like -- and such a stage is where running two side by side
 // normally wins. It does not win here, and the shape of the failure is the same
@@ -181,145 +183,11 @@
 #include <string>
 #include <vector>
 
-#include "voice/qtts.hpp"
+#include "voice/text/sentence_stream.hpp"
+#include "voice/tts/qwen3_tts.hpp"
 
-namespace bodyclock {
+namespace yoai {
 namespace voice {
-
-//------------------------------------------------------------------------------
-// Splitting
-//------------------------------------------------------------------------------
-
-// One piece of the passage, as a byte range into it.
-//
-// `text` is the EXACT slice, punctuation and trailing whitespace included, not
-// a cleaned-up version. That is what makes the invariant below checkable, and a
-// caller that wants the spoken form trims it -- which is what Reader does.
-struct Sentence {
-    std::string text;
-    std::size_t begin = 0;   // byte offset into the passage
-    std::size_t end   = 0;   // one past the last byte
-};
-
-// Where the cuts are allowed to fall.
-//
-// Both counts are in CHARACTERS, not bytes: a Chinese sentence of twenty
-// characters is sixty bytes, and a limit expressed in bytes would cut Chinese
-// three times as often as English for no reason anybody could see.
-struct SplitOptions {
-    // Below this, a piece is NOT cut even at a full stop -- it keeps going and
-    // absorbs the next sentence.
-    //
-    // It exists because of a failure that is easy to reproduce and hard to
-    // notice: "你好。" and "你觉得呢？" are complete sentences of three and five
-    // characters, and synthesized alone they come out clipped and oddly
-    // stressed, because there is not enough text for the model to build a
-    // prosody arc over. Worse, an earlier cut here dropped them entirely.
-    //
-    // **30 rather than the 12 that only avoided that failure**, and the
-    // difference was heard rather than computed. At 12 a listener's verdict on
-    // the split take was that it is correct but "less natural than the whole
-    // one, the pace too even"; at 30, on the same passage and seed, "better".
-    // A piece holding two or three sentences gives the model room to plan a
-    // pace across them, which is the one thing anchoring the voice cannot do --
-    // see set_reference_voice.
-    //
-    // **Its cost is on a clock this class cannot see, and the two clocks are
-    // easy to conflate.** There are two "time to first audio":
-    //
-    //   1. From the reader seeing the first WORD to hearing the first sound.
-    //      The one a person experiences.
-    //   2. From text entering the engine to the first samples leaving it. What
-    //      ReaderResult::first_audio_seconds reports.
-    //
-    // This number barely touches (2) -- 0.15 s at 12 against 0.12 s at 30,
-    // because the engine streams and the first chunk of a piece arrives in
-    // about that long however long the piece is. It sets (1) almost entirely:
-    // in the streaming case it is how much the language model must have written
-    // before anything can be sent, and the wait is for a COMPLETE sentence of
-    // at least this many characters, not for this many characters.
-    //
-    // So its price depends on the lane writing the text, not on this one. The
-    // on-device model decodes at 14 tok/s (design/voice.md), where eighteen
-    // further characters is on the order of a second; a remote model is several
-    // times faster and it is a fraction of that. Neither is measured here,
-    // because read() is handed text that already exists -- (1) only becomes
-    // measurable from an incremental entry point, where the clock starts at the
-    // first token rather than at the call.
-    //
-    // One passage, one listener, one judgement. It is the right default until
-    // somebody sits through a longer one.
-    std::size_t min_chars = 30;
-
-    // Above this a piece is cut even with no punctuation to cut at, at the last
-    // comma if there is one and at a character boundary if there is not.
-    //
-    // A run-on with no full stop would otherwise become one enormous say(), and
-    // the whole point of cutting is to have something to hand the player early.
-    std::size_t max_chars = 60;
-
-    // The LAST piece gets its own, higher minimum, and merges backwards until
-    // it reaches it.
-    //
-    // **A short final utterance does not get a release.** The model stops
-    // generating while the last vowel is still sounding, so the reply ends at
-    // -34 dBFS instead of at the noise floor -- heard as abrupt, with a click
-    // that a fade softens and does not remove, because what is missing is the
-    // release rather than a smooth edge. Measured on one passage, cutting it
-    // four ways:
-    //
-    //   min_chars   final piece        ending
-    //   12          24 chars, 4.60 s   cut, -34.5 dBFS
-    //   16          24 chars, 4.60 s   cut, -34.5
-    //   20          24 chars, 4.60 s   cut, -34.5
-    //   24          48 chars, 9.83 s   released, -67.8
-    //
-    // The same final sentence, cut three ways into the same short piece, ends
-    // abruptly every time; folded into a longer one it does not. It is the
-    // length of the last utterance, not the number of pieces.
-    //
-    // **And lengthening it is free.** Every other piece trades size against how
-    // soon it can be spoken; the last one is heard when the listener is already
-    // listening, so nothing waits on it. That is why this is a separate number
-    // rather than a reason to raise min_chars.
-    //
-    // 40 sits between the two measured points and is fitted to exactly those
-    // two. A passage with no piece long enough simply ends up as one.
-    std::size_t tail_chars = 40;
-
-    // Whether a comma ends a piece once min_chars has been reached, the same
-    // way a full stop does.
-    //
-    // OFF by default, because the unit it produces is a clause and the unit
-    // that sounded best was a sentence or two -- the pieces a model plans a
-    // pace across. Commas are otherwise only a fallback: a piece runs to
-    // max_chars and is then cut at the last one.
-    //
-    // **On a stream that fallback is far too late.** A reply of 45 characters
-    // with its only full stop at the end has commas at 14 and 28, and with this
-    // off nothing could be spoken until all 45 had been written -- measured,
-    // both of its pieces were dispatched in the same millisecond, 481 ms before
-    // the writer finished. With it on, the clause ending at character 28 goes
-    // as soon as it arrives.
-    //
-    // So this is the trade the streaming case makes and the buffered one does
-    // not: a shorter unit, spoken sooner.
-    bool clause_cuts = false;
-};
-
-// Cut `text` into pieces that can each be synthesized on their own.
-//
-// **The invariant is that nothing is lost**: the pieces are contiguous, in
-// order, and their byte ranges cover the whole passage. Concatenating every
-// `text` reproduces the input exactly. This is stated because the version of
-// this that was written inline in the desktop client did not hold it -- it
-// advanced a cursor past sentences it decided were too short, and they were
-// silently never spoken. An invariant that can be checked is the difference.
-//
-// An empty passage gives an empty vector. A passage with no terminator at all
-// gives one piece, or several if it is longer than `max_chars`.
-std::vector<Sentence> split_sentences(const std::string& text,
-                                      const SplitOptions& opt = SplitOptions());
 
 //------------------------------------------------------------------------------
 // Reading
@@ -472,8 +340,8 @@ public:
     // saying here because it is the obvious guess and it was tried. Narrowing
     // `subtalker_temperature` to argmax made the piece-to-piece spread worse on
     // average over four seeds and produced a fresh four-semitone excursion of
-    // its own; qtts.hpp has the table. The excursion is the absence of acoustic
-    // conditioning between pieces, not the width of the draw.
+    // its own; qwen3_tts.hpp has the table. The excursion is the absence of
+    // acoustic conditioning between pieces, not the width of the draw.
     //
     // What it is good for is everything a narrower draw does control, and a
     // split passage wants a narrower draw on those axes for the same reason it
@@ -555,4 +423,4 @@ private:
 };
 
 }  // namespace voice
-}  // namespace bodyclock
+}  // namespace yoai

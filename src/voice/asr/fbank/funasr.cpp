@@ -1,14 +1,15 @@
-#include "voice/fbank.hpp"
+#include "voice/asr/fbank/funasr.hpp"
+
+#include "voice/asr/fbank/common.hpp"
 
 #include <cmath>
 #include <cstring>
-#include <utility>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
-namespace bodyclock {
+namespace yoai {
 namespace voice {
 namespace {
 
@@ -23,52 +24,9 @@ inline float hz_to_mel(float f) {
 // otherwise -inf, which propagates through the whole encoder.
 const float kEnergyFloor = 1.1920929e-07f;
 
-// In-place radix-2 FFT. n is a power of two (512 here), so the bit-reversal
-// permutation and the butterflies need no special cases. Complex input with
-// im[] zeroed: a real-input transform would halve the work, but at 512 points
-// per 10 ms this is already far under the encoder's cost, and the simple form
-// is the one that can be read against the reference.
-void fft_radix2(std::vector<float>& re, std::vector<float>& im, int n) {
-    for (int i = 1, j = 0; i < n; ++i) {
-        int bit = n >> 1;
-        for (; j & bit; bit >>= 1) {
-            j ^= bit;
-        }
-        j ^= bit;
-        if (i < j) {
-            std::swap(re[i], re[j]);
-            std::swap(im[i], im[j]);
-        }
-    }
-    for (int len = 2; len <= n; len <<= 1) {
-        const double ang = -2.0 * M_PI / len;
-        const float  wr  = static_cast<float>(std::cos(ang));
-        const float  wi  = static_cast<float>(std::sin(ang));
-        for (int i = 0; i < n; i += len) {
-            float cr = 1.0f;
-            float ci = 0.0f;
-            for (int k = 0; k < len / 2; ++k) {
-                const float ur = re[i + k];
-                const float ui = im[i + k];
-                const float xr = re[i + k + len / 2];
-                const float xi = im[i + k + len / 2];
-                const float vr = xr * cr - xi * ci;
-                const float vi = xr * ci + xi * cr;
-                re[i + k]           = ur + vr;
-                im[i + k]           = ui + vi;
-                re[i + k + len / 2] = ur - vr;
-                im[i + k + len / 2] = ui - vi;
-                const float nc = cr * wr - ci * wi;
-                ci = cr * wi + ci * wr;
-                cr = nc;
-            }
-        }
-    }
-}
-
 }  // namespace
 
-Fbank::Fbank(const FbankOptions& opt)
+FunAsrFbank::FunAsrFbank(const FunAsrFbankOptions& opt)
     : opt_(opt), n_bins_(opt.n_fft / 2 + 1) {
     // Hamming, with the (frame_length - 1) denominator -- the symmetric form.
     // The periodic form differs by one sample's worth of phase and is what most
@@ -117,7 +75,7 @@ Fbank::Fbank(const FbankOptions& opt)
     }
 }
 
-int Fbank::frames_for(size_t n) const {
+int FunAsrFbank::frames_for(size_t n) const {
     if (n < static_cast<size_t>(opt_.frame_length)) {
         return 0;
     }
@@ -126,7 +84,7 @@ int Fbank::frames_for(size_t n) const {
     return (t + opt_.lfr_n - 1) / opt_.lfr_n;
 }
 
-void Fbank::mel_frame(const float* samples, float* out) const {
+void FunAsrFbank::mel_frame(const float* samples, float* out) const {
     const int len = opt_.frame_length;
 
     // Remove the DC offset per frame, then pre-emphasize. Both are Kaldi
@@ -155,7 +113,7 @@ void Fbank::mel_frame(const float* samples, float* out) const {
     for (int i = 0; i < len; ++i) {
         re[i] = frame[i] * window_[i];
     }
-    fft_radix2(re, im, opt_.n_fft);
+    fbank::fft_radix2(re, im, opt_.n_fft);
 
     for (int m = 0; m < opt_.n_mel; ++m) {
         const float* row = &mel_weights_[static_cast<size_t>(m) * n_bins_];
@@ -167,7 +125,7 @@ void Fbank::mel_frame(const float* samples, float* out) const {
     }
 }
 
-std::vector<float> Fbank::compute(const float* pcm, size_t n, int* frames) const {
+std::vector<float> FunAsrFbank::compute(const float* pcm, size_t n, int* frames) const {
     *frames = 0;
     if (pcm == nullptr || n < static_cast<size_t>(opt_.frame_length)) {
         return std::vector<float>();
@@ -230,4 +188,4 @@ std::vector<float> Fbank::compute(const float* pcm, size_t n, int* frames) const
 }
 
 }  // namespace voice
-}  // namespace bodyclock
+}  // namespace yoai

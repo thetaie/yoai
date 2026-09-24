@@ -650,7 +650,7 @@ Each number is doing a job:
 - **The transcript supplies boundaries too, and they are now free.** Greedy CTC
   knows which encoder frame emitted each token, and an encoder frame is 60 ms,
   so every token carries a timestamp out of the same forward pass at no extra
-  cost. `src/voice/sensevoice.hpp` returns them. This was an open question until
+  cost. `src/voice/asr/sensevoice.hpp` returns them. This was an open question until
   the port was written; it is answered, and it means punctuation is available as
   a boundary. Punctuation beats pauses — people pause where sentences do not
   end, and end sentences without pausing — and a pause confirmed by punctuation
@@ -752,7 +752,7 @@ effort, and on a coarser cut of this same clip it ranked the segments in the
 
 ### It is in the core now
 
-`src/voice/prosody.cpp`, needing neither a model nor ggml — which is the whole
+`src/voice/prosody/prosody.cpp`, needing neither a model nor ggml — which is the whole
 point of taking arousal from the signal. `bodyclock-prosody-test` prints the
 table above from a WAV.
 
@@ -1441,7 +1441,7 @@ prompt** — and on this device that came to 5.68 s against about 1.5 s, of whic
 2.6× is the token count and 1.5× is 3B against 2B.
 
 (The ~0.31 is inferred: that run logged its token count but not its clip length,
-which is the bug the logging fix in `src/voice/omni.cpp` was for. The next run
+which is the bug the logging fix in `src/voice/omni/qwen25_omni.cpp` was for. The next run
 prints the length directly.)
 
 **The derived ~26 tok/s was close.** Measured on the phone through MNN, with the
@@ -1732,7 +1732,7 @@ sees an empty answer rather than a broken engine, forever, until the model is
 loaded again.
 
 **The control** was a desktop program driving the engine exactly as
-`src/voice/omni.cpp` does — an in-memory waveform through `MultimodalPrompt`,
+`src/voice/omni/qwen25_omni.cpp` does — an in-memory waveform through `MultimodalPrompt`,
 one `response()` call — rather than MNN's own demo. It answered correctly,
 **263 prompt tokens to 35 generated**, which is what narrowed the difference
 between the two machines down to the overrides this file had added.
@@ -2939,7 +2939,7 @@ prosody, and the recording it would clone is the one judged best of everything
 generated here.
 
 `bodyclock_tts_set_reference` now takes a WAV and its transcript, and
-`src/voice/qtts.cpp` carries a RIFF reader strict enough to refuse anything that
+`src/voice/tts/qwen3_tts.cpp` carries a RIFF reader strict enough to refuse anything that
 is not mono 16-bit at exactly 24 kHz — the same no-resampler rule the
 recognition lane states at 16 kHz, for the same reason. The page shows the
 reference controls only for a `base` checkpoint and nothing else for it, because

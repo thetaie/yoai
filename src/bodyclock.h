@@ -662,7 +662,7 @@ typedef void (*bodyclock_omni_text_handler)(const char* text, void* user_data);
 // number is not a limit. It was set from two runs that read as a boundary;
 // re-measured, the same clip at the same length both crashes and succeeds, at
 // any thread count. The guard shortens the input rather than avoiding the bug.
-// See src/voice/omni.hpp and design/voice.md.
+// See src/voice/omni/qwen25_omni.hpp and design/voice.md.
 const char* bodyclock_omni_ask(const short* pcm,
                           int n_samples,
                           const char* prompt,
@@ -901,7 +901,7 @@ const char* bodyclock_tts_last_error(void);
 // above, so **only one of the two should be loaded at a time** -- together they
 // hold the weights twice. A host that offers both switches by unloading.
 //
-// What splitting costs and what holds it together is in src/voice/reader.hpp,
+// What splitting costs and what holds it together is in src/voice/tts/reader.hpp,
 // measured: a pinned seed, a reference voice to anchor the register, a minimum
 // on the last piece, and the edge shaping that makes a join sound like a pause
 // rather than like two files played back to back.
@@ -916,8 +916,9 @@ int bodyclock_reader_available(void);
 // Read the two GGUFs into `voices` engines. BLOCKS. `voices` below 1 is 1.
 //
 // **Each voice is another copy of the weights**, and on this desktop a second
-// one measured slightly SLOWER rather than faster -- see reader.hpp. 1 is the
-// number to pass until a device says otherwise.
+// one measured slightly SLOWER rather than faster -- see
+// src/voice/tts/reader.hpp. 1 is the number to pass until a device says
+// otherwise.
 int bodyclock_reader_load(const char* talker_path, const char* codec_path, int voices);
 int bodyclock_reader_loaded(void);
 void bodyclock_reader_unload(void);
@@ -933,8 +934,8 @@ const char* bodyclock_reader_model_type(void);
 // generation, and with nothing acoustic in common they drift in register: one
 // sentence in sixteen came out five semitones low, which is heard as the voice
 // changing mid-reply. Anchoring every piece to one embedding removed it on
-// four seeds out of four and cost nothing measurable in speed. reader.hpp has
-// the numbers.
+// four seeds out of four and cost nothing measurable in speed.
+// src/voice/tts/reader.hpp has the numbers.
 void bodyclock_reader_set_voice(const char* instruct);
 void bodyclock_reader_set_speaker(const char* name);
 int bodyclock_reader_set_reference_voice(const char* wav_path);
@@ -965,7 +966,7 @@ void bodyclock_reader_set_split(int min_chars, int max_chars, int tail_chars);
 // end cannot be spoken until all of it has been written -- measured, a
 // 45-character reply had both its pieces dispatched in the same millisecond.
 // What it costs is the unit: a clause rather than a sentence, which is shorter
-// than the one that sounded best. See src/voice/reader.hpp.
+// than the one that sounded best. See src/voice/tts/reader.hpp.
 void bodyclock_reader_set_clause_cuts(int on);
 
 // Worker threads per engine for the NEXT load. <= 0 leaves the engine's choice.

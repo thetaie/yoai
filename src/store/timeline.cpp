@@ -11,7 +11,7 @@
 #include <ctime>
 #include <mutex>
 
-namespace bodyclock {
+namespace yoai {
 namespace store {
 
 namespace {
@@ -655,4 +655,4 @@ bool Timeline::day(int local_day, std::vector<Entry>* out, std::string* err) {
 }
 
 }  // namespace store
-}  // namespace bodyclock
+}  // namespace yoai

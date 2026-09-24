@@ -20,11 +20,11 @@
 #include "platform/log.hpp"
 #include "platform/membw.hpp"
 #include "store/timeline.hpp"
-#include "voice/omni.hpp"
-#include "voice/prosody.hpp"
-#include "voice/qtts.hpp"
-#include "voice/reader.hpp"
-#include "voice/sensevoice.hpp"
+#include "voice/omni/qwen25_omni.hpp"
+#include "voice/prosody/prosody.hpp"
+#include "voice/tts/qwen3_tts.hpp"
+#include "voice/tts/reader.hpp"
+#include "voice/asr/sensevoice.hpp"
 
 #include <chrono>
 
@@ -40,13 +40,13 @@
 
 namespace {
 
-using bodyclock::llm::ChatMessage;
-using bodyclock::llm::Event;
-using bodyclock::llm::EventType;
-using bodyclock::llm::LocalClient;
-using bodyclock::llm::LocalOptions;
-using bodyclock::llm::LocalStats;
-using bodyclock::llm::OpenAIChatOptions;
+using yoai::llm::ChatMessage;
+using yoai::llm::Event;
+using yoai::llm::EventType;
+using yoai::llm::LocalClient;
+using yoai::llm::LocalOptions;
+using yoai::llm::LocalStats;
+using yoai::llm::OpenAIChatOptions;
 
 // Wall clock, not clock(). These figures are reported to a person as "how long
 // it took", and clock() answers a different question: on POSIX it is processor
@@ -102,7 +102,7 @@ std::map<std::string, std::shared_ptr<LocalClient> >& local_clients() {
 // the first one a host calls.
 void ensure_curl() {
     static std::once_flag once;
-    std::call_once(once, []() { bodyclock::client::HttpClient::global_init(); });
+    std::call_once(once, []() { yoai::client::HttpClient::global_init(); });
 }
 
 // Look up `id` and hand back a COPY of its entry, so the turn that follows is
@@ -168,7 +168,7 @@ const char* tag_for(EventType t) {
     return "error";
 }
 
-std::string usage_json(const bodyclock::llm::CostStatistics& c) {
+std::string usage_json(const yoai::llm::CostStatistics& c) {
     rapidjson::StringBuffer buf;
     rapidjson::Writer<rapidjson::StringBuffer> w(buf);
     w.StartObject();
@@ -216,7 +216,7 @@ void apply_local_options(const char* options_json, LocalOptions* opt) {
     rapidjson::Document doc;
     doc.Parse(options_json);
     if (doc.HasParseError() || !doc.IsObject()) {
-        bodyclock::platform::log_warn(
+        yoai::platform::log_warn(
             "bodyclock_local_set: ignoring options_json, not a JSON object: %.120s", options_json);
         return;
     }
@@ -279,7 +279,7 @@ bool blank(const char* s) { return s == nullptr || *s == '\0'; }
 // The day log
 //------------------------------------------------------------------------------
 
-using bodyclock::store::Timeline;
+using yoai::store::Timeline;
 
 std::mutex& timeline_mutex() {
     static std::mutex m;
@@ -350,7 +350,7 @@ void write_json_string(rapidjson::Writer<rapidjson::StringBuffer>& w,
 // One entry, notes and all. The shape is documented in bodyclock.h; keep the
 // two in step, because a host reads only the header.
 void write_entry(rapidjson::Writer<rapidjson::StringBuffer>& w,
-                 const bodyclock::store::Entry& e) {
+                 const yoai::store::Entry& e) {
     w.StartObject();
     w.Key("id");        w.Int64(e.id);
     w.Key("stateId");   write_json_string(w, e.state_id);
@@ -364,7 +364,7 @@ void write_entry(rapidjson::Writer<rapidjson::StringBuffer>& w,
     w.Key("notes");
     w.StartArray();
     for (size_t i = 0; i < e.notes.size(); ++i) {
-        const bodyclock::store::Note& n = e.notes[i];
+        const yoai::store::Note& n = e.notes[i];
         w.StartObject();
         w.Key("id");   w.Int64(n.id);
         w.Key("text"); write_json_string(w, n.text);
@@ -377,7 +377,7 @@ void write_entry(rapidjson::Writer<rapidjson::StringBuffer>& w,
 
 // A list read -- recent() and day() differ only in which method they call and
 // which buffer they land in, so the marshalling is written once.
-const char* timeline_entries_json(std::vector<bodyclock::store::Entry>& entries,
+const char* timeline_entries_json(std::vector<yoai::store::Entry>& entries,
                                   std::string& buffer) {
     rapidjson::StringBuffer buf;
     rapidjson::Writer<rapidjson::StringBuffer> w(buf);
@@ -402,7 +402,7 @@ extern "C" const char* bodyclock_version(void) {
 
 extern "C" void bodyclock_set_log_level(const char* level) {
     if (blank(level)) return;
-    bodyclock::platform::set_log_level(level);
+    yoai::platform::set_log_level(level);
 }
 
 //------------------------------------------------------------------------------
@@ -510,7 +510,7 @@ extern "C" const char* bodyclock_timeline_now(void) {
     std::shared_ptr<Timeline> t = timeline_checked();
     if (!t) return nullptr;
 
-    bodyclock::store::Now now;
+    yoai::store::Now now;
     std::string err;
     if (!t->now(&now, &err)) {
         timeline_error() = err;
@@ -542,7 +542,7 @@ extern "C" const char* bodyclock_timeline_recent(int hours) {
     std::shared_ptr<Timeline> t = timeline_checked();
     if (!t) return nullptr;
 
-    std::vector<bodyclock::store::Entry> entries;
+    std::vector<yoai::store::Entry> entries;
     std::string err;
     if (!t->recent(hours, &entries, &err)) {
         timeline_error() = err;
@@ -555,7 +555,7 @@ extern "C" const char* bodyclock_timeline_day(int local_day) {
     std::shared_ptr<Timeline> t = timeline_checked();
     if (!t) return nullptr;
 
-    std::vector<bodyclock::store::Entry> entries;
+    std::vector<yoai::store::Entry> entries;
     std::string err;
     if (!t->day(local_day, &entries, &err)) {
         timeline_error() = err;
@@ -597,7 +597,7 @@ extern "C" int bodyclock_provider_set(const char* id,
                                  const char* model,
                                  const char* extra_json) {
     if (blank(id) || blank(base_url) || blank(api_key) || blank(model)) {
-        bodyclock::platform::log_warn("bodyclock_provider_set: id, base_url, api_key and model are all required");
+        yoai::platform::log_warn("bodyclock_provider_set: id, base_url, api_key and model are all required");
         return 1;
     }
 
@@ -623,7 +623,7 @@ extern "C" int bodyclock_provider_set(const char* id,
         forget_local_client(id);
     }
     // The key is deliberately absent from this line.
-    bodyclock::platform::log_info("provider registered: %s -> %s (%s)", id, base_url, model);
+    yoai::platform::log_info("provider registered: %s -> %s (%s)", id, base_url, model);
     return 0;
 }
 
@@ -663,7 +663,7 @@ extern "C" int bodyclock_local_set(const char* id,
                               const char* model_path,
                               const char* options_json) {
     if (blank(id) || blank(model_path)) {
-        bodyclock::platform::log_warn("bodyclock_local_set: id and model_path are both required");
+        yoai::platform::log_warn("bodyclock_local_set: id and model_path are both required");
         return 1;
     }
 
@@ -683,7 +683,7 @@ extern "C" int bodyclock_local_set(const char* id,
         // next turn builds a fresh engine from what was just registered.
         forget_local_client(id);
     }
-    bodyclock::platform::log_info("on-device model registered: %s -> %s", id, model_path);
+    yoai::platform::log_info("on-device model registered: %s -> %s", id, model_path);
     return 0;
 }
 
@@ -693,13 +693,13 @@ extern "C" int bodyclock_local_load(const char* id) {
     // Outside the registry lock, deliberately: this reads gigabytes.
     std::shared_ptr<LocalClient> client = local_client_for(id);
     if (!client) {
-        bodyclock::platform::log_warn("bodyclock_local_load: %s is not an on-device model", id);
+        yoai::platform::log_warn("bodyclock_local_load: %s is not an on-device model", id);
         return 1;
     }
 
     std::string err;
     if (!client->load(err)) {
-        bodyclock::platform::log_warn("bodyclock_local_load(%s): %s", id, err.c_str());
+        yoai::platform::log_warn("bodyclock_local_load(%s): %s", id, err.c_str());
         return 1;
     }
     return 0;
@@ -710,7 +710,7 @@ extern "C" int bodyclock_local_set_threads(const char* id, int threads) {
 
     std::shared_ptr<LocalClient> client = local_client_for(id);
     if (!client) {
-        bodyclock::platform::log_warn(
+        yoai::platform::log_warn(
             "bodyclock_local_set_threads: %s is not an on-device model", id);
         return 1;
     }
@@ -718,7 +718,7 @@ extern "C" int bodyclock_local_set_threads(const char* id, int threads) {
     // Logged rather than returned, because the number that matters is the one
     // the NEXT "on-device turn:" line was produced with, and the two lines are
     // read together.
-    bodyclock::platform::log_info("on-device threads: %s -> %d", id, threads);
+    yoai::platform::log_info("on-device threads: %s -> %d", id, threads);
     return 0;
 }
 
@@ -727,17 +727,17 @@ extern "C" int bodyclock_local_forget(const char* id) {
 
     std::shared_ptr<LocalClient> client = local_client_for(id);
     if (!client) {
-        bodyclock::platform::log_warn("bodyclock_local_forget: %s is not an on-device model", id);
+        yoai::platform::log_warn("bodyclock_local_forget: %s is not an on-device model", id);
         return 1;
     }
     client->forget();
-    bodyclock::platform::log_info("on-device context cleared: %s", id);
+    yoai::platform::log_info("on-device context cleared: %s", id);
     return 0;
 }
 
 extern "C" const char* bodyclock_memory_bandwidth(int threads, int mib, int passes) {
-    bodyclock::platform::MemoryBandwidth m;
-    if (!bodyclock::platform::measure_memory_bandwidth(threads, mib, passes, &m)) {
+    yoai::platform::MemoryBandwidth m;
+    if (!yoai::platform::measure_memory_bandwidth(threads, mib, passes, &m)) {
         return nullptr;
     }
 
@@ -776,7 +776,7 @@ extern "C" int bodyclock_chat(const char* provider_id,
     // return code: the host has a place to show text and no way to turn an int
     // into one.
     auto fail = [&](const std::string& msg) {
-        bodyclock::platform::log_warn("bodyclock_chat: %s", msg.c_str());
+        yoai::platform::log_warn("bodyclock_chat: %s", msg.c_str());
         on_event("error", msg.c_str(), user_data);
         return 1;
     };
@@ -798,14 +798,14 @@ extern "C" int bodyclock_chat(const char* provider_id,
     const std::string system = blank(system_prompt) ? std::string()
                                                     : std::string(system_prompt);
 
-    bodyclock::llm::RequestOptions req;
+    yoai::llm::RequestOptions req;
     if (!blank(grammar)) {
         req.grammar = grammar;
     }
 
     // One handler for both lanes: the clients speak the same Event vocabulary, so
     // the only per-lane work is which client runs the turn.
-    const bodyclock::llm::EventHandler forward = [&](const Event& e) -> bool {
+    const yoai::llm::EventHandler forward = [&](const Event& e) -> bool {
         const std::string payload = (e.type == EventType::CostStatistics)
                                   ? usage_json(e.cost)
                                   : e.content;
@@ -821,7 +821,7 @@ extern "C" int bodyclock_chat(const char* provider_id,
         }
 
         const bool ok = client->ainvoke(messages, system, forward,
-                                        bodyclock::llm::UserContext(), req);
+                                        yoai::llm::UserContext(), req);
 
         // The engine reports token counts through stats() rather than as an event,
         // because it has no wire protocol to carry one. Turning them into the same
@@ -830,7 +830,7 @@ extern "C" int bodyclock_chat(const char* provider_id,
         // cancelled: a partial count presented as a total is worse than none.
         if (ok) {
             const LocalStats st = client->stats();
-            bodyclock::llm::CostStatistics cost;
+            yoai::llm::CostStatistics cost;
             cost.model         = file_name(entry.on_device.model_path);
             cost.input_tokens  = st.prompt_tokens;
             cost.output_tokens = st.decoded_tokens;
@@ -844,7 +844,7 @@ extern "C" int bodyclock_chat(const char* provider_id,
             // and pairing each one with a separate "threads ->" line breaks the
             // moment another turn interleaves. st.n_threads is what the turn
             // ACTUALLY ran with, after <= 0 has been resolved to a core count.
-            bodyclock::platform::log_info(
+            yoai::platform::log_info(
                 "on-device turn: %d prompt (%d reused) + %d decoded tokens, ctx %d, "
                 "threads %d, load %.0fms prefill %.0fms (%.1f tok/s) "
                 "decode %.0fms (first %.0fms, then %.1f tok/s), %d msgs dropped",
@@ -869,9 +869,9 @@ extern "C" int bodyclock_chat(const char* provider_id,
 
     ensure_curl();
 
-    bodyclock::llm::OpenAIChatClient client(entry.remote);
+    yoai::llm::OpenAIChatClient client(entry.remote);
     const bool ok = client.ainvoke(messages, system, forward,
-                                   bodyclock::llm::UserContext(), req);
+                                   yoai::llm::UserContext(), req);
 
     return ok ? 0 : 1;
 }
@@ -895,8 +895,8 @@ std::mutex& voice_mutex() {
     return m;
 }
 
-bodyclock::voice::SenseVoice& recognizer() {
-    static bodyclock::voice::SenseVoice sv;
+yoai::voice::SenseVoice& recognizer() {
+    static yoai::voice::SenseVoice sv;
     return sv;
 }
 
@@ -952,11 +952,11 @@ bool is_clause_mark(const std::string& piece) {
 // Raw, one segment per mark. analyze_segments merges them up to
 // min_supplied_utterance, which is where the short-unit pitch errors live.
 std::vector<std::pair<float, float> > clause_segments(
-    const bodyclock::voice::Transcript& transcript, float audio_seconds) {
+    const yoai::voice::Transcript& transcript, float audio_seconds) {
     std::vector<std::pair<float, float> > segs;
     float start = 0.0f;
     for (size_t i = 0; i < transcript.tokens.size(); ++i) {
-        const bodyclock::voice::Token& t = transcript.tokens[i];
+        const yoai::voice::Token& t = transcript.tokens[i];
         if (t.frame < 0 || t.dropped) {
             continue;   // a query token, or one the stray-capital filter removed
         }
@@ -985,12 +985,12 @@ void append_piece(std::string* text, const std::string& piece) {
 }  // namespace
 
 extern "C" int bodyclock_voice_available(void) {
-    return bodyclock::voice::SenseVoice::available() ? 1 : 0;
+    return yoai::voice::SenseVoice::available() ? 1 : 0;
 }
 
 extern "C" int bodyclock_voice_load(const char* model_path) {
     if (blank(model_path)) {
-        bodyclock::platform::log_warn("bodyclock_voice_load: model_path is required");
+        yoai::platform::log_warn("bodyclock_voice_load: model_path is required");
         return 1;
     }
     std::lock_guard<std::mutex> guard(voice_mutex());
@@ -1014,7 +1014,7 @@ extern "C" void bodyclock_voice_unload(void) {
 extern "C" int bodyclock_voice_set_itn(int on) {
     std::lock_guard<std::mutex> guard(voice_mutex());
     if (!voice_loaded()) {
-        bodyclock::platform::log_warn("bodyclock_voice_set_itn: no model is loaded");
+        yoai::platform::log_warn("bodyclock_voice_set_itn: no model is loaded");
         return 1;
     }
     return recognizer().set_inverse_text_normalization(on != 0) ? 0 : 1;
@@ -1023,14 +1023,14 @@ extern "C" int bodyclock_voice_set_itn(int on) {
 extern "C" int bodyclock_voice_set_threads(int threads) {
     std::lock_guard<std::mutex> guard(voice_mutex());
     if (!voice_loaded()) {
-        bodyclock::platform::log_warn("bodyclock_voice_set_threads: no model is loaded");
+        yoai::platform::log_warn("bodyclock_voice_set_threads: no model is loaded");
         return 1;
     }
     recognizer().set_threads(threads);
     // Logged rather than returned, for the same reason the on-device lane's is:
     // the number that matters is the one the NEXT transcript was produced with,
     // and the two lines are read together.
-    bodyclock::platform::log_info("voice threads: -> %d", threads);
+    yoai::platform::log_info("voice threads: -> %d", threads);
     return 0;
 }
 
@@ -1038,11 +1038,11 @@ extern "C" const char* bodyclock_voice_analyze(const short* pcm,
                                           int n_samples,
                                           int sample_rate) {
     if (pcm == nullptr || n_samples <= 0) {
-        bodyclock::platform::log_warn("bodyclock_voice_analyze: pcm and n_samples are required");
+        yoai::platform::log_warn("bodyclock_voice_analyze: pcm and n_samples are required");
         return nullptr;
     }
     if (sample_rate != 16000) {
-        bodyclock::platform::log_error(
+        yoai::platform::log_error(
             "bodyclock_voice_analyze: sample_rate is %d, must be 16000 -- the core carries "
             "no resampler, capture at 16 kHz",
             sample_rate);
@@ -1056,7 +1056,7 @@ extern "C" const char* bodyclock_voice_analyze(const short* pcm,
 
     std::lock_guard<std::mutex> guard(voice_mutex());
 
-    bodyclock::voice::Transcript transcript;
+    yoai::voice::Transcript transcript;
     bool   have_transcript    = false;
     double transcribe_seconds = 0.0;
     if (voice_loaded()) {
@@ -1070,7 +1070,7 @@ extern "C" const char* bodyclock_voice_analyze(const short* pcm,
     // systems, and a number from one is not comparable with a number from the
     // other.
     const float audio_seconds = static_cast<float>(n_samples) / sample_rate;
-    bodyclock::voice::Recording recording;
+    yoai::voice::Recording recording;
     const char* cut = "pause";
     const wall_clk::time_point prosody_started = wall_clk::now();
     bool have_prosody = false;
@@ -1079,15 +1079,15 @@ extern "C" const char* bodyclock_voice_analyze(const short* pcm,
             clause_segments(transcript, audio_seconds);
         if (segs.size() > 1) {
             cut = "clause";
-            have_prosody = bodyclock::voice::analyze_segments(
+            have_prosody = yoai::voice::analyze_segments(
                 &samples[0], samples.size(), sample_rate, segs,
-                bodyclock::voice::ProsodyOptions(), &recording);
+                yoai::voice::ProsodyOptions(), &recording);
         }
     }
     if (!have_prosody) {
-        have_prosody = bodyclock::voice::analyze(
+        have_prosody = yoai::voice::analyze(
             &samples[0], samples.size(), sample_rate,
-            bodyclock::voice::ProsodyOptions(), &recording);
+            yoai::voice::ProsodyOptions(), &recording);
     }
     const double prosody_seconds = wall_seconds_since(prosody_started);
 
@@ -1117,7 +1117,7 @@ extern "C" const char* bodyclock_voice_analyze(const short* pcm,
         w.Key("tokens");
         w.StartArray();
         for (size_t i = 0; i < transcript.tokens.size(); ++i) {
-            const bodyclock::voice::Token& t = transcript.tokens[i];
+            const yoai::voice::Token& t = transcript.tokens[i];
             w.StartObject();
             w.Key("at");    w.Double(t.start);
             w.Key("frame"); w.Int(t.frame);
@@ -1152,8 +1152,8 @@ extern "C" const char* bodyclock_voice_analyze(const short* pcm,
         w.Key("utterances");
         w.StartArray();
         for (size_t i = 0; i < recording.utterances.size(); ++i) {
-            const bodyclock::voice::Utterance& u = recording.utterances[i];
-            const bodyclock::voice::Deviation  d = bodyclock::voice::deviation(recording, i);
+            const yoai::voice::Utterance& u = recording.utterances[i];
+            const yoai::voice::Deviation  d = yoai::voice::deviation(recording, i);
             w.StartObject();
             w.Key("start");        w.Double(u.start);
             w.Key("duration");     w.Double(u.duration);
@@ -1170,7 +1170,7 @@ extern "C" const char* bodyclock_voice_analyze(const short* pcm,
             w.Key("zF0");         w.Double(d.f0);
             w.Key("zLoudness");   w.Double(d.loudness);
             w.Key("zContinuity"); w.Double(d.continuity);
-            w.Key("arousal");     w.Double(bodyclock::voice::arousal(recording, i));
+            w.Key("arousal");     w.Double(yoai::voice::arousal(recording, i));
 
             // What was being said, when there is a transcript to say it with.
             // The two halves are independent measurements of the same seconds,
@@ -1179,7 +1179,7 @@ extern "C" const char* bodyclock_voice_analyze(const short* pcm,
                 std::string said;
                 const float end = u.start + u.duration;
                 for (size_t k = 0; k < transcript.tokens.size(); ++k) {
-                    const bodyclock::voice::Token& t = transcript.tokens[k];
+                    const yoai::voice::Token& t = transcript.tokens[k];
                     if (t.frame < 0 || t.dropped) {
                         continue;   // a query token, or one the filter removed
                     }
@@ -1216,8 +1216,8 @@ std::mutex& omni_mutex() {
     return m;
 }
 
-bodyclock::voice::Omni& omni() {
-    static bodyclock::voice::Omni engine;
+yoai::voice::Omni& omni() {
+    static yoai::voice::Omni engine;
     return engine;
 }
 
@@ -1256,12 +1256,12 @@ void omni_text_sink(const char* text, void* user_data) {
 }  // namespace
 
 extern "C" int bodyclock_omni_available(void) {
-    return bodyclock::voice::Omni::available() ? 1 : 0;
+    return yoai::voice::Omni::available() ? 1 : 0;
 }
 
 extern "C" int bodyclock_omni_load(const char* model_dir) {
     if (blank(model_dir)) {
-        bodyclock::platform::log_warn("bodyclock_omni_load: model_dir is required");
+        yoai::platform::log_warn("bodyclock_omni_load: model_dir is required");
         return 1;
     }
     std::lock_guard<std::mutex> guard(omni_mutex());
@@ -1282,7 +1282,7 @@ extern "C" void bodyclock_omni_unload(void) {
     // Nothing to release explicitly: the engine drops its weights when another
     // load replaces them or the process ends. Kept for symmetry with the other
     // lanes, and so a host has one place to say "I am done with this".
-    bodyclock::platform::log_info("bodyclock_omni_unload: weights stay until replaced");
+    yoai::platform::log_info("bodyclock_omni_unload: weights stay until replaced");
 }
 
 extern "C" const char* bodyclock_omni_ask(const short* pcm,
@@ -1292,7 +1292,7 @@ extern "C" const char* bodyclock_omni_ask(const short* pcm,
                                      bodyclock_omni_text_handler on_text,
                                      void* user_data) {
     if (pcm == nullptr || n_samples <= 0 || blank(prompt)) {
-        bodyclock::platform::log_warn("bodyclock_omni_ask: pcm, n_samples and prompt are required");
+        yoai::platform::log_warn("bodyclock_omni_ask: pcm, n_samples and prompt are required");
         return nullptr;
     }
 
@@ -1308,7 +1308,7 @@ extern "C" const char* bodyclock_omni_ask(const short* pcm,
     bridge.on_text   = on_text;
     bridge.user_data = user_data;
 
-    bodyclock::voice::OmniReply reply;
+    yoai::voice::OmniReply reply;
     const bool ok = omni().ask(&samples[0], samples.size(), prompt,
                                on_audio ? omni_sink : 0,
                                on_text ? omni_text_sink : 0,
@@ -1363,8 +1363,8 @@ std::mutex& tts_mutex() {
     return m;
 }
 
-bodyclock::voice::Qtts& tts() {
-    static bodyclock::voice::Qtts engine;
+yoai::voice::Qtts& tts() {
+    static yoai::voice::Qtts engine;
     return engine;
 }
 
@@ -1412,12 +1412,12 @@ bool tts_sink(const float* pcm, size_t n_samples, bool last, void* user_data) {
 }  // namespace
 
 extern "C" int bodyclock_tts_available(void) {
-    return bodyclock::voice::Qtts::available() ? 1 : 0;
+    return yoai::voice::Qtts::available() ? 1 : 0;
 }
 
 extern "C" int bodyclock_tts_load(const char* talker_path, const char* codec_path) {
     if (blank(talker_path) || blank(codec_path)) {
-        bodyclock::platform::log_warn("bodyclock_tts_load: both model paths are required");
+        yoai::platform::log_warn("bodyclock_tts_load: both model paths are required");
         return 1;
     }
     std::lock_guard<std::mutex> guard(tts_mutex());
@@ -1517,7 +1517,7 @@ extern "C" const char* bodyclock_tts_say(const char* text,
                                     bodyclock_tts_audio_handler on_audio,
                                     void* user_data) {
     if (blank(text)) {
-        bodyclock::platform::log_warn("bodyclock_tts_say: text is required");
+        yoai::platform::log_warn("bodyclock_tts_say: text is required");
         return nullptr;
     }
 
@@ -1527,7 +1527,7 @@ extern "C" const char* bodyclock_tts_say(const char* text,
     bridge.handler   = on_audio;
     bridge.user_data = user_data;
 
-    bodyclock::voice::QttsResult result;
+    yoai::voice::QttsResult result;
     const bool ok = tts().say(text, on_audio ? tts_sink : 0,
                               on_audio ? &bridge : 0, &result);
     tts_error() = tts().last_error();
@@ -1592,13 +1592,13 @@ bool bundle_progress_bridge(const char* name, unsigned long long done,
 
 extern "C" const char* bodyclock_bundle_list(const char* bundle_path) {
     if (blank(bundle_path)) {
-        bodyclock::platform::log_warn("bodyclock_bundle_list: bundle_path is required");
+        yoai::platform::log_warn("bodyclock_bundle_list: bundle_path is required");
         return nullptr;
     }
 
-    std::vector<bodyclock::platform::BundleEntry> entries;
+    std::vector<yoai::platform::BundleEntry> entries;
     unsigned long long total = 0;
-    if (!bodyclock::platform::bundle_list(bundle_path, &entries, &total)) {
+    if (!yoai::platform::bundle_list(bundle_path, &entries, &total)) {
         return nullptr;
     }
 
@@ -1628,7 +1628,7 @@ extern "C" int bodyclock_bundle_extract(const char* bundle_path,
                                    bodyclock_bundle_progress on_progress,
                                    void* user_data) {
     if (blank(bundle_path) || blank(dest_dir)) {
-        bodyclock::platform::log_warn(
+        yoai::platform::log_warn(
             "bodyclock_bundle_extract: bundle_path and dest_dir are both required");
         return 1;
     }
@@ -1637,7 +1637,7 @@ extern "C" int bodyclock_bundle_extract(const char* bundle_path,
     bridge.handler   = on_progress;
     bridge.user_data = user_data;
 
-    const bool ok = bodyclock::platform::bundle_extract(
+    const bool ok = yoai::platform::bundle_extract(
         bundle_path, dest_dir,
         on_progress ? bundle_progress_bridge : 0,
         on_progress ? &bridge : 0);
@@ -1660,8 +1660,8 @@ std::mutex& reader_mutex() {
     return m;
 }
 
-bodyclock::voice::Reader& reader() {
-    static bodyclock::voice::Reader r;
+yoai::voice::Reader& reader() {
+    static yoai::voice::Reader r;
     return r;
 }
 
@@ -1707,14 +1707,14 @@ bool reader_sink(const float* pcm, size_t n_samples, int sentence, bool last, vo
 }  // namespace
 
 extern "C" int bodyclock_reader_available(void) {
-    return bodyclock::voice::Reader::available() ? 1 : 0;
+    return yoai::voice::Reader::available() ? 1 : 0;
 }
 
 extern "C" int bodyclock_reader_load(const char* talker_path, const char* codec_path,
                                      int voices) {
     if (blank(talker_path) || blank(codec_path)) {
         reader_error() = "talker_path and codec_path are both required";
-        bodyclock::platform::log_warn("bodyclock_reader_load: %s", reader_error().c_str());
+        yoai::platform::log_warn("bodyclock_reader_load: %s", reader_error().c_str());
         return 1;
     }
     std::lock_guard<std::mutex> guard(reader_mutex());
@@ -1777,7 +1777,7 @@ extern "C" void bodyclock_reader_set_split(int min_chars, int max_chars, int tai
     std::lock_guard<std::mutex> guard(reader_mutex());
     // Each field independently, so a host can set one and leave the measured
     // defaults in place for the others.
-    bodyclock::voice::SplitOptions opt = reader().split();
+    yoai::voice::SplitOptions opt = reader().split();
     if (min_chars > 0) {
         opt.min_chars = static_cast<size_t>(min_chars);
     }
@@ -1792,7 +1792,7 @@ extern "C" void bodyclock_reader_set_split(int min_chars, int max_chars, int tai
 
 extern "C" void bodyclock_reader_set_clause_cuts(int on) {
     std::lock_guard<std::mutex> guard(reader_mutex());
-    bodyclock::voice::SplitOptions opt = reader().split();
+    yoai::voice::SplitOptions opt = reader().split();
     opt.clause_cuts = (on != 0);
     reader().set_split(opt);
 }
@@ -1828,7 +1828,7 @@ extern "C" int bodyclock_reader_feed(const char* delta) {
 }
 
 extern "C" const char* bodyclock_reader_finish(void) {
-    bodyclock::voice::ReaderResult result;
+    yoai::voice::ReaderResult result;
     // Also without the lock: finish() BLOCKS for the rest of the speech, and
     // holding the configuration mutex for that long would freeze every status
     // call a host makes meanwhile. The omni lane learned this the hard way --

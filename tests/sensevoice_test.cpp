@@ -21,8 +21,8 @@
 // answers "is the filterbank worth hand-optimizing" -- and `-t` moves the only
 // part of the pass that a change would actually be felt in.
 
-#include "voice/fbank.hpp"
-#include "voice/sensevoice.hpp"
+#include "voice/asr/fbank/funasr.hpp"
+#include "voice/asr/sensevoice.hpp"
 
 #include "bodyclock.h"
 #include "platform/log.hpp"
@@ -37,11 +37,11 @@
 #include <string>
 #include <vector>
 
-using bodyclock::voice::Fbank;
-using bodyclock::voice::FbankOptions;
-using bodyclock::voice::Transcript;
-using bodyclock::voice::SenseVoice;
-using bodyclock::voice::Token;
+using yoai::voice::FunAsrFbank;
+using yoai::voice::FunAsrFbankOptions;
+using yoai::voice::Transcript;
+using yoai::voice::SenseVoice;
+using yoai::voice::Token;
 
 namespace {
 
@@ -86,8 +86,8 @@ std::vector<float> tone(double hz, double seconds, int sample_rate, bool fade = 
 }
 
 void test_front_end() {
-    const FbankOptions opt;
-    Fbank fbank(opt);
+    const FunAsrFbankOptions opt;
+    FunAsrFbank fbank(opt);
 
     check(fbank.dim() == 560, "one feature row is 560 wide (7 stacked 80-bin frames)");
 
@@ -247,7 +247,7 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[i], "-t") == 0 && i + 1 < argc) {
             threads = std::atoi(argv[++i]);
         } else if (std::strcmp(argv[i], "-v") == 0) {
-            bodyclock::platform::set_log_level("debug");
+            yoai::platform::set_log_level("debug");
         } else if (std::strcmp(argv[i], "--no-itn") == 0) {
             no_itn = true;
         } else if (std::strcmp(argv[i], "--abi") == 0) {
@@ -273,7 +273,7 @@ int main(int argc, char** argv) {
             std::printf("%s\n", audio[a]);
             std::vector<float> pcm;
             int rate = 0;
-            if (!bodyclock::testing::read_wav_16k_mono(audio[a], &pcm, &rate)) {
+            if (!yoai::testing::read_wav_16k_mono(audio[a], &pcm, &rate)) {
                 ++g_failures;
                 continue;
             }
@@ -319,7 +319,7 @@ int main(int argc, char** argv) {
         std::printf("%s\n", audio[a]);
         std::vector<float> pcm;
         int rate = 0;
-        if (!bodyclock::testing::read_wav_16k_mono(audio[a], &pcm, &rate)) {
+        if (!yoai::testing::read_wav_16k_mono(audio[a], &pcm, &rate)) {
             ++g_failures;
             continue;
         }
@@ -333,7 +333,7 @@ int main(int argc, char** argv) {
         // decides whether hand-optimizing the filterbank would buy anything.
         double front_end = 0.0;
         {
-            Fbank probe;
+            FunAsrFbank probe;
             int probe_frames = 0;
             const std::chrono::steady_clock::time_point tf = std::chrono::steady_clock::now();
             probe.compute(&pcm[0], pcm.size(), &probe_frames);

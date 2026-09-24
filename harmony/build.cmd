@@ -47,6 +47,8 @@ rem
 rem     build.cmd deps hap
 rem
 rem Env overrides:
+rem   Each also reads as YOAI_<NAME>, from the environment or from .env at the
+rem   repository root, and that wins over <NAME>. See .env.example.
 rem   DEVECO_HOME     DevEco Studio install (default: read from its own .home
 rem                   marker under %LOCALAPPDATA%\Huawei\DevEcoStudio*)
 rem   VCPKG_ROOT      vcpkg checkout (default: a sibling of the repo)
@@ -62,6 +64,9 @@ rem the patches this script expects already applied.
 rem ---------------------------------------------------------------------------
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
+rem Captured before the argument loop: `shift` moves %0 as well, so after it
+rem %~dp0 names an argument, and resolves here only because of the cd above.
+set "HARMONY_DIR=%~dp0"
 
 rem --- Arguments, position-independent ------------------------------------------
 rem Every token is a keyword or the ABI, and an unrecognized one is an ERROR
@@ -127,6 +132,13 @@ shift
 goto args
 
 :args_done
+rem YOAI_* settings, from the environment and from .env. See .env.example.
+rem After the arguments, so the help text still prints when a configured
+rem path is wrong. The names are the paths this script reads: each one that
+rem is configured has to exist.
+call "%HARMONY_DIR%..\scripts\load-env.cmd" DEVECO_HOME VCPKG_ROOT OHOS_SDK_ROOT LLAMA_SRC MNN_SRC QTTS_SRC || exit /b 1
+set "THIRD_SYNC=%HARMONY_DIR%..\third\sync.cmd"
+
 if not defined ABI set "ABI=arm64-v8a"
 rem Nothing named: everything, in the order `all` would. The bare command is what
 rem a fresh clone runs, and it should end with an installable app that has
@@ -355,21 +367,26 @@ git -C "!VCPKG_ROOT!" checkout %BASELINE%
 if errorlevel 1 exit /b 1
 if not exist "!VCPKG_ROOT!\vcpkg.exe" call "!VCPKG_ROOT!\bootstrap-vcpkg.bat" -disableMetrics
 
-rem --- Build the core's deps for OHOS (classic mode) ----------------------------
-rem --classic: this script runs inside the repo, whose vcpkg.json would otherwise
-rem put vcpkg into manifest mode (which rejects port-name arguments).
+rem --- Build the core's deps for OHOS ------------------------------------------
+rem Manifest mode, from the repository's vcpkg.json. The dependency list lives
+rem there and nowhere else, so a port the core starts to need is added once and
+rem every lane installs it. This used to be --classic with the ports named
+rem here: a second list, which the desktop build never read.
 rem
-rem zlib is named explicitly even though curl pulls it in: the OHOS triplet builds
-rem everything static, so the final link needs it resolvable on its own.
-set "PORTS=openssl curl[openssl] rapidjson zlib"
-echo [deps] installing: !PORTS!
-"!VCPKG_ROOT!\vcpkg.exe" install !PORTS! --classic --triplet !TRIPLET! ^
-    --overlay-triplets="%~dp0vcpkg-triplets" ^
+rem The install root is per triplet rather than VCPKG_ROOT\installed. A manifest
+rem install may remove what its manifest does not ask for, and this vcpkg
+rem checkout is shared by every ABI of both mobile lanes.
+set "VCPKG_INSTALL_ROOT=!VCPKG_ROOT!\installed-!TRIPLET!"
+echo [deps] installing from vcpkg.json into !VCPKG_INSTALL_ROOT!
+"!VCPKG_ROOT!\vcpkg.exe" install --triplet !TRIPLET! ^
+    --x-manifest-root="%HARMONY_DIR%.." ^
+    --x-install-root="!VCPKG_INSTALL_ROOT!" ^
+    --overlay-triplets="%HARMONY_DIR%vcpkg-triplets" ^
     --x-buildtrees-root "!VCPKG_ROOT!\buildtrees"
 if errorlevel 1 exit /b 1
 
 rem --- Lay out under harmony\prebuilt\<ABI> -------------------------------------
-set "INSTALLED=!VCPKG_ROOT!\installed\!TRIPLET!"
+set "INSTALLED=!VCPKG_INSTALL_ROOT!\!TRIPLET!"
 if not exist "!INSTALLED!" (
     echo expected install tree missing: !INSTALLED!>&2
     exit /b 1
@@ -444,6 +461,7 @@ rem It was in the checkout by hand, undocumented, for long enough that nothing
 rem here knew it was load-bearing -- found only when third/ went to record what
 rem these trees contain. Now it is a file and this is the line that applies it.
 call :qpatch "!LLAMA_SRC!" llama-ggml-ohos-affinity.patch || exit /b 1
+call :third_verify llama.cpp LLAMA_SRC "!LLAMA_SRC!"
 
 rem The SDK ships its own cmake and ninja beside the toolchain; fall back to the
 rem host's if it does not.
@@ -585,6 +603,7 @@ if not exist "!MNN_SRC!\CMakeLists.txt" (
     exit /b 1
 )
 echo [mnn] src=!MNN_SRC!
+call :third_verify MNN MNN_SRC "!MNN_SRC!"
 
 set "NATIVE=!OHOS_SDK_ROOT!\native"
 set "TOOLCHAIN=!NATIVE!\build\cmake\ohos.toolchain.cmake"
@@ -787,6 +806,8 @@ rem Applied here rather than committed there because the checkouts are upstream'
 rem and get updated. :qpatch is idempotent -- see the note on it below.
 call :qpatch "!LLAMA_SRC!" llama-ggml-ohos-affinity.patch      || exit /b 1
 call :qpatch "!QTTS_SRC!"  qwentts-thread-count-override.patch || exit /b 1
+call :third_verify llama.cpp LLAMA_SRC "!LLAMA_SRC!"
+call :third_verify qwentts.cpp QTTS_SRC "!QTTS_SRC!"
 
 set "NATIVE=!OHOS_SDK_ROOT!\native"
 set "TOOLCHAIN=!NATIVE!\build\cmake\ohos.toolchain.cmake"
@@ -988,4 +1009,23 @@ if exist "!HAP_OUT!\entry-default-signed.hap" (
 if exist "!HAP_OUT!\entry-default-unsigned.hap" (
     echo [hap]   entry-default-unsigned.hap
 )
+exit /b 0
+
+rem -----------------------------------------------------------------------------
+rem Is this checkout what third\manifest.txt records? %1 the manifest name, %2
+rem its variable there, %3 the tree this build is about to compile.
+rem
+rem A WARNING, never a stop: a tree ahead of its pin is a normal state while
+rem trying something (third\README.md), and a missing patch matters to some
+rem lanes and not others. The tree goes over as YOAI_<var>, the one name sync's
+rem own loader will not override, so the tree checked is the tree built. Once
+rem per name per run.
+rem -----------------------------------------------------------------------------
+:third_verify
+if defined THIRD_SEEN_%~1 exit /b 0
+setlocal
+set "YOAI_%~2=%~3"
+call "%THIRD_SYNC%" verify %~1
+if errorlevel 1 echo [build] warning: %~1 differs from third\manifest.txt ^(above^) -- building anyway. Details: third\sync.cmd check %~1>&2
+endlocal & set "THIRD_SEEN_%~1=1"
 exit /b 0

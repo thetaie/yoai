@@ -239,16 +239,22 @@ build_deps() {
     # x64-android, and they are already static.
     export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
 
-    # --classic: this script runs inside the repo, whose vcpkg.json would
-    # otherwise put vcpkg into manifest mode (which rejects port-name
-    # arguments). zlib is named explicitly even though curl pulls it in,
-    # because the static final link needs it resolvable on its own.
-    local ports=(openssl "curl[openssl]" rapidjson zlib)
-    echo "[deps] installing: ${ports[*]}"
-    "$VCPKG_ROOT/vcpkg" install "${ports[@]}" --classic --triplet "$VCPKG_TRIPLET" \
-        --x-buildtrees-root "$VCPKG_ROOT/buildtrees"
+    # Manifest mode, from the repository's vcpkg.json. The dependency list
+    # lives there and nowhere else, so a port the core starts to need is added
+    # once and every lane installs it. This used to be --classic with the
+    # ports named here: a second list, which the desktop build never read.
+    #
+    # The install root is per triplet rather than VCPKG_ROOT/installed. A
+    # manifest install may remove what its manifest does not ask for, and this
+    # vcpkg checkout is shared by every ABI of both mobile lanes.
+    local install_root="$VCPKG_ROOT/installed-$VCPKG_TRIPLET"
+    echo "[deps] installing from vcpkg.json into $install_root"
+    "$VCPKG_ROOT/vcpkg" install --triplet "$VCPKG_TRIPLET" \
+        --x-manifest-root="$REPO_ROOT" \
+        --x-install-root="$install_root" \
+        --x-buildtrees-root "$VCPKG_ROOT/buildtrees" || return 1
 
-    local installed="$VCPKG_ROOT/installed/$VCPKG_TRIPLET"
+    local installed="$install_root/$VCPKG_TRIPLET"
     if [ ! -d "$installed" ]; then
         echo "[deps] expected install tree missing: $installed" >&2
         return 1

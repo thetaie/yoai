@@ -13,7 +13,7 @@
 #include <sys/mman.h>
 #endif
 
-namespace bodyclock {
+namespace yoai {
 namespace platform {
 
 namespace {
@@ -191,4 +191,4 @@ bool measure_memory_bandwidth(int threads, int mib, int passes, MemoryBandwidth*
 }
 
 }  // namespace platform
-}  // namespace bodyclock
+}  // namespace yoai

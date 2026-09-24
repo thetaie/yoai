@@ -3,7 +3,7 @@
 # The external checkouts this repo builds against: clone them, report on them,
 # or move them forward. manifest.txt is the record; this reads it.
 #
-#   ./sync.sh [check|clone|update] [name ...]
+#   ./sync.sh [check|clone|update|verify] [name ...]
 #
 #     check    (default) say what is there, whether it is on the pinned
 #              commit, whether the patches are applied, whether anything else
@@ -14,6 +14,11 @@
 #              with the new pins. Patches come off first and go back on after,
 #              so one that no longer fits STOPS that dependency rather than
 #              leaving it half-moved.
+#     verify   for the build scripts: silent and exit 0 when each checkout is on
+#              its pinned commit with every patch applied; otherwise one line
+#              per problem on stderr and exit 1. Changes nothing. A missing
+#              checkout counts as a problem. Stray files do not -- a patched
+#              tree always has some, so they are check's business, not this.
 #
 #   name ...   limit to these (manifest names, case-insensitive). No name
 #              means all of them.
@@ -28,12 +33,21 @@
 # Env overrides:
 #   THIRD_ROOT   where checkouts live (default: this repo's parent directory)
 #   <dep>_SRC    one checkout's exact path; see the env column in manifest.txt
+#   Each <dep>_SRC also reads as YOAI_<dep>_SRC, from the environment or from
+#   .env at the repository root -- the same loader the build scripts call.
 #
 # This is the twin of sync.cmd. Keep the two in step.
 # ---------------------------------------------------------------------------
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Before any default below, so a path set in .env is the one cloned into.
+. "$HERE/../scripts/load-env.sh"
+# No names: a clone target does not exist yet, and a missing checkout is what
+# check and verify report.
+yoai_load_env
+
 MANIFEST="$HERE/manifest.txt"
 PATCHDIR="$HERE/patches"
 THIRD_ROOT="${THIRD_ROOT:-$(cd "$HERE/../.." && pwd)}"
@@ -50,7 +64,7 @@ ONLY=""
 bad=0
 for tok in "$@"; do
     case "$tok" in
-        check|clone|update) MODE="$tok" ;;
+        check|clone|update|verify) MODE="$tok" ;;
         *)
             if grep -qi "^${tok}|" "$MANIFEST"; then
                 ONLY="${ONLY},${tok}"
@@ -62,14 +76,16 @@ for tok in "$@"; do
     esac
 done
 if [ "$bad" -ne 0 ]; then
-    echo "  modes: check | clone | update" >&2
+    echo "  modes: check | clone | update | verify" >&2
     echo "  names: the first column of manifest.txt" >&2
     exit 1
 fi
 [ -n "$ONLY" ] && ONLY="${ONLY},"
 
-echo "[third] root=$THIRD_ROOT  mode=$MODE"
-echo
+if [ "$MODE" != verify ]; then
+    echo "[third] root=$THIRD_ROOT  mode=$MODE"
+    echo
+fi
 
 failed=""
 
@@ -176,6 +192,30 @@ do_report() {
     return 0
 }
 
+# --- Verify ----------------------------------------------------------------
+# The same two facts do_report states, said only when they are wrong, so a
+# build can run this every time and print nothing on the normal path.
+do_verify() {
+    local head spec file sub tree bad=0
+    head="$(git -C "$DIR" rev-parse HEAD)"
+    if [ "$head" != "$D_COMMIT" ]; then
+        echo "[third] $D_NAME: commit ${head:0:12}, manifest pins ${D_COMMIT:0:12}" >&2
+        bad=1
+    fi
+    if [ "$D_PATCHES" != "-" ]; then
+        local IFS=,
+        for spec in $D_PATCHES; do
+            file="${spec%%@*}"; sub="${spec#*@}"; tree="$DIR"
+            [ "$sub" != "." ] && tree="$DIR/$sub"
+            if ! git -C "$tree" apply --reverse --check "$PATCHDIR/$file" >/dev/null 2>&1; then
+                echo "[third] $D_NAME: patch MISSING: $file" >&2
+                bad=1
+            fi
+        done
+    fi
+    return $bad
+}
+
 # --- The table -------------------------------------------------------------
 # Read once into an array so `update` can re-emit manifest.txt from it at the
 # end. Lines starting with # are the header; an empty column is written `-`
@@ -200,6 +240,17 @@ while IFS='|' read -r name env url branch commit sub patches usedby; do
     # never disagree about which tree is being built.
     DIR="${!D_ENV:-}"
     [ -z "$DIR" ] && DIR="$THIRD_ROOT/$D_NAME"
+
+    if [ "$MODE" = verify ]; then
+        if [ ! -d "$DIR/.git" ]; then
+            echo "[third] $D_NAME: MISSING at $DIR" >&2
+            failed="$failed $D_NAME"
+        elif ! do_verify; then
+            failed="$failed $D_NAME"
+        fi
+        lines+=("$D_NAME|$D_ENV|$D_URL|$D_BRANCH|$D_COMMIT|$D_SUB|$D_PATCHES|$D_USEDBY")
+        continue
+    fi
 
     echo "=== $D_NAME  ($D_USEDBY)"
     echo "    $DIR"
@@ -244,6 +295,12 @@ if [ "$MODE" = update ]; then
     } > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
     echo
     echo "[third] manifest.txt rewritten with the new pins -- git diff third/manifest.txt"
+fi
+
+# verify says nothing on success and has already named each problem.
+if [ "$MODE" = verify ]; then
+    [ -z "$failed" ]
+    exit $?
 fi
 
 if [ -n "$failed" ]; then

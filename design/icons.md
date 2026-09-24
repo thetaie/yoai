@@ -9,7 +9,7 @@ It is also what the Tanka design system uses, so the two match without
 adjustment.
 
 A pinned copy of the icons we use lives in
-[third_party/lucide](../third_party/lucide), and **that copy is the source of
+[third/lucide](../third/lucide), and **that copy is the source of
 record**. The canvas loads Lucide from a CDN at `@latest`, which is fine for a
 review canvas and useless as a reference: it moves.
 
@@ -52,7 +52,7 @@ each state cell on the home screen. It is a state color from the palette's
 
 The design's 24, and the three more the app already draws. **Name** is what the
 canvas calls it; **file** is the pinned SVG in
-[third_party/lucide/icons](../third_party/lucide/icons), which is what to
+[third/lucide/icons](../third/lucide/icons), which is what to
 transcribe from; **Lucide** is the component name, useful only on a platform
 that can import the package. Four of the names differ from the file, so go by
 the file.
@@ -105,7 +105,7 @@ Six of the 24 are in that table — `menu`, the three chevrons, `check`,
 the rest when the screen that needs them lands, rather than filling the table
 in from memory.
 
-**Path data comes from [third_party/lucide](../third_party/lucide).** This file
+**Path data comes from [third/lucide](../third/lucide).** This file
 used to say the opposite — that where an earlier design file and Lucide
 differed, the design file won, citing a `check` of `m5 13 4 4L19 7` at stroke
 2.6 against Lucide's `M20 6 9 17l-5-5`. That reasoning does not survive

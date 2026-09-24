@@ -32,7 +32,7 @@
 #include <utility>
 #include <vector>
 
-namespace bodyclock {
+namespace yoai {
 namespace voice {
 
 struct ProsodyOptions {
@@ -194,4 +194,4 @@ float arousal(const Recording& recording, size_t index,
               const ArousalWeights& weights = ArousalWeights());
 
 }  // namespace voice
-}  // namespace bodyclock
+}  // namespace yoai

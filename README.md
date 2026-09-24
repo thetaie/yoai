@@ -1,7 +1,5 @@
 # Body Clock
 
-*[中文](README.zh-CN.md)*
-
 Your conversations live on your device, and models are called with your own API
 keys — there is no Body Clock account and no Body Clock server.
 
@@ -68,9 +66,16 @@ rapidjson-dev`, or `brew install openssl@3 rapidjson`. `build.cmd` wants vcpkg,
 which is where a Windows machine gets all three anyway.
 
 ```
-build.cmd            # Windows
-./build.sh           # macOS / Linux
+build.cmd build      # Windows
+./build.sh build     # macOS / Linux
 ```
+
+With no arguments either script prints its commands and builds nothing.
+
+Paths that differ per machine -- Visual Studio, vcpkg, the llama.cpp checkout
+-- go in `.env` at the root, which git ignores and every C/C++ build script
+reads (root, `harmony/`, `desktop/`). Copy [.env.example](.env.example); it
+lists every `YOAI_*` setting.
 
 Then talk to a real provider without a phone in the loop:
 
@@ -88,7 +93,8 @@ export BODYCLOCK_API_KEY=...
 
 With no question argument it goes interactive and keeps the transcript, so
 multi-turn context is exercised too. `--usage` prints the token summary,
-`--debug` turns on core logging.
+`--debug` turns on core logging. [cli/README.md](cli/README.md) covers every
+desktop tool, including `bodyclock-asr` for speech recognition.
 
 Any OpenAI-compatible endpoint works the same way — only the URL, the key and
 the model name change. Google Gemini is worth spelling out because its
@@ -147,7 +153,7 @@ build.cmd             # Windows       -- or `build.cmd llama` for just the engin
 It costs about 4.3 MiB in `libbodyclock.so`, a ~200 MB checkout, and a few minutes of
 cross-compile. `build.cmd deps hap` builds the app without it.
 
-The checkout goes beside the repo (`LLAMA_SRC` moves it) and is never updated
+The checkout goes beside the repo (`YOAI_LLAMA_SRC` moves it) and is never updated
 for you: this build wants a source you can pin and re-measure against, not one
 that changes under you between two runs.
 

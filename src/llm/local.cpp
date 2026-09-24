@@ -15,7 +15,7 @@
 #include <vector>
 #endif
 
-namespace bodyclock { namespace llm {
+namespace yoai { namespace llm {
 
 namespace {
 
@@ -512,7 +512,7 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
         if (gr != nullptr) {
             llama_sampler_chain_add(smpl, gr);
         } else {
-            bodyclock::platform::log_warn(
+            yoai::platform::log_warn(
                 "on-device: grammar rejected by the parser, continuing unconstrained");
         }
     }

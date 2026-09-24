@@ -28,7 +28,7 @@
 #include <cstddef>
 #include <string>
 
-namespace bodyclock {
+namespace yoai {
 namespace voice {
 
 // What one exchange produced.
@@ -180,4 +180,4 @@ private:
 };
 
 }  // namespace voice
-}  // namespace bodyclock
+}  // namespace yoai

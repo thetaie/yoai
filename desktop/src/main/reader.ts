@@ -170,7 +170,7 @@ export function load(): Promise<string> {
   }
 
   // One engine, not several. A second voice measured slightly SLOWER on this
-  // desktop and costs another 1.4 GB -- see src/voice/reader.hpp.
+  // desktop and costs another 1.4 GB -- see src/voice/tts/reader.hpp.
   const voices = 1
   try {
     if (core().nativeTtsLoaded() === 1) {

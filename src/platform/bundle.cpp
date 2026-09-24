@@ -22,7 +22,7 @@
 #define BODYCLOCK_RMDIR(p) rmdir(p)
 #endif
 
-namespace bodyclock {
+namespace yoai {
 namespace platform {
 namespace {
 
@@ -284,4 +284,4 @@ bool bundle_extract(const std::string& bundle_path, const std::string& dest_dir,
 }
 
 }  // namespace platform
-}  // namespace bodyclock
+}  // namespace yoai

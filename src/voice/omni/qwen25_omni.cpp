@@ -1,4 +1,4 @@
-#include "voice/omni.hpp"
+#include "voice/omni/qwen25_omni.hpp"
 
 #include "platform/log.hpp"
 
@@ -27,13 +27,15 @@ extern "C" void MNNForceLinkVulkanRuntime();
 #endif
 #endif
 
-namespace bodyclock {
+namespace yoai {
 namespace voice {
 
-// Thirty seconds is the window a Whisper-family audio encoder has, and MNN does
-// not chunk past it -- it segfaults inside the front end. Measured: 28 s fine,
-// 31 s crash. Two seconds of margin below the cliff, because the limit is
-// upstream's and may not be exactly 30.
+// Not a boundary the crash respects. It was first read as one -- 28 s fine,
+// 31 s crash -- but later runs crashed at 18 s and passed at 26, so the fault
+// is a memory bug in MNN's audio front end rather than a length limit. The cap
+// stays because a shorter input gives that bug fewer chances to fire, and 30 s
+// is the window a Whisper-family encoder has anyway. See Omni::ask in
+// qwen25_omni.hpp.
 float Omni::max_seconds() {
     return 28.0f;
 }
@@ -440,10 +442,10 @@ bool Omni::ask(const float* pcm, size_t n_samples, const std::string& prompt,
 
     const float seconds = static_cast<float>(n_samples) / 16000.0f;
     if (seconds > max_seconds()) {
-        // Refused, not attempted. This is upstream's cliff, and walking off it
-        // takes the whole process with it.
+        // Refused, not attempted. Shorter input does not prevent the crash in
+        // MNN's front end, but it makes it rarer; see max_seconds().
         platform::log_error(
-            "omni: %.1f s of audio exceeds the %.0f s this engine survives -- "
+            "omni: %.1f s of audio exceeds the %.0f s cap -- "
             "chunk it before calling",
             seconds, max_seconds());
         return false;
@@ -659,4 +661,4 @@ bool Omni::ask(const float*, size_t, const std::string&, OmniAudioSink, OmniText
 #endif  // BODYCLOCK_MNN
 
 }  // namespace voice
-}  // namespace bodyclock
+}  // namespace yoai

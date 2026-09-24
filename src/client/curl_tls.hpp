@@ -5,7 +5,7 @@
 
 #include <curl/curl.h>
 
-namespace bodyclock { namespace client {
+namespace yoai { namespace client {
 
 // Tell libcurl to consult the platform's native trust store (Windows Schannel,
 // macOS keychain) at handshake time, regardless of which SSL backend it was

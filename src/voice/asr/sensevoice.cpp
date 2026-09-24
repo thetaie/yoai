@@ -1,6 +1,6 @@
-#include "voice/sensevoice.hpp"
+#include "voice/asr/sensevoice.hpp"
 
-#include "voice/fbank.hpp"
+#include "voice/asr/fbank/funasr.hpp"
 #include "platform/log.hpp"
 
 #include <cmath>
@@ -18,7 +18,7 @@
 #include <map>
 #endif
 
-namespace bodyclock {
+namespace yoai {
 namespace voice {
 
 #ifdef BODYCLOCK_ASR
@@ -204,7 +204,7 @@ struct SenseVoice::Impl {
     int                                 threads  = 4;
     int                                 itn_slot = -1;   // index into query_tokens, or -1
 
-    Fbank fbank;
+    FunAsrFbank fbank;
 
     ~Impl() {
         if (alloc)   ggml_gallocr_free(alloc);
@@ -708,4 +708,4 @@ bool SenseVoice::transcribe(const float*, size_t, Transcript* out) {
 #endif  // BODYCLOCK_ASR
 
 }  // namespace voice
-}  // namespace bodyclock
+}  // namespace yoai

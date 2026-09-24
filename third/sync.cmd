@@ -3,7 +3,7 @@ rem ---------------------------------------------------------------------------
 rem The external checkouts this repo builds against: clone them, report on them,
 rem or move them forward. manifest.txt is the record; this reads it.
 rem
-rem   sync.cmd [check^|clone^|update] [name ...]
+rem   sync.cmd [check^|clone^|update^|verify] [name ...]
 rem
 rem     check    (default) say what is there, whether it is on the pinned
 rem              commit, whether the patches are applied, whether anything else
@@ -14,6 +14,11 @@ rem     update   move each checkout to its branch tip and rewrite manifest.txt
 rem              with the new pins. Patches come off first and go back on after,
 rem              so one that no longer fits STOPS that dependency rather than
 rem              leaving it half-moved.
+rem     verify   for the build scripts: silent and exit 0 when each checkout is
+rem              on its pinned commit with every patch applied; otherwise one
+rem              line per problem on stderr and exit 1. Changes nothing. A
+rem              missing checkout counts as a problem. Stray files do not -- a
+rem              patched tree always has some, so they are check's business.
 rem
 rem   name ...   limit to these (manifest names, case-insensitive). No name
 rem              means all of them.
@@ -28,9 +33,16 @@ rem
 rem Env overrides:
 rem   THIRD_ROOT   where checkouts live (default: this repo's parent directory)
 rem   <dep>_SRC    one checkout's exact path; see the env column in manifest.txt
+rem   Each <dep>_SRC also reads as YOAI_<dep>_SRC, from the environment or from
+rem   .env at the repository root -- the same loader the build scripts call.
 rem ---------------------------------------------------------------------------
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
+
+rem Before any default below, so a path set in .env is the one cloned into.
+rem No names: a clone target does not exist yet, and a missing checkout is what
+rem check and verify report.
+call "%~dp0..\scripts\load-env.cmd"
 
 set "MANIFEST=%~dp0manifest.txt"
 set "PATCHDIR=%~dp0patches"
@@ -63,6 +75,7 @@ for %%A in (%*) do (
     if /I "!TOK!"=="check"  set "MODE=check"  & set "HANDLED=1"
     if /I "!TOK!"=="clone"  set "MODE=clone"  & set "HANDLED=1"
     if /I "!TOK!"=="update" set "MODE=update" & set "HANDLED=1"
+    if /I "!TOK!"=="verify" set "MODE=verify" & set "HANDLED=1"
     if not defined HANDLED (
         findstr /B /I /C:"!TOK!|" "!MANIFEST!" >nul
         if errorlevel 1 (
@@ -75,13 +88,15 @@ for %%A in (%*) do (
     )
 )
 if defined BADARG (
-    echo   modes: check ^| clone ^| update>&2
+    echo   modes: check ^| clone ^| update ^| verify>&2
     echo   names: the first column of manifest.txt>&2
     exit /b 1
 )
 
-echo [third] root=!THIRD_ROOT!  mode=!MODE!
-echo.
+if /I not "!MODE!"=="verify" (
+    echo [third] root=!THIRD_ROOT!  mode=!MODE!
+    echo.
+)
 
 rem --- The table -------------------------------------------------------------
 rem Read once into DEP_n_* so `update` can re-emit manifest.txt from it at the
@@ -109,6 +124,13 @@ if !NDEP! EQU 0 (
 for /L %%I in (1,1,!NDEP!) do call :dep %%I
 
 if /I "!MODE!"=="update" call :rewrite
+rem verify says nothing on success and has already named each problem. At the
+rem top level rather than in an if block: `cmd /c sync.cmd` drops an exit
+rem code set from inside one, and a caller outside a batch file sees 0.
+if /I not "!MODE!"=="verify" goto verify_done
+if defined FAILED exit /b 1
+exit /b 0
+:verify_done
 if defined FAILED (
     echo.
     echo [third] trouble with:!FAILED!
@@ -143,6 +165,17 @@ rem Where it lives: the build scripts' own variable wins, so the two can never
 rem disagree about which tree is being built.
 call :getvar DIR !D_ENV!
 if not defined DIR set "DIR=!THIRD_ROOT!\!D_NAME!"
+
+if /I "!MODE!"=="verify" (
+    if not exist "!DIR!\.git" (
+        echo [third] !D_NAME!: MISSING at !DIR!>&2
+        set "FAILED=!FAILED! !D_NAME!"
+    ) else (
+        call :verify
+        if errorlevel 1 set "FAILED=!FAILED! !D_NAME!"
+    )
+    exit /b 0
+)
 
 echo === !D_NAME!  ^(!D_USEDBY!^)
 echo     !DIR!
@@ -256,6 +289,32 @@ for %%Q in ("!D_PATCHES:,=" "!") do if not defined PERR (
     )
 )
 if defined PERR exit /b 1
+exit /b 0
+
+rem ---------------------------------------------------------------------------
+rem The same two facts :report states, said only when they are wrong, so a
+rem build can run this every time and print nothing on the normal path.
+:verify
+set "VBAD="
+for /f "delims=" %%H in ('git -C "!DIR!" rev-parse HEAD') do set "HEAD=%%H"
+if /I not "!HEAD!"=="!D_COMMIT!" (
+    echo [third] !D_NAME!: commit !HEAD:~0,12!, manifest pins !D_COMMIT:~0,12!>&2
+    set "VBAD=1"
+)
+if not "!D_PATCHES!"=="-" (
+    for %%Q in ("!D_PATCHES:,=" "!") do (
+        for /f "tokens=1,2 delims=@" %%F in ("%%~Q") do (
+            set "PTREE=!DIR!"
+            if not "%%G"=="." set "PTREE=!DIR!\%%G"
+            git -C "!PTREE!" apply --reverse --check "!PATCHDIR!\%%F" >nul 2>&1
+            if errorlevel 1 (
+                echo [third] !D_NAME!: patch MISSING: %%F>&2
+                set "VBAD=1"
+            )
+        )
+    )
+)
+if defined VBAD exit /b 1
 exit /b 0
 
 rem ---------------------------------------------------------------------------

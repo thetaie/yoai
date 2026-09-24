@@ -1,4 +1,4 @@
-#include "voice/qtts.hpp"
+#include "voice/tts/qwen3_tts.hpp"
 
 #include "platform/log.hpp"
 
@@ -18,7 +18,7 @@
 #endif
 #endif
 
-namespace bodyclock {
+namespace yoai {
 namespace voice {
 
 // 24 kHz, because that is the codec's rate and nothing in a float buffer says
@@ -684,6 +684,13 @@ bool Qtts::set_reference(const std::string& wav_path, const std::string& transcr
         platform::log_error("qtts: reference %s -- %s", wav_path.c_str(), why.c_str());
         return false;
     }
+    // Refused rather than stored: say() treats an empty reference as none, so
+    // accepting it would report success and then synthesize unanchored.
+    if (pcm.empty()) {
+        m->error = "reference " + wav_path + " has no samples";
+        platform::log_error("qtts: %s", m->error.c_str());
+        return false;
+    }
 
     m->reference.swap(pcm);
     m->reference_text = transcript;
@@ -719,6 +726,11 @@ bool Qtts::set_reference_voice(const std::string& wav_path) {
     if (!read_reference_wav(wav_path, &pcm, &why)) {
         m->error = why;
         platform::log_error("qtts: reference voice %s -- %s", wav_path.c_str(), why.c_str());
+        return false;
+    }
+    if (pcm.empty()) {
+        m->error = "reference voice " + wav_path + " has no samples";
+        platform::log_error("qtts: %s", m->error.c_str());
         return false;
     }
 
@@ -942,7 +954,7 @@ bool Qtts::say(const std::string& text, QttsAudioSink sink, void* user_data, Qtt
     // The end marker, on a call of its own, for the streaming path only.
     // qwentts.cpp's chunk callback has no `last` flag, and holding a chunk back
     // to give it one would delay the first chunk, which is the whole point of
-    // streaming. See voice/qtts.hpp.
+    // streaming. See voice/tts/qwen3_tts.hpp.
     if (stream && !m->aborted) {
         sink(0, 0, true, user_data);
     }
@@ -1054,4 +1066,4 @@ bool Qtts::say(const std::string&, QttsAudioSink, void*, QttsResult* out) {
 #endif  // BODYCLOCK_QTTS
 
 }  // namespace voice
-}  // namespace bodyclock
+}  // namespace yoai

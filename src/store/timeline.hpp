@@ -89,7 +89,7 @@
 #include <string>
 #include <vector>
 
-namespace bodyclock {
+namespace yoai {
 namespace store {
 
 // One note attached to an entry -- the design's "add a note" on the current
@@ -248,4 +248,4 @@ private:
 };
 
 }  // namespace store
-}  // namespace bodyclock
+}  // namespace yoai

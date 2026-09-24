@@ -28,7 +28,7 @@
 #include <string>
 #include <vector>
 
-namespace bodyclock {
+namespace yoai {
 namespace voice {
 
 // One decoded token, kept rather than collapsed straight into a string.
@@ -161,4 +161,4 @@ private:
 };
 
 }  // namespace voice
-}  // namespace bodyclock
+}  // namespace yoai

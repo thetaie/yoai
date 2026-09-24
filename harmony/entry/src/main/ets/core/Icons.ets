@@ -64,7 +64,7 @@ interface IconDef {
 }
 
 /**
- * The path data, transcribed from third_party/lucide -- a pinned copy of the
+ * The path data, transcribed from third/lucide -- a pinned copy of the
  * icons at one version, which is the source of record.
  *
  * It used to come from an earlier design file instead, on the reasoning that

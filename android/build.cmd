@@ -304,16 +304,22 @@ rem No overlay triplet, unlike the OHOS lane: vcpkg ships arm64-android and
 rem x64-android, and they are already static.
 set "ANDROID_NDK_HOME=!ANDROID_NDK_ROOT!"
 
-rem --classic: this script runs inside the repo, whose vcpkg.json would
-rem otherwise put vcpkg into manifest mode (which rejects port-name arguments).
-rem zlib is named explicitly even though curl pulls it in, because the static
-rem final link needs it resolvable on its own.
-set "PORTS=openssl curl[openssl] rapidjson zlib"
-echo [deps] installing: !PORTS!
-"!VCPKG_ROOT!\vcpkg.exe" install !PORTS! --classic --triplet !VCPKG_TRIPLET! ^
+rem Manifest mode, from the repository's vcpkg.json. The dependency list lives
+rem there and nowhere else, so a port the core starts to need is added once and
+rem every lane installs it. This used to be --classic with the ports named
+rem here: a second list, which the desktop build never read.
+rem
+rem The install root is per triplet rather than VCPKG_ROOT\installed. A manifest
+rem install may remove what its manifest does not ask for, and this vcpkg
+rem checkout is shared by every ABI of both mobile lanes.
+set "VCPKG_INSTALL_ROOT=!VCPKG_ROOT!\installed-!VCPKG_TRIPLET!"
+echo [deps] installing from vcpkg.json into !VCPKG_INSTALL_ROOT!
+"!VCPKG_ROOT!\vcpkg.exe" install --triplet !VCPKG_TRIPLET! ^
+    --x-manifest-root="%REPO_ROOT%" ^
+    --x-install-root="!VCPKG_INSTALL_ROOT!" ^
     --x-buildtrees-root "!VCPKG_ROOT!\buildtrees" || exit /b 1
 
-set "INSTALLED=!VCPKG_ROOT!\installed\!VCPKG_TRIPLET!"
+set "INSTALLED=!VCPKG_INSTALL_ROOT!\!VCPKG_TRIPLET!"
 if not exist "!INSTALLED!\" (
     echo [deps] expected install tree missing: "!INSTALLED!">&2
     exit /b 1

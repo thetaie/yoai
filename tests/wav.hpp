@@ -15,7 +15,7 @@
 #include <cstring>
 #include <vector>
 
-namespace bodyclock {
+namespace yoai {
 namespace testing {
 
 inline uint32_t le32(const unsigned char* p) {
@@ -125,4 +125,4 @@ inline bool read_wav_16k_mono(const char* path, std::vector<float>* pcm, int* so
 
 
 }  // namespace testing
-}  // namespace bodyclock
+}  // namespace yoai

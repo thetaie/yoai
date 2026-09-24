@@ -23,7 +23,7 @@
 #include <cstddef>
 #include <string>
 
-namespace bodyclock {
+namespace yoai {
 namespace platform {
 
 struct MemoryBandwidth {
@@ -47,4 +47,4 @@ struct MemoryBandwidth {
 bool measure_memory_bandwidth(int threads, int mib, int passes, MemoryBandwidth* out);
 
 }  // namespace platform
-}  // namespace bodyclock
+}  // namespace yoai

@@ -1,9 +1,9 @@
-#include "voice/prosody.hpp"
+#include "voice/prosody/prosody.hpp"
 
 #include <algorithm>
 #include <cmath>
 
-namespace bodyclock {
+namespace yoai {
 namespace voice {
 namespace {
 
@@ -407,4 +407,4 @@ float arousal(const Recording& recording, size_t index, const ArousalWeights& w)
 }
 
 }  // namespace voice
-}  // namespace bodyclock
+}  // namespace yoai

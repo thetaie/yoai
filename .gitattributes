@@ -20,5 +20,5 @@
 # The vendored SQLite amalgamation is generated upstream code that is never
 # edited here, and sqlite3.c alone is 270k lines. Keeping it out of diffs and
 # language stats stops one dependency bump from burying an actual review.
-third_party/sqlite3/sqlite3.c -diff linguist-vendored
-third_party/sqlite3/sqlite3.h -diff linguist-vendored
+third/sqlite3/sqlite3.c -diff linguist-vendored
+third/sqlite3/sqlite3.h -diff linguist-vendored

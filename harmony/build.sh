@@ -49,6 +49,8 @@
 #     ./build.sh deps hap
 #
 # Env overrides:
+#   Each also reads as YOAI_<NAME>, from the environment or from .env at the
+#   repository root, and that wins over <NAME>. See .env.example.
 #   DEVECO_HOME     DevEco Studio / command-line-tools install (default: read
 #                   from DevEco's own .home marker, else common locations)
 #   VCPKG_ROOT      vcpkg checkout (default: a sibling of the repo)
@@ -70,6 +72,27 @@ set -euo pipefail
 SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 cd "$(dirname "$SCRIPT")"
 SCRIPT_DIR="$(pwd)"
+
+# Defines yoai_load_env, called once the arguments are parsed.
+. "$SCRIPT_DIR/../scripts/load-env.sh"
+THIRD_SYNC="$SCRIPT_DIR/../third/sync.sh"
+
+# Is this checkout what third/manifest.txt records? $1 the manifest name, $2
+# its variable there, $3 the tree this build is about to compile.
+#
+# A WARNING, never a stop: a tree ahead of its pin is a normal state while
+# trying something (third/README.md), and a missing patch matters to some
+# lanes and not others. The tree goes over as YOAI_<var>, the one name sync's
+# own loader will not override, so the tree checked is the tree built. Once
+# per name per run.
+THIRD_SEEN=","
+third_verify() {
+  case "$THIRD_SEEN" in *",$1,"*) return 0 ;; esac
+  THIRD_SEEN="$THIRD_SEEN$1,"
+  if ! env "YOAI_$2=$3" bash "$THIRD_SYNC" verify "$1"; then
+    echo "[build] warning: $1 differs from third/manifest.txt (above) -- building anyway. Details: third/sync.sh check $1" >&2
+  fi
+}
 
 # --- Arguments, position-independent -----------------------------------------
 # Every token is a keyword or the ABI, and an unrecognized one is an ERROR
@@ -107,6 +130,12 @@ for tok in "$@"; do
             ;;
     esac
 done
+
+# YOAI_* settings, from the environment and from .env. See .env.example.
+# After the arguments, so the help text still prints when a configured path
+# is wrong. The names are the paths this script reads: each one that is
+# configured has to exist.
+yoai_load_env DEVECO_HOME VCPKG_ROOT OHOS_SDK_ROOT LLAMA_SRC MNN_SRC QTTS_SRC VULKAN_SDK || exit 1
 
 ABI="${ABI:-arm64-v8a}"
 # Nothing named: everything, in the order `all` would. The bare command is what
@@ -260,21 +289,23 @@ build_deps() {
         "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
     fi
 
-    # --classic: this script runs inside the repo, whose vcpkg.json would
-    # otherwise put vcpkg into manifest mode (which rejects port-name arguments).
+    # Manifest mode, from the repository's vcpkg.json. The dependency list
+    # lives there and nowhere else, so a port the core starts to need is added
+    # once and every lane installs it. This used to be --classic with the
+    # ports named here: a second list, which the desktop build never read.
     #
-    # zlib is named explicitly even though curl pulls it in: the OHOS triplet
-    # builds everything static, so the final link needs it resolvable on its own.
-    #
-    # An array, and "curl[openssl]" quoted: unquoted, the brackets are a glob
-    # the shell would try to expand against the working directory.
-    local ports=(openssl "curl[openssl]" rapidjson zlib)
-    echo "[deps] installing: ${ports[*]}"
-    "$VCPKG_ROOT/vcpkg" install "${ports[@]}" --classic --triplet "$TRIPLET" \
+    # The install root is per triplet rather than VCPKG_ROOT/installed. A
+    # manifest install may remove what its manifest does not ask for, and this
+    # vcpkg checkout is shared by every ABI of both mobile lanes.
+    local install_root="$VCPKG_ROOT/installed-$TRIPLET"
+    echo "[deps] installing from vcpkg.json into $install_root"
+    "$VCPKG_ROOT/vcpkg" install --triplet "$TRIPLET" \
+        --x-manifest-root="$SCRIPT_DIR/.." \
+        --x-install-root="$install_root" \
         --overlay-triplets="$SCRIPT_DIR/vcpkg-triplets" \
-        --x-buildtrees-root "$VCPKG_ROOT/buildtrees"
+        --x-buildtrees-root "$VCPKG_ROOT/buildtrees" || return 1
 
-    local installed="$VCPKG_ROOT/installed/$TRIPLET"
+    local installed="$install_root/$TRIPLET"
     if [ ! -d "$installed" ]; then
         echo "[deps] expected install tree missing: $installed" >&2
         return 1
@@ -341,6 +372,7 @@ build_llama() {
                 return 1; }
         fi
     fi
+    third_verify llama.cpp LLAMA_SRC "$llama_src"
 
     # The SDK ships its own cmake and ninja beside the toolchain; fall back to
     # the host's if it does not.
@@ -494,6 +526,7 @@ build_mnn() {
         return 1
     fi
     echo "[mnn] src=$mnn_src"
+    third_verify MNN MNN_SRC "$mnn_src"
 
     local native="$OHOS_SDK_ROOT/native"
     local toolchain="$native/build/cmake/ohos.toolchain.cmake"
@@ -643,6 +676,8 @@ build_qtts() {
                 return 1; }
         fi
     done
+    third_verify llama.cpp LLAMA_SRC "$llama_src"
+    third_verify qwentts.cpp QTTS_SRC "$qtts_src"
 
     local native="$OHOS_SDK_ROOT/native"
     local toolchain="$native/build/cmake/ohos.toolchain.cmake"

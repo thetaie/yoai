@@ -22,7 +22,7 @@
 // #5 is the sentence where the speaker turns to his mother. Nothing here reads a
 // word of the content.
 
-#include "voice/prosody.hpp"
+#include "voice/prosody/prosody.hpp"
 
 #include "wav.hpp"
 
@@ -36,11 +36,11 @@
 #include <cstring>
 #include <vector>
 
-using bodyclock::voice::ArousalWeights;
-using bodyclock::voice::Deviation;
-using bodyclock::voice::ProsodyOptions;
-using bodyclock::voice::Recording;
-using bodyclock::voice::Utterance;
+using yoai::voice::ArousalWeights;
+using yoai::voice::Deviation;
+using yoai::voice::ProsodyOptions;
+using yoai::voice::Recording;
+using yoai::voice::Utterance;
 
 namespace {
 
@@ -72,8 +72,8 @@ void print_recording(const Recording& r, double elapsed) {
     std::printf("      %s\n", "------------------------------------------------------------------------------");
     for (size_t i = 0; i < r.utterances.size(); ++i) {
         const Utterance& u = r.utterances[i];
-        const Deviation  d = bodyclock::voice::deviation(r, i);
-        const float      a = bodyclock::voice::arousal(r, i);
+        const Deviation  d = yoai::voice::deviation(r, i);
+        const float      a = yoai::voice::arousal(r, i);
 
         // Eight steps of block, the same shape the scratchpad tool drew, so the
         // two outputs can be read side by side.
@@ -92,13 +92,13 @@ void print_recording(const Recording& r, double elapsed) {
     // table: the claim is about where the extremes LAND, not about the spread.
     size_t low = 0, high = 0;
     for (size_t i = 1; i < r.utterances.size(); ++i) {
-        if (bodyclock::voice::arousal(r, i) < bodyclock::voice::arousal(r, low))  low = i;
-        if (bodyclock::voice::arousal(r, i) > bodyclock::voice::arousal(r, high)) high = i;
+        if (yoai::voice::arousal(r, i) < yoai::voice::arousal(r, low))  low = i;
+        if (yoai::voice::arousal(r, i) > yoai::voice::arousal(r, high)) high = i;
     }
     std::printf("\n      lowest  #%zu at %.1fs (%.2f)\n", low, r.utterances[low].start,
-                bodyclock::voice::arousal(r, low));
+                yoai::voice::arousal(r, low));
     std::printf("      highest #%zu at %.1fs (%.2f)\n", high, r.utterances[high].start,
-                bodyclock::voice::arousal(r, high));
+                yoai::voice::arousal(r, high));
 }
 
 }  // namespace
@@ -149,7 +149,7 @@ void sweep(const std::vector<float>& pcm) {
             o.min_pause       = pauses[p];
             o.silence_fraction = silences[s];
             Recording r;
-            if (!bodyclock::voice::analyze(&pcm[0], pcm.size(), 16000, o, &r)) {
+            if (!yoai::voice::analyze(&pcm[0], pcm.size(), 16000, o, &r)) {
                 std::printf("%14s", "-");
                 continue;
             }
@@ -195,7 +195,7 @@ int main(int argc, char** argv) {
 
         std::vector<float> pcm;
         int rate = 0;
-        if (!bodyclock::testing::read_wav_16k_mono(argv[i], &pcm, &rate)) {
+        if (!yoai::testing::read_wav_16k_mono(argv[i], &pcm, &rate)) {
             ++failures;
             continue;
         }
@@ -215,10 +215,10 @@ int main(int argc, char** argv) {
         if (seg_file) {
             std::vector<std::pair<float, float> > segs = read_segments(seg_file);
             std::printf("      (%d boundaries supplied)\n", static_cast<int>(segs.size()));
-            ok = bodyclock::voice::analyze_segments(&pcm[0], pcm.size(), 16000, segs,
+            ok = yoai::voice::analyze_segments(&pcm[0], pcm.size(), 16000, segs,
                                                     ProsodyOptions(), &r);
         } else {
-            ok = bodyclock::voice::analyze(&pcm[0], pcm.size(), 16000, ProsodyOptions(), &r);
+            ok = yoai::voice::analyze(&pcm[0], pcm.size(), 16000, ProsodyOptions(), &r);
         }
         const double elapsed =
             std::chrono::duration_cast<std::chrono::duration<double> >(

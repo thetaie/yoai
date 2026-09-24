@@ -36,7 +36,7 @@
 #include <string>
 #include <vector>
 
-namespace bodyclock {
+namespace yoai {
 namespace platform {
 
 // Progress as extraction runs, so a host can show something during several
@@ -82,4 +82,4 @@ bool bundle_extract(const std::string& bundle_path,
                     void* user_data);
 
 }  // namespace platform
-}  // namespace bodyclock
+}  // namespace yoai

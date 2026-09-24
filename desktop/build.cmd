@@ -32,6 +32,8 @@ rem              CMake keeps the cached value. So `build.cmd addon` on a tree
 rem              built with `llama qtts` rebuilds it with both still on.
 rem
 rem Env overrides:
+rem   Each also reads as YOAI_<NAME>, from the environment or from .env at the
+rem   repository root, and that wins over <NAME>. See .env.example.
 rem   VS_DIR       Visual Studio install root
 rem   NINJA        ninja.exe path
 rem   VCPKG_ROOT   vcpkg checkout (default: the VS-bundled one)
@@ -71,6 +73,13 @@ if /I "%~1"=="app"   ( set "DO_APP=1"   & shift & goto args )
 echo Unknown argument "%~1". Usage: build.cmd [clean] [addon] [llama] [qtts] [mnn] [app]>&2
 exit /b 1
 :args_done
+
+rem YOAI_* settings, from the environment and from .env. See .env.example.
+rem After the arguments, so the help text still prints when a configured
+rem path is wrong. The names are the paths this script reads: each one that
+rem is configured has to exist.
+call "%PROJECT_DIR%\scripts\load-env.cmd" VS_DIR NINJA VCPKG_ROOT LLAMA_SRC QTTS_SRC MNN_SRC VULKAN_SDK || exit /b 1
+set "THIRD_SYNC=%PROJECT_DIR%\third\sync.cmd"
 
 rem No target named means both, which is what a first run wants.
 if not defined DO_ADDON if not defined DO_APP (
@@ -178,6 +187,14 @@ rem the tts half) and only answers nativeLocalAvailable() with false at runtime,
 rem which reads as a missing model rather than an ignored flag. Same as the
 rem "configured every run" note under :llama_sdk: CMake is idempotent and quick
 rem when nothing changed, and `build` then does the incremental work.
+rem VCPKG_MANIFEST_DIR because the source directory cmake-js configures is
+rem native\, and the vcpkg toolchain looks for vcpkg.json only in the source
+rem directory. Without it the toolchain runs in classic mode, installs nothing,
+rem and finds curl and OpenSSL only because the root build happened to install
+rem them into the shared vcpkg_installed\ first -- on a fresh clone, where
+rem nothing has, find_package(CURL) would fail. MANIFEST_MODE is passed as
+rem well because it is a cached option: a tree first configured without the
+rem manifest keeps OFF.
 for %%C in (configure build) do (
     node "%DESKTOP_DIR%\node_modules\cmake-js\bin\cmake-js" %%C ^
         --directory "%DESKTOP_DIR%\native" ^
@@ -190,6 +207,8 @@ for %%C in (configure build) do (
         "--CDCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" ^
         --CDVCPKG_TARGET_TRIPLET=x64-windows ^
         "--CDVCPKG_INSTALLED_DIR=%PROJECT_DIR%\vcpkg_installed" ^
+        "--CDVCPKG_MANIFEST_DIR=%PROJECT_DIR%" ^
+        --CDVCPKG_MANIFEST_MODE=ON ^
         !LLAMA_ON! !LLAMA_DIR! ^
         !QTTS_ON! !QTTS_DIR_ARG! ^
         !MNN_ON! !MNN_DIR_ARG! !MNN_VK_ON!
@@ -247,6 +266,7 @@ if not exist "!QTTS_SRC!\src\qwen.h" (
     echo or point QTTS_SRC at an existing checkout.>&2
     exit /b 1
 )
+call :third_verify qwentts.cpp QTTS_SRC "!QTTS_SRC!"
 if not defined VULKAN_SDK (
     echo qtts needs a Vulkan SDK ^(VULKAN_SDK is unset^) for glslc and vulkan.hpp.>&2
     exit /b 1
@@ -293,6 +313,7 @@ if not exist "!GGML_SRC!\ggml\CMakeLists.txt" (
     echo   ..\third\sync.cmd clone llama.cpp>&2
     exit /b 1
 )
+call :third_verify llama.cpp LLAMA_SRC "!GGML_SRC!"
 
 set "QBUILD=%SDK_DIR%\qtts"
 set "QSDK=%SDK_DIR%\qtts-sdk"
@@ -387,6 +408,7 @@ if not exist "!LLAMA_SRC!\ggml\include\ggml.h" (
     echo or point LLAMA_SRC at an existing checkout.>&2
     exit /b 1
 )
+call :third_verify llama.cpp LLAMA_SRC "!LLAMA_SRC!"
 
 set "LBUILD=%SDK_DIR%\llama"
 set "LSDK=%SDK_DIR%\llama-sdk"
@@ -480,6 +502,7 @@ if not exist "!MNN_SRC!\CMakeLists.txt" (
     echo or point MNN_SRC at an existing checkout.>&2
     exit /b 1
 )
+call :third_verify MNN MNN_SRC "!MNN_SRC!"
 
 set "MBUILD=%SDK_DIR%\mnn"
 set "MSDK=%SDK_DIR%\mnn-sdk"
@@ -537,4 +560,23 @@ if not exist "!MSDK!\lib\MNN.lib" (
     exit /b 1
 )
 echo [build] MNN SDK at !MSDK!
+exit /b 0
+
+rem -----------------------------------------------------------------------------
+rem Is this checkout what third\manifest.txt records? %1 the manifest name, %2
+rem its variable there, %3 the tree this build is about to compile.
+rem
+rem A WARNING, never a stop: a tree ahead of its pin is a normal state while
+rem trying something (third\README.md), and a missing patch matters to some
+rem lanes and not others. The tree goes over as YOAI_<var>, the one name sync's
+rem own loader will not override, so the tree checked is the tree built. Once
+rem per name per run.
+rem -----------------------------------------------------------------------------
+:third_verify
+if defined THIRD_SEEN_%~1 exit /b 0
+setlocal
+set "YOAI_%~2=%~3"
+call "%THIRD_SYNC%" verify %~1
+if errorlevel 1 echo [build] warning: %~1 differs from third\manifest.txt ^(above^) -- building anyway. Details: third\sync.cmd check %~1>&2
+endlocal & set "THIRD_SEEN_%~1=1"
 exit /b 0

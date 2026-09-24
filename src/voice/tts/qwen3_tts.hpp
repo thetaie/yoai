@@ -1,10 +1,10 @@
 // Qwen3-TTS VoiceDesign on qwentts.cpp: text in, a described voice out.
 //
 // The THIRD engine in this core, and like the second it is here for one thing.
-// omni.hpp explains what MNN buys -- the model's own voice -- and design/voice.md
-// records what it costs: 2.8x slower than real time at the coarsest diffusion
-// setting that still sounds like anything, on a chain that also has to think
-// before it speaks. This engine speaks text somebody else produced, so the
+// omni/qwen25_omni.hpp explains what MNN buys -- the model's own voice -- and
+// design/voice.md records what it costs: 2.8x slower than real time at the
+// coarsest diffusion setting that still sounds like anything, on a chain that
+// also has to think before it speaks. This engine speaks text somebody else produced, so the
 // thinker is llama.cpp's and already measured, and the speaking measured 1.16x
 // on a desktop against omni's 3.0x for the same job.
 //
@@ -51,11 +51,9 @@
 #include <string>
 #include <vector>
 
-namespace bodyclock {
+namespace yoai {
 namespace voice {
 
-// What one synthesis produced. Every duration is wall clock from a steady clock
-// -- see the note in omni.hpp for why that is spelled out.
 // Both sampling stacks, with qwentts.cpp's own defaults.
 //
 // The values here MATCH sampling-defaults.h, so a default-constructed one
@@ -74,6 +72,8 @@ struct QttsSampling {
     float subtalker_top_p       = 1.0f;
 };
 
+// What one synthesis produced. Every duration is wall clock from a steady clock
+// -- see the note in omni/qwen25_omni.hpp for why that is spelled out.
 struct QttsResult {
     // Seconds of audio, at 24000 Hz.
     float speech_seconds = 0.0f;
@@ -333,7 +333,7 @@ public:
     // autoregression. Across separate say() calls there is no shared context:
     // each piece redraws the acoustic trajectory from nothing, and one piece in
     // sixteen came back five semitones low -- a whole sentence in a different
-    // voice. See src/voice/reader.hpp for that measurement.
+    // voice. See src/voice/tts/reader.hpp for that measurement.
     //
     // **Turning the sub-talker down does NOT fix that, and it was measured
     // rather than assumed.** Four seeds, one passage of four pieces, the widest
@@ -394,4 +394,4 @@ private:
 };
 
 }  // namespace voice
-}  // namespace bodyclock
+}  // namespace yoai

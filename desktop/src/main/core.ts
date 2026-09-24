@@ -78,7 +78,7 @@ export interface BodyclockNative {
   //--- Reading a reply while it is still being written -------------------------
   // A SECOND engine over the same two GGUFs as the lane above, so only one of
   // them should be loaded: together they hold the weights twice. See
-  // src/bodyclock.h and src/voice/reader.hpp.
+  // src/bodyclock.h and src/voice/tts/reader.hpp.
   nativeReaderAvailable(): number
   nativeReaderLoad(
     talkerPath: string,

@@ -15,7 +15,7 @@
 #include <string>
 #include <vector>
 
-namespace bodyclock { namespace llm {
+namespace yoai { namespace llm {
 
 struct ChatMessage {
     std::string role;       // "user" / "assistant" / "system" / "tool"

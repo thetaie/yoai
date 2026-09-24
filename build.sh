@@ -1,40 +1,95 @@
 #!/usr/bin/env bash
-# Desktop build: bodyclock_core plus the CLI harness, into build/.
+# The core library, the desktop tools in cli/ and the tests in tests/, into
+# build/. Not the desktop app -- that is desktop/build.sh.
 #
 # The point of a desktop build is that the core can be exercised without a
-# device -- see cli/main.cpp. It is not a shipping target.
+# device -- see cli/README.md. It is not a shipping target.
 #
 # Dependencies come from vcpkg when it is there, and from the system's own
 # packages when it is not -- see the comment above the vcpkg block below.
 #
-# Usage: ./build.sh [clean] [asr]
+# With no arguments this prints usage() and builds nothing, so running the
+# script to find out what it does is safe.
 #
-#   asr   also build speech recognition, which needs ggml. Assembles a desktop
-#         ggml SDK into build/llama-sdk/ from a llama.cpp checkout and configures
-#         with -DBODYCLOCK_ASR=ON. Only ggml is built -- recognition does not
-#         link llama -- so this is a couple of minutes, not the twenty the full
-#         engine takes.
-#
-# Env overrides:
-#   VCPKG_ROOT        vcpkg checkout (default: a sibling of the repo, used only
-#                     if it exists)
-#   OPENSSL_ROOT_DIR  where to find OpenSSL, when the default search misses it
-#   LLAMA_SRC         llama.cpp checkout (default: a sibling of the repo), `asr` only
+# `asr` assembles a desktop ggml SDK into build/llama-sdk/ from a llama.cpp
+# checkout and configures with -DBODYCLOCK_ASR=ON. Only ggml is built --
+# recognition does not link llama -- so this is a couple of minutes, not the
+# twenty the full engine takes.
 set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: ./build.sh <command> [command ...]
+
+Builds the core library, the desktop tools in cli/ and the tests in tests/,
+into build/. This is not the desktop app -- that is desktop/build.sh.
+
+Commands:
+  build    configure if needed, then build
+  asr      the same, with speech recognition compiled in. Needs a llama.cpp
+           checkout for ggml; see LLAMA_SRC
+  clean    delete build/ first, then build
+
+Commands combine, e.g. ./build.sh clean asr
+
+Environment, each also as YOAI_<NAME> in the environment or in .env,
+which wins -- see .env.example:
+  VCPKG_ROOT        vcpkg checkout (default: ../vcpkg, used only if it exists)
+  OPENSSL_ROOT_DIR  where to find OpenSSL, when the default search misses it
+  LLAMA_SRC         llama.cpp checkout for asr (default: ../llama.cpp)
+EOF
+}
 
 cd "$(dirname "$0")"
 PROJECT_DIR="$(pwd)"
 BUILD_DIR="$PROJECT_DIR/build"
 
+# Defines yoai_load_env, called once the arguments are parsed.
+. "$PROJECT_DIR/scripts/load-env.sh"
+THIRD_SYNC="$PROJECT_DIR/third/sync.sh"
+
+# Is this checkout what third/manifest.txt records? $1 the manifest name, $2
+# its variable there, $3 the tree this build is about to compile.
+#
+# A WARNING, never a stop: a tree ahead of its pin is a normal state while
+# trying something (third/README.md), and a missing patch matters to some
+# lanes and not others. The tree goes over as YOAI_<var>, the one name sync's
+# own loader will not override, so the tree checked is the tree built. Once
+# per name per run.
+THIRD_SEEN=","
+third_verify() {
+  case "$THIRD_SEEN" in *",$1,"*) return 0 ;; esac
+  THIRD_SEEN="$THIRD_SEEN$1,"
+  if ! env "YOAI_$2=$3" bash "$THIRD_SYNC" verify "$1"; then
+    echo "[build] warning: $1 differs from third/manifest.txt (above) -- building anyway. Details: third/sync.sh check $1" >&2
+  fi
+}
+
+# Help exits 0: asking for it is not an error.
+if [ $# -eq 0 ]; then
+  usage
+  exit 0
+fi
+
 DO_CLEAN=""
 DO_ASR=""
 for arg in "$@"; do
   case "$arg" in
+    # `build` sets nothing: every command builds, and this one only asks for
+    # the defaults.
+    build) ;;
     clean) DO_CLEAN=1 ;;
     asr)   DO_ASR=1 ;;
-    *) echo "Unknown argument \"$arg\". Usage: ./build.sh [clean] [asr]" >&2; exit 1 ;;
+    help|-h|--help) usage; exit 0 ;;
+    *) echo "Unknown argument \"$arg\". Run ./build.sh with no arguments for help." >&2; exit 1 ;;
   esac
 done
+
+# YOAI_* settings, from the environment and from .env. See .env.example.
+# After the arguments, so the help text still prints when a configured path
+# is wrong. The names are the paths this script reads: each one that is
+# configured has to exist.
+yoai_load_env VCPKG_ROOT OPENSSL_ROOT_DIR LLAMA_SRC || exit 1
 
 if [ -n "$DO_CLEAN" ]; then
   rm -rf "$BUILD_DIR"
@@ -88,6 +143,7 @@ if [ -n "$DO_ASR" ]; then
     echo "or point LLAMA_SRC at an existing checkout." >&2
     exit 1
   fi
+  third_verify llama.cpp LLAMA_SRC "$LLAMA_SRC"
 
   GGML_BUILD="$BUILD_DIR/ggml"
   LSDK="$BUILD_DIR/llama-sdk"

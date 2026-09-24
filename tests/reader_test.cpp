@@ -4,8 +4,9 @@
 //     build/bodyclock-reader-test <talker.gguf> <tokenizer.gguf> [voices] [instruct] [seed]
 //                                 [subtalker_temperature] [reference.wav] [min_chars]
 //
-// With no arguments this is split_sentences() alone -- plain text processing,
-// so it runs anywhere the core builds and says yes or no on its own.
+// With no arguments this is split_sentences() and SentenceStream alone --
+// plain text processing, so it runs anywhere the core builds and says yes or no
+// on its own.
 //
 // Given the two GGUFs it also reads a passage aloud on `voices` engines and
 // checks the half that cannot be checked without one: that the audio arrives in
@@ -22,8 +23,9 @@
 // cover the passage exactly, and the short-sentence cases are the ones that
 // caught it.
 
-#include "voice/prosody.hpp"
-#include "voice/reader.hpp"
+#include "voice/prosody/prosody.hpp"
+#include "voice/text/sentence_stream.hpp"
+#include "voice/tts/reader.hpp"
 
 #include <chrono>
 #include <algorithm>
@@ -35,11 +37,12 @@
 #include <utility>
 #include <vector>
 
-using bodyclock::voice::Reader;
-using bodyclock::voice::ReaderResult;
-using bodyclock::voice::Sentence;
-using bodyclock::voice::SplitOptions;
-using bodyclock::voice::split_sentences;
+using yoai::voice::Reader;
+using yoai::voice::ReaderResult;
+using yoai::voice::Sentence;
+using yoai::voice::SentenceStream;
+using yoai::voice::SplitOptions;
+using yoai::voice::split_sentences;
 
 namespace {
 
@@ -339,9 +342,9 @@ void describe_pieces(const std::vector<float>& pcm, const std::vector<std::size_
                                           static_cast<float>(end / rate)));
     }
 
-    bodyclock::voice::Recording rec;
-    bodyclock::voice::ProsodyOptions opt;
-    if (!bodyclock::voice::analyze_segments(&pcm[0], pcm.size(), Reader::sample_rate(),
+    yoai::voice::Recording rec;
+    yoai::voice::ProsodyOptions opt;
+    if (!yoai::voice::analyze_segments(&pcm[0], pcm.size(), Reader::sample_rate(),
                                             segments, opt, &rec)) {
         std::printf("          per piece: too short to analyze\n");
         return;
@@ -373,7 +376,7 @@ void describe_pieces(const std::vector<float>& pcm, const std::vector<std::size_
 
     std::printf("          per piece, against the median %.1f Hz:\n", mid);
     for (std::size_t k = 0; k < rec.utterances.size(); ++k) {
-        const bodyclock::voice::Utterance& u = rec.utterances[k];
+        const yoai::voice::Utterance& u = rec.utterances[k];
         const double st = (u.f0_mean > 0.0f)
                               ? 12.0 * std::log(u.f0_mean / mid) / std::log(2.0)
                               : 0.0;
@@ -405,9 +408,9 @@ void describe_pieces(const std::vector<float>& pcm, const std::vector<std::size_
 // question -- it would measure the pieces this test made rather than the pieces
 // a listener hears.
 void describe(const char* label, const std::vector<float>& pcm) {
-    bodyclock::voice::Recording rec;
-    bodyclock::voice::ProsodyOptions opt;
-    if (!bodyclock::voice::analyze(&pcm[0], pcm.size(), Reader::sample_rate(), opt, &rec)) {
+    yoai::voice::Recording rec;
+    yoai::voice::ProsodyOptions opt;
+    if (!yoai::voice::analyze(&pcm[0], pcm.size(), Reader::sample_rate(), opt, &rec)) {
         std::printf("  %-6s  too short to analyze\n", label);
         return;
     }
@@ -421,8 +424,8 @@ void describe(const char* label, const std::vector<float>& pcm) {
     double db_step = 0.0, db_step_max = 0.0;
     int steps = 0;
     for (std::size_t k = 1; k < rec.utterances.size(); ++k) {
-        const bodyclock::voice::Utterance& a = rec.utterances[k - 1];
-        const bodyclock::voice::Utterance& b = rec.utterances[k];
+        const yoai::voice::Utterance& a = rec.utterances[k - 1];
+        const yoai::voice::Utterance& b = rec.utterances[k];
         if (a.f0_mean > 0.0f && b.f0_mean > 0.0f) {
             double st = 12.0 * std::log(b.f0_mean / a.f0_mean) / std::log(2.0);
             if (st < 0.0) st = -st;
@@ -451,7 +454,7 @@ void describe(const char* label, const std::vector<float>& pcm) {
                 "level %.2f dB mean / %.2f max\n",
                 f0_step, f0_step_max, db_step, db_step_max);
     for (std::size_t k = 0; k < rec.utterances.size(); ++k) {
-        const bodyclock::voice::Utterance& u = rec.utterances[k];
+        const yoai::voice::Utterance& u = rec.utterances[k];
         std::printf("            [%d] at %5.2f s  %4.2f s  F0 %6.1f  range %4.1f st  "
                     "RMS %.4f\n",
                     static_cast<int>(k), u.start, u.duration, u.f0_mean, u.f0_range_st,
@@ -501,7 +504,7 @@ int compare(const char* talker, const char* tokenizer, int voices, const char* i
     }
     reader.set_seed(seed);
     // The one field this sweep is about. Negative leaves the engine's 0.9.
-    bodyclock::voice::QttsSampling sampling;
+    yoai::voice::QttsSampling sampling;
     if (sub_temp >= 0.0f) {
         sampling.subtalker_temperature = sub_temp;
         reader.set_sampling(sampling);
@@ -762,7 +765,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    // 10. English, since a reply mixes it in.
+    // 11. English, since a reply mixes it in.
     {
         const std::string text =
             "This is the first sentence. Here is a second one! And a third?";
@@ -773,6 +776,85 @@ int main(int argc, char** argv) {
         const std::vector<Sentence> out = split_checked(text, latin, "english");
         show("english", out);
         expect(out.size() == 3, "english", "expected three pieces");
+    }
+
+    // 12. The stream, one character at a time, as a language model writes.
+    //
+    //     Three things: nothing is lost across feed() and finish(); a fragment
+    //     still mid-sentence is never handed over; and the first piece comes
+    //     out when its clause is complete, not when the whole reply is.
+    {
+        const std::string text =
+            "瘦西湖位于中国江苏省扬州市，是扬州城西一条狭长的人工湖，"
+            "因湖面曲折如一条瘦长的青螺而得名。";
+        SplitOptions opt;
+        opt.min_chars   = 12;
+        opt.max_chars   = 40;
+        opt.tail_chars  = 1;
+        opt.clause_cuts = true;
+
+        SentenceStream stream(opt);
+        std::vector<std::string> got;
+        std::size_t first_at = 0;   // characters written when piece 0 came out
+        std::size_t written  = 0;
+        for (std::size_t i = 0; i < text.size(); ) {
+            // This passage is CJK and ASCII only, so a character is 3 bytes or 1.
+            const std::size_t len = (static_cast<unsigned char>(text[i]) & 0x80) ? 3 : 1;
+            const std::vector<std::string> ready = stream.feed(text.substr(i, len));
+            i += len;
+            ++written;
+            if (!ready.empty() && got.empty()) {
+                first_at = written;
+            }
+            got.insert(got.end(), ready.begin(), ready.end());
+        }
+        const std::vector<std::string> rest = stream.finish();
+        got.insert(got.end(), rest.begin(), rest.end());
+
+        std::printf("stream -> %d piece(s), first after %d of %d chars\n",
+                    static_cast<int>(got.size()), static_cast<int>(first_at),
+                    static_cast<int>(chars_of(text)));
+        std::string joined;
+        for (std::size_t k = 0; k < got.size(); ++k) {
+            std::printf("    [%d] %s\n", static_cast<int>(k), got[k].c_str());
+            joined += got[k];
+        }
+        expect(joined == text, "stream", "the streamed pieces do not reproduce the passage");
+        expect(first_at > 0 && first_at < chars_of(text), "stream",
+               "the first piece waited for the whole reply");
+
+        // A trailing fragment is not settled, however long it is.
+        SentenceStream open(opt);
+        expect(open.feed("这是一个还没有写完而且足够长的句子").empty(), "stream",
+               "a fragment still mid-sentence was handed over");
+    }
+
+    // 13. Fed whole, the stream gives the same pieces the splitter does, trimmed.
+    //     read() is exactly this path, so it is what a passage handed over in one
+    //     go is cut into.
+    {
+        const std::string text =
+            "This is the first sentence. Here is a second one! And a third?";
+        SplitOptions latin;
+        latin.min_chars  = 8;
+        latin.max_chars  = 40;
+        latin.tail_chars = 1;
+
+        SentenceStream stream(latin);
+        std::vector<std::string> got = stream.feed(text);
+        const std::vector<std::string> rest = stream.finish();
+        got.insert(got.end(), rest.begin(), rest.end());
+
+        const std::vector<Sentence> ref = split_sentences(text, latin);
+        bool same = got.size() == ref.size();
+        for (std::size_t k = 0; same && k < got.size(); ++k) {
+            const std::string& r = ref[k].text;
+            const std::size_t e = r.find_last_not_of(' ');
+            same = got[k] == r.substr(0, e + 1);
+        }
+        std::printf("stream whole -> %d piece(s), %s the splitter\n",
+                    static_cast<int>(got.size()), same ? "same as" : "DIFFERENT from");
+        expect(same, "stream whole", "fed in one go, the stream cut differently");
     }
 
     if (argc >= 3) {

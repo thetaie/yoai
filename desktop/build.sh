@@ -29,6 +29,8 @@
 #              under sdk/ are NOT discarded either way.
 #
 # Env overrides:
+#   Each also reads as YOAI_<NAME>, from the environment or from .env at the
+#   repository root, and that wins over <NAME>. See .env.example.
 #   VCPKG_ROOT        vcpkg checkout (default: a sibling of the repo, used only
 #                     if it exists)
 #   OPENSSL_ROOT_DIR  where to find OpenSSL, when the default search misses it
@@ -40,6 +42,27 @@ set -euo pipefail
 cd "$(dirname "$0")"
 DESKTOP_DIR="$(pwd)"
 PROJECT_DIR="$(cd .. && pwd)"
+
+# Defines yoai_load_env, called once the arguments are parsed.
+. "$PROJECT_DIR/scripts/load-env.sh"
+THIRD_SYNC="$PROJECT_DIR/third/sync.sh"
+
+# Is this checkout what third/manifest.txt records? $1 the manifest name, $2
+# its variable there, $3 the tree this build is about to compile.
+#
+# A WARNING, never a stop: a tree ahead of its pin is a normal state while
+# trying something (third/README.md), and a missing patch matters to some
+# lanes and not others. The tree goes over as YOAI_<var>, the one name sync's
+# own loader will not override, so the tree checked is the tree built. Once
+# per name per run.
+THIRD_SEEN=","
+third_verify() {
+  case "$THIRD_SEEN" in *",$1,"*) return 0 ;; esac
+  THIRD_SEEN="$THIRD_SEEN$1,"
+  if ! env "YOAI_$2=$3" bash "$THIRD_SYNC" verify "$1"; then
+    echo "[build] warning: $1 differs from third/manifest.txt (above) -- building anyway. Details: third/sync.sh check $1" >&2
+  fi
+}
 BUILD_DIR="$DESKTOP_DIR/build"
 
 # The SDKs live OUTSIDE build/, and that is not tidiness. build/ belongs to
@@ -65,6 +88,12 @@ for arg in "$@"; do
     *) echo "Unknown argument \"$arg\". Usage: ./build.sh [clean] [addon] [llama] [qtts] [app]" >&2; exit 1 ;;
   esac
 done
+
+# YOAI_* settings, from the environment and from .env. See .env.example.
+# After the arguments, so the help text still prints when a configured path
+# is wrong. The names are the paths this script reads: each one that is
+# configured has to exist.
+yoai_load_env VCPKG_ROOT OPENSSL_ROOT_DIR LLAMA_SRC QTTS_SRC VULKAN_SDK || exit 1
 
 # No target named means both, which is what a first run wants.
 if [ -z "$DO_ADDON" ] && [ -z "$DO_APP" ]; then
@@ -99,6 +128,10 @@ if [ -n "$DO_ADDON" ]; then
     CMAKE_JS_ARGS+=(
       "--CDCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
       "--CDVCPKG_INSTALLED_DIR=$PROJECT_DIR/vcpkg_installed"
+      # The toolchain looks for vcpkg.json only in the source directory, which
+      # for cmake-js is native/. See the same flags in build.cmd for why both.
+      "--CDVCPKG_MANIFEST_DIR=$PROJECT_DIR"
+      "--CDVCPKG_MANIFEST_MODE=ON"
     )
   elif [ -n "$VCPKG_EXPLICIT" ]; then
     echo "vcpkg not found at $VCPKG_ROOT (from VCPKG_ROOT)." >&2
@@ -126,6 +159,7 @@ if [ -n "$DO_ADDON" ]; then
       echo "or point LLAMA_SRC at an existing checkout." >&2
       exit 1
     fi
+    third_verify llama.cpp LLAMA_SRC "$LLAMA_SRC"
 
     LBUILD="$SDK_DIR/llama"
     LSDK="$SDK_DIR/llama-sdk"
@@ -170,6 +204,7 @@ if [ -n "$DO_ADDON" ]; then
       echo "or point QTTS_SRC at an existing checkout." >&2
       exit 1
     fi
+    third_verify qwentts.cpp QTTS_SRC "$QTTS_SRC"
 
     # ONE ggml for both lanes, and llama.cpp's is the one. qwentts builds a ggml
     # of its own from a fork, and until 2026-09-21 that copy superset llama's,
@@ -189,6 +224,7 @@ if [ -n "$DO_ADDON" ]; then
       echo "  ../third/sync.sh clone llama.cpp" >&2
       exit 1
     fi
+    third_verify llama.cpp LLAMA_SRC "$LLAMA_SRC"
 
     # The GPU backend is per platform, not optional-per-platform.
     #

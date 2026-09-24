@@ -26,7 +26,7 @@
 #include <windows.h>
 #endif
 
-namespace bodyclock { namespace platform {
+namespace yoai { namespace platform {
 
 namespace {
 
