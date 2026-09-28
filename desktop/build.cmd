@@ -131,7 +131,7 @@ set "LLAMA_ON="
 set "LLAMA_DIR="
 if defined DO_LLAMA (
     call :llama_sdk || exit /b 1
-    set "LLAMA_ON=--CDBODYCLOCK_ONDEVICE_LLM=ON"
+    set "LLAMA_ON=--CDYOAI_ONDEVICE_LLM=ON"
     set LLAMA_DIR="--CDLLAMA_CPP_DIR=%SDK_DIR%\llama-sdk"
 )
 
@@ -139,7 +139,7 @@ set "QTTS_ON="
 set "QTTS_DIR_ARG="
 if defined DO_QTTS (
     call :qtts_sdk || exit /b 1
-    set "QTTS_ON=--CDBODYCLOCK_QTTS=ON"
+    set "QTTS_ON=--CDYOAI_QTTS=ON"
     set QTTS_DIR_ARG="--CDQTTS_DIR=%SDK_DIR%\qtts-sdk"
 )
 
@@ -148,13 +148,13 @@ set "MNN_DIR_ARG="
 set "MNN_VK_ON="
 if defined DO_MNN (
     call :mnn_sdk || exit /b 1
-    set "MNN_ON=--CDBODYCLOCK_MNN=ON"
+    set "MNN_ON=--CDYOAI_MNN=ON"
     set MNN_DIR_ARG="--CDMNN_DIR=%SDK_DIR%\mnn-sdk"
     rem Off, with -DMNN_VULKAN under :mnn_sdk and for the same reason. The two
     rem travel together: this one says the Vulkan symbols exist to link against,
     rem and referencing them in a libMNN built without the backend does not link
     rem at all.
-    rem set "MNN_VK_ON=--CDBODYCLOCK_MNN_VULKAN=ON"
+    rem set "MNN_VK_ON=--CDYOAI_MNN_VULKAN=ON"
 )
 
 rem Two things here are worked around rather than configured, and both cost an
@@ -193,8 +193,21 @@ rem directory. Without it the toolchain runs in classic mode, installs nothing,
 rem and finds curl and OpenSSL only because the root build happened to install
 rem them into the shared vcpkg_installed\ first -- on a fresh clone, where
 rem nothing has, find_package(CURL) would fail. MANIFEST_MODE is passed as
-rem well because it is a cached option: a tree first configured without the
-rem manifest keeps OFF.
+rem well because it is a cached option.
+rem
+rem It does NOT rescue a tree first configured without the manifest: vcpkg
+rem refuses to switch an existing build directory to manifest mode, and records
+rem the mode it started in as Z_VCPKG_CHECK_MANIFEST_MODE. Such a tree has to
+rem start over, which is said here rather than in vcpkg's own words -- those
+rem ask for the directory to be deleted and do not mention the lanes it had.
+findstr /C:"Z_VCPKG_CHECK_MANIFEST_MODE:INTERNAL=OFF" "%BUILD_DIR%\CMakeCache.txt" >nul 2>&1
+if not errorlevel 1 (
+    echo [build] build\ was configured before the addon used the root vcpkg.json,>&2
+    echo [build] and vcpkg cannot switch an existing tree to manifest mode. Start it>&2
+    echo [build] over, naming the lanes it had -- `clean` does not keep them:>&2
+    echo [build]   build.cmd clean addon [llama] [qtts] [mnn]>&2
+    exit /b 1
+)
 for %%C in (configure build) do (
     node "%DESKTOP_DIR%\node_modules\cmake-js\bin\cmake-js" %%C ^
         --directory "%DESKTOP_DIR%\native" ^
@@ -474,7 +487,7 @@ rem MNN_VULKAN is DELIBERATELY ABSENT, and the reason is a measurement rather
 rem than an omission. Turning it on needs three things together: -DMNN_VULKAN=ON,
 rem -DMNN_VULKAN_IMAGE=OFF (the default image path is the classic CNN backend --
 rem no attention, no layernorm, no low-bit weights, so the DiT cannot run on it),
-rem and BODYCLOCK_MNN_VULKAN below, because a static libMNN drops every one of
+rem and YOAI_MNN_VULKAN below, because a static libMNN drops every one of
 rem the backend's registrars unless the archive is linked whole. All three are
 rem in place; see CMakeLists.txt and third/patches.
 rem

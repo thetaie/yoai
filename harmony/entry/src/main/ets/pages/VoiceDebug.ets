@@ -37,7 +37,7 @@ import { ChainPrompt, DEFAULT_CHAIN_PROMPT } from '../core/ChainPrompt';
 import { TextReaderTts } from '../core/TextReaderTts';
 
 //------------------------------------------------------------------------------
-// The shape the core returns (src/bodyclock.h, bodyclock_voice_analyze)
+// The shape the core returns (src/yoai.h, yoai_voice_analyze)
 //------------------------------------------------------------------------------
 
 // Every field the core emits, because each z below is a raw measurement divided
@@ -103,7 +103,7 @@ interface AnalysisJson {
  */
 const DEMO_LINE: string = '今天过得怎么样？这是我现在说话的声音。';
 
-/** What bodyclock_memory_bandwidth returns. gbPerSecond is DECIMAL GB. */
+/** What yoai_memory_bandwidth returns. gbPerSecond is DECIMAL GB. */
 interface MemBwJson {
   threads: number;
   bytes: number;
@@ -736,7 +736,7 @@ struct VoiceDebug {
    * Fill the KV with the system prompt, by asking something and throwing the
    * answer away.
    *
-   * There is no prefill-only entry point -- bodyclock_chat always generates --
+   * There is no prefill-only entry point -- yoai_chat always generates --
    * so this costs a handful of decoded tokens. It buys the 2.4 s that the first
    * real recording would otherwise spend prefilling a prompt that never changes.
    *

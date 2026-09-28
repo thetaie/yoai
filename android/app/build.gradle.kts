@@ -35,7 +35,7 @@ android {
                 // shim. See src/main/cpp/CMakeLists.txt.
                 arguments += listOf(
                     "-DANDROID_STL=c++_shared",
-                    "-DBODYCLOCK_ANDROID_ABI=$bodyclockAbi",
+                    "-DYOAI_ANDROID_ABI=$bodyclockAbi",
                 )
                 cppFlags += "-std=c++11"
             }

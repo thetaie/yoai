@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.19)
 project(bodyclock C CXX)
 
-# The Body Clock core: a static library plus a C ABI (src/bodyclock.h), built to be linked
+# The Body Clock core: a static library plus a C ABI (src/yoai.h), built to be linked
 # INTO a host app -- the HarmonyOS native module today, an Android one next --
 # rather than run as a process. There is no server here and no port to bind: the
 # host owns storage and settings and reaches the core through the C ABI.
@@ -12,6 +12,22 @@ project(bodyclock C CXX)
 # Dependencies come from vcpkg (see vcpkg.json). Cross-compiling for HarmonyOS
 # goes through harmony/build.{sh,cmd}, which lays the same ports out
 # under harmony/prebuilt/<abi>/ for the find_package calls below to resolve.
+
+# A build tree configured before the switches were renamed from BODYCLOCK_* to
+# YOAI_* still caches the old names, and would read every YOAI_* option at its
+# default: each lane quietly OFF, compiled to its stub, the build still green.
+# So such a tree stops here and names itself. Every host's build includes this
+# file, so the check covers harmony's and android's .cxx trees and desktop's too.
+get_cmake_property(_yoai_cached CACHE_VARIABLES)
+foreach(_v IN LISTS _yoai_cached)
+    if(_v MATCHES "^BODYCLOCK_")
+        message(FATAL_ERROR
+            "${CMAKE_BINARY_DIR} was configured before BODYCLOCK_* became YOAI_* -- "
+            "it still caches ${_v}, and reconfiguring would turn its lanes off. "
+            "Delete that directory and build again, with the build script's `clean` "
+            "where it has one, naming the lanes it had.")
+    endif()
+endforeach()
 
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -90,6 +106,39 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(bodyclock_sqlite3 PUBLIC Threads::Threads)
 
+# sqlite-vec, vendored beside it: vector search as a vec0 virtual table, for
+# src/memory. See third/sqlite-vec/README.md for the version.
+#
+# Compiled in rather than loaded, so SQLITE_OMIT_LOAD_EXTENSION above stays. A
+# connection gets it by calling sqlite3_vec_init directly.
+add_library(yoai_sqlite_vec STATIC third/sqlite-vec/sqlite-vec.c)
+target_include_directories(yoai_sqlite_vec PUBLIC third/sqlite-vec)
+target_link_libraries(yoai_sqlite_vec PUBLIC bodyclock_sqlite3)
+
+target_compile_definitions(yoai_sqlite_vec
+    PUBLIC
+        # Built into the library, so it calls the sqlite3 API directly instead of
+        # through the routine table a loader hands over. PUBLIC because
+        # sqlite-vec.h makes the same choice for whoever includes it: without
+        # this it asks for sqlite3ext.h, which is not vendored.
+        SQLITE_CORE
+        # No __declspec(dllexport) on the entry point: it is linked, not exported.
+        SQLITE_VEC_STATIC
+    PRIVATE
+        # Drops the functions that read .npy files by path. SQL that can open
+        # files is the same attack surface OMIT_LOAD_EXTENSION closes.
+        SQLITE_VEC_OMIT_FS
+)
+
+if(MSVC)
+    target_compile_options(yoai_sqlite_vec PRIVATE /w)
+else()
+    # sqlite-vec.c typedefs uint8_t from u_int8_t on every non-Windows target
+    # without including the header that declares it. glibc and bionic declare
+    # it anyway; musl -- HarmonyOS -- does not, and the file does not compile.
+    target_compile_options(yoai_sqlite_vec PRIVATE -w -include sys/types.h)
+endif()
+
 #-------------------------------------------------------------------------------
 # Schema migrations
 #-------------------------------------------------------------------------------
@@ -107,14 +156,14 @@ target_link_libraries(bodyclock_sqlite3 PUBLIC Threads::Threads)
 # Only the schema lives here. Query text stays next to the code that binds its
 # parameters and reads its columns -- splitting those two apart is how a column
 # order silently stops matching the indices that read it.
-file(GLOB BODYCLOCK_SQL_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/sql/sqlite/*.sql")
-list(SORT BODYCLOCK_SQL_FILES)
-if(NOT BODYCLOCK_SQL_FILES)
+file(GLOB YOAI_SQL_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/sql/sqlite/*.sql")
+list(SORT YOAI_SQL_FILES)
+if(NOT YOAI_SQL_FILES)
     message(FATAL_ERROR "No migrations found in sql/sqlite/")
 endif()
 
 set(_bodyclock_migrations "")
-foreach(_sql_file ${BODYCLOCK_SQL_FILES})
+foreach(_sql_file ${YOAI_SQL_FILES})
     get_filename_component(_sql_name "${_sql_file}" NAME)
     if(NOT _sql_name MATCHES "^([0-9]+)_.+\\.sql$")
         message(FATAL_ERROR "Migration ${_sql_name} is not named NNN_something.sql")
@@ -127,7 +176,7 @@ foreach(_sql_file ${BODYCLOCK_SQL_FILES})
     endif()
     file(READ "${_sql_file}" _sql_text)
     string(APPEND _bodyclock_migrations
-        "    { ${_sql_version}, \"${_sql_name}\", R\"BODYCLOCK_SQL(\n${_sql_text})BODYCLOCK_SQL\" },\n")
+        "    { ${_sql_version}, \"${_sql_name}\", R\"YOAI_SQL(\n${_sql_text})YOAI_SQL\" },\n")
     # Re-run CMake when the statements change, not only when a file is added.
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_sql_file}")
 endforeach()
@@ -165,12 +214,13 @@ configure_file("${_bodyclock_gen_dir}/store/migrations.hpp.in"
 add_library(bodyclock_core STATIC
     src/client/http_client.cpp
     src/llm/event.cpp
-    # Compiles to a stub unless BODYCLOCK_ONDEVICE_LLM is on (see below), so the
+    # Compiles to a stub unless YOAI_ONDEVICE_LLM is on (see below), so the
     # default build needs no llama.cpp and still exposes the on-device entry
     # points -- they just answer "not built in".
     src/llm/local.cpp
     src/llm/openai_chat.cpp
     src/llm/sse_parser.cpp
+    src/memory/vector_index.cpp
     src/platform/bundle.cpp
     src/platform/c_api.cpp
     src/platform/log.cpp
@@ -193,14 +243,14 @@ add_library(bodyclock_core STATIC
     # on having no way to ask for a voice -- design/voice.md and
     # src/voice/attic/README.md have the table -- and is back because the
     # end-to-end shape is the thing a chain cannot imitate. Stubs out without
-    # BODYCLOCK_MNN.
+    # YOAI_MNN.
     src/voice/omni/qwen25_omni.cpp
     # A THIRD, for the speaking half alone at a third of the cost, on text
-    # somebody else wrote. Stubs out without BODYCLOCK_QTTS.
+    # somebody else wrote. Stubs out without YOAI_QTTS.
     src/voice/tts/qwen3_tts.cpp
     # And a passage over the top of it: split into sentences, several engines at
     # once, emitted in order. No engine of its own, so it builds everywhere --
-    # without BODYCLOCK_QTTS its load() fails the way qwen3_tts.cpp's does.
+    # without YOAI_QTTS its load() fails the way qwen3_tts.cpp's does.
     src/voice/tts/reader.cpp
     # Streamed text cut into pieces that can each be spoken on their own. Plain
     # text processing, no engine; the reader is its first user.
@@ -226,6 +276,7 @@ target_link_libraries(bodyclock_core PUBLIC
     CURL::libcurl
     OpenSSL::SSL
     OpenSSL::Crypto
+    yoai_sqlite_vec
     bodyclock_sqlite3
 )
 
@@ -294,7 +345,7 @@ endif()
 # llama` and `... qtts` assemble the SDKs under harmony/prebuilt/ and the app's
 # CMakeLists finds them there. Building an SDK IS turning its lane on.
 
-# Resolves the ggml archives into BODYCLOCK_GGML_LIBS, and fails with the reason
+# Resolves the ggml archives into YOAI_GGML_LIBS, and fails with the reason
 # rather than with a link error two minutes later. `_why` names the option that
 # asked, so the message says which switch to look at.
 macro(bodyclock_require_ggml _why)
@@ -302,7 +353,7 @@ macro(bodyclock_require_ggml _why)
     # lane is on, and it can stand alone: src/voice/tts/qwen3_tts.cpp includes
     # qwen.h and no ggml header, so a build with only that lane needs no llama
     # SDK.
-    if(BODYCLOCK_QTTS AND DEFINED QTTS_DIR)
+    if(YOAI_QTTS AND DEFINED QTTS_DIR)
         set(_ggml_dir "${QTTS_DIR}/lib")
     elseif(DEFINED LLAMA_CPP_DIR)
         set(_ggml_dir "${LLAMA_CPP_DIR}/lib")
@@ -343,10 +394,10 @@ macro(bodyclock_require_ggml _why)
     #
     # ggml-vulkan goes FIRST: it references the rest of ggml and, with static
     # archives, the linker resolves left to right.
-    set(BODYCLOCK_GGML_LIBS "")
+    set(YOAI_GGML_LIBS "")
     foreach(_lib GGML_VULKAN_LIB GGML_LIB GGML_CPU_LIB GGML_BASE_LIB)
         if(${_lib})
-            list(APPEND BODYCLOCK_GGML_LIBS "${${_lib}}")
+            list(APPEND YOAI_GGML_LIBS "${${_lib}}")
         endif()
     endforeach()
 
@@ -370,11 +421,11 @@ macro(bodyclock_require_ggml _why)
                 "loader (vulkan-1 or vulkan) was found to link it against. "
                 "On Windows, set VULKAN_SDK to a Vulkan SDK install.")
         endif()
-        list(APPEND BODYCLOCK_GGML_LIBS "${VULKAN_LOADER_LIB}")
+        list(APPEND YOAI_GGML_LIBS "${VULKAN_LOADER_LIB}")
         # So src/voice/tts/qwen3_tts.cpp can set the backend's environment before
         # the engine initialises it. There is no runtime way to ask ggml whether
         # the Vulkan backend was compiled in early enough to matter.
-        target_compile_definitions(bodyclock_core PRIVATE BODYCLOCK_QTTS_VULKAN)
+        target_compile_definitions(bodyclock_core PRIVATE YOAI_QTTS_VULKAN)
         # And the C header, so that same file can ask Vulkan what KIND of GPU
         # this is before ggml creates one -- the tuning it sets is for a GPU
         # that shares system memory and costs a discrete card dearly. Only the C
@@ -386,7 +437,7 @@ macro(bodyclock_require_ggml _why)
                   HINTS "$ENV{VULKAN_SDK}/Include" "$ENV{VULKAN_SDK}/include")
         if(VULKAN_HEADER_DIR)
             target_include_directories(bodyclock_core PRIVATE "${VULKAN_HEADER_DIR}")
-            target_compile_definitions(bodyclock_core PRIVATE BODYCLOCK_QTTS_VULKAN_PROBE)
+            target_compile_definitions(bodyclock_core PRIVATE YOAI_QTTS_VULKAN_PROBE)
             message(STATUS "bodyclock_core: Vulkan device probe ON -> ${VULKAN_HEADER_DIR}")
         else()
             message(WARNING
@@ -418,12 +469,12 @@ endmacro()
 # OFF by default like the others. QTTS_DIR points at an SDK dir shaped like the
 # llama one: include/ + lib/. harmony/build.cmd qtts assembles it at
 # harmony/prebuilt/qtts-sdk/<abi>.
-option(BODYCLOCK_QTTS "Build speech output (qwentts.cpp + Qwen3-TTS)" OFF)
+option(YOAI_QTTS "Build speech output (qwentts.cpp + Qwen3-TTS)" OFF)
 
-if(BODYCLOCK_QTTS)
+if(YOAI_QTTS)
     if(NOT DEFINED QTTS_DIR)
         message(FATAL_ERROR
-            "BODYCLOCK_QTTS=ON requires -DQTTS_DIR=<qwentts SDK dir (include/, lib/)>")
+            "YOAI_QTTS=ON requires -DQTTS_DIR=<qwentts SDK dir (include/, lib/)>")
     endif()
     if(NOT EXISTS "${QTTS_DIR}/include/qwen.h")
         message(FATAL_ERROR "qwen.h not found under ${QTTS_DIR}/include.")
@@ -439,7 +490,7 @@ if(BODYCLOCK_QTTS)
     # The ggml that goes with it -- resolved here rather than left to whichever
     # lane happens to ask first, because this lane is the one that decides which
     # copy wins and the decision has to be made before anything links.
-    bodyclock_require_ggml(BODYCLOCK_QTTS)
+    bodyclock_require_ggml(YOAI_QTTS)
 
     # QWEN_STATIC matters only on Windows, and only because qwen.h defaults the
     # other way. Its QT_API expands to __declspec(dllimport) unless told
@@ -447,7 +498,7 @@ if(BODYCLOCK_QTTS)
     # that a static qwen-core.lib cannot satisfy -- fifteen unresolved externals
     # naming functions that are plainly present in the archive. The SDK is built
     # with QWEN_SHARED=OFF, so static is what it always is here.
-    target_compile_definitions(bodyclock_core PRIVATE BODYCLOCK_QTTS QWEN_STATIC)
+    target_compile_definitions(bodyclock_core PRIVATE YOAI_QTTS QWEN_STATIC)
     target_include_directories(bodyclock_core PRIVATE "${QTTS_DIR}/include")
     target_link_libraries(bodyclock_core PUBLIC "${QWEN_CORE_LIB}")
 
@@ -461,10 +512,10 @@ endif()
 # OFF by default: the engine is a few hundred MB of static archives that only the
 # mobile hosts want, and src/llm/local.cpp compiles a stub without it, so the
 # desktop build stays a two-minute vcpkg affair.
-option(BODYCLOCK_ONDEVICE_LLM "Build the on-device LLM engine (llama.cpp + GGUF)" OFF)
+option(YOAI_ONDEVICE_LLM "Build the on-device LLM engine (llama.cpp + GGUF)" OFF)
 
-if(BODYCLOCK_ONDEVICE_LLM)
-    bodyclock_require_ggml(BODYCLOCK_ONDEVICE_LLM)
+if(YOAI_ONDEVICE_LLM)
+    bodyclock_require_ggml(YOAI_ONDEVICE_LLM)
 
     unset(LLAMA_LIB CACHE)
     find_library(LLAMA_LIB NAMES llama
@@ -499,7 +550,7 @@ if(BODYCLOCK_ONDEVICE_LLM)
     unset(_llama_h)
     unset(_llama_h_flat)
 
-    target_compile_definitions(bodyclock_core PUBLIC BODYCLOCK_ONDEVICE_LLM)
+    target_compile_definitions(bodyclock_core PUBLIC YOAI_ONDEVICE_LLM)
     target_include_directories(bodyclock_core PRIVATE "${LLAMA_CPP_DIR}/include")
 
     # llama only. ggml goes on the end of the link line for every lane at once,
@@ -518,11 +569,11 @@ endif()
 # src/voice/asr/sensevoice.cpp compiles to a truthful stub without it -- but it
 # is a much smaller ask: ggml only, no llama, and a 254 MB model at q8 against
 # several GB for an audio-capable LLM.
-option(BODYCLOCK_ASR "Build on-device speech recognition (SenseVoice + ggml)" OFF)
+option(YOAI_ASR "Build on-device speech recognition (SenseVoice + ggml)" OFF)
 
-if(BODYCLOCK_ASR)
-    bodyclock_require_ggml(BODYCLOCK_ASR)
-    if(NOT BODYCLOCK_GGML_LIBS AND NOT BODYCLOCK_ONDEVICE_LLM)
+if(YOAI_ASR)
+    bodyclock_require_ggml(YOAI_ASR)
+    if(NOT YOAI_GGML_LIBS AND NOT YOAI_ONDEVICE_LLM)
         message(FATAL_ERROR
             "No ggml archives under ${LLAMA_CPP_DIR}/lib, and the LLM lane that would "
             "otherwise carry them is off. Recognition links ggml directly and cannot "
@@ -532,7 +583,7 @@ if(BODYCLOCK_ASR)
     # PRIVATE: only src/voice/asr/sensevoice.cpp changes shape with this. The
     # public header does not branch on it -- a host asks SenseVoice::available()
     # at runtime, so the same declarations link either way.
-    target_compile_definitions(bodyclock_core PRIVATE BODYCLOCK_ASR)
+    target_compile_definitions(bodyclock_core PRIVATE YOAI_ASR)
     target_include_directories(bodyclock_core PRIVATE "${LLAMA_CPP_DIR}/include")
 
     message(STATUS "bodyclock_core: speech recognition ON -> ${LLAMA_CPP_DIR}")
@@ -546,8 +597,8 @@ endif()
 # the two lanes that did were adjacent; a third one declared earlier would have
 # pulled ggml up in front of llama and left llama's every ggml symbol undefined.
 # One line here cannot get that wrong.
-if(BODYCLOCK_GGML_LIBS)
-    target_link_libraries(bodyclock_core PUBLIC ${BODYCLOCK_GGML_LIBS})
+if(YOAI_GGML_LIBS)
+    target_link_libraries(bodyclock_core PUBLIC ${YOAI_GGML_LIBS})
 endif()
 
 #-------------------------------------------------------------------------------
@@ -567,12 +618,12 @@ endif()
 #
 # MNN_DIR points at an SDK dir shaped like the llama one: include/ + lib/.
 # harmony/build.cmd mnn assembles it at harmony/prebuilt/mnn-sdk/<abi>.
-option(BODYCLOCK_MNN "Build omni speech output (MNN + Qwen2.5-Omni)" OFF)
+option(YOAI_MNN "Build omni speech output (MNN + Qwen2.5-Omni)" OFF)
 
-if(BODYCLOCK_MNN)
+if(YOAI_MNN)
     if(NOT DEFINED MNN_DIR)
         message(FATAL_ERROR
-            "BODYCLOCK_MNN=ON requires -DMNN_DIR=<MNN SDK dir (include/, lib/)>")
+            "YOAI_MNN=ON requires -DMNN_DIR=<MNN SDK dir (include/, lib/)>")
     endif()
     if(NOT EXISTS "${MNN_DIR}/include/llm/llm.hpp")
         message(FATAL_ERROR "llm/llm.hpp not found under ${MNN_DIR}/include.")
@@ -595,7 +646,7 @@ if(BODYCLOCK_MNN)
     # ONE archive by design: built with MNN_SEP_BUILD=OFF, the llm engine is an
     # OBJECT library folded into libMNN, so there is no libllm to find. Looking
     # for one reports a good build as a failure.
-    target_compile_definitions(bodyclock_core PRIVATE BODYCLOCK_MNN)
+    target_compile_definitions(bodyclock_core PRIVATE YOAI_MNN)
 
     # Whether that libMNN was built with -DMNN_VULKAN=ON, which the archive
     # itself cannot be asked.
@@ -618,9 +669,9 @@ if(BODYCLOCK_MNN)
     # So the whole archive goes in rather than one referenced symbol. It is
     # blunt and it costs binary size; the alternative is naming every operator
     # file MNN might ever add.
-    option(BODYCLOCK_MNN_VULKAN "The MNN at MNN_DIR has the Vulkan backend" OFF)
-    if(BODYCLOCK_MNN_VULKAN)
-        target_compile_definitions(bodyclock_core PRIVATE BODYCLOCK_MNN_VULKAN)
+    option(YOAI_MNN_VULKAN "The MNN at MNN_DIR has the Vulkan backend" OFF)
+    if(YOAI_MNN_VULKAN)
+        target_compile_definitions(bodyclock_core PRIVATE YOAI_MNN_VULKAN)
         if(MSVC)
             # INTERFACE: this is a static library, so the option has to reach
             # whoever produces the binary -- the addon, or the CLI.
@@ -668,14 +719,14 @@ if(CMAKE_CROSSCOMPILING)
 else()
     set(_bodyclock_cli_default ON)
 endif()
-option(BODYCLOCK_BUILD_CLI "Build the desktop CLI harness (cli/)" ${_bodyclock_cli_default})
+option(YOAI_BUILD_CLI "Build the desktop CLI harness (cli/)" ${_bodyclock_cli_default})
 
-if(BODYCLOCK_BUILD_CLI)
+if(YOAI_BUILD_CLI)
     add_executable(yoai-cli cli/main.cpp)
     target_link_libraries(yoai-cli PRIVATE bodyclock_core)
 
     # Recognition from the command line: a model, then WAV files. Builds
-    # whether or not BODYCLOCK_ASR is on and says which it is, the same way the
+    # whether or not YOAI_ASR is on and says which it is, the same way the
     # engine does. tests/ for wav.hpp, the one WAV reader the harnesses share.
     add_executable(yoai-asr cli/asr.cpp)
     target_link_libraries(yoai-asr PRIVATE bodyclock_core)
@@ -690,11 +741,17 @@ if(BODYCLOCK_BUILD_CLI)
 
     # The same store through the door a HOST uses, which is a separate thing to
     # get wrong: the rules can be perfect while a JSON key is spelled
-    # differently than bodyclock.h says, and a host only ever reads the header.
+    # differently than yoai.h says, and a host only ever reads the header.
     add_executable(yoai-timeline-abi-test tests/timeline_abi_test.cpp)
     target_link_libraries(yoai-timeline-abi-test PRIVATE bodyclock_core)
 
-    # Builds whether or not BODYCLOCK_ASR is on. Without it the front-end checks
+    # Vector search over an in-memory database. Checks that sqlite-vec is
+    # compiled in and registers, and that a nearest-neighbor query returns
+    # what was stored, in distance order.
+    add_executable(yoai-vector-index-test tests/vector_index_test.cpp)
+    target_link_libraries(yoai-vector-index-test PRIVATE bodyclock_core)
+
+    # Builds whether or not YOAI_ASR is on. Without it the front-end checks
     # still run and still mean something -- the filterbank is the half that has
     # one right answer -- and the transcription half says it is not compiled in.
     add_executable(yoai-sensevoice-test tests/sensevoice_test.cpp)

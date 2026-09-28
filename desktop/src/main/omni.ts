@@ -28,7 +28,7 @@ interface Stored {
   /**
    * Diffusion solver steps. 0 leaves the model's own config alone.
    *
-   * bodyclock.h calls this the one lever on the cost that does not need a
+   * yoai.h calls this the one lever on the cost that does not need a
    * different model: MNN runs `steps - 1` DiT forwards per chunk, and the
    * shipped config says 5. What fewer of them coarsens is naturalness, which is
    * the whole reason this engine is here -- so the number to find is not the

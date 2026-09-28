@@ -1,11 +1,11 @@
-// Node-API bridge: Electron's main process <-> the Body Clock C ABI (src/bodyclock.h).
+// Node-API bridge: Electron's main process <-> the Body Clock C ABI (src/yoai.h).
 //
 // The same bridge harmony/entry/src/main/cpp/napi_init.cpp is, against the same
 // header and with the same threading rules, because Node-API and OHOS's NAPI are
 // the same API with different registration. Where the two files agree they are
 // meant to be read side by side; the differences are marked.
 //
-// Threading is the whole reason this file exists. bodyclock_chat BLOCKS until the
+// Threading is the whole reason this file exists. yoai_chat BLOCKS until the
 // turn completes and calls its handler once per event on the calling thread, so
 // each turn runs on a detached worker thread and every event crosses back to JS
 // through one napi_threadsafe_function. Events arrive in order; the worker
@@ -24,7 +24,7 @@
 
 #include <node_api.h>
 
-#include "bodyclock.h"
+#include "yoai.h"
 
 #include <atomic>
 #include <cstdint>
@@ -106,7 +106,7 @@ void CallJs(napi_env env, napi_value js_callback, void* /*context*/, void* data)
     napi_call_function(env, undefined, js_callback, 2, argv, nullptr);
 }
 
-// The bodyclock_chat_handler context: where to forward events, and the cancel flag.
+// The yoai_chat_handler context: where to forward events, and the cancel flag.
 struct HandlerContext {
     napi_threadsafe_function tsfn;
     std::shared_ptr<Turn>    turn;
@@ -135,7 +135,7 @@ void ChatWorker(std::int32_t turn_id,
                 std::shared_ptr<Turn> turn) {
     HandlerContext ctx{tsfn, turn};
 
-    const int rc = bodyclock_chat(provider.c_str(), messages_json.c_str(),
+    const int rc = yoai_chat(provider.c_str(), messages_json.c_str(),
                              system_prompt.empty() ? nullptr : system_prompt.c_str(),
                              grammar.empty() ? nullptr : grammar.c_str(),
                              &OnChatEvent, &ctx);
@@ -167,7 +167,7 @@ void ChatWorker(std::int32_t turn_id,
 
 // nativeVersion(): string -- build stamp, proves the .node is really loaded.
 napi_value NativeVersion(napi_env env, napi_callback_info /*info*/) {
-    return Utf8(env, ("bodyclock " + std::string(bodyclock_version())
+    return Utf8(env, ("bodyclock " + std::string(yoai_version())
                       + " / built " __DATE__ " " __TIME__).c_str());
 }
 
@@ -177,7 +177,7 @@ napi_value NativeSetLogLevel(napi_env env, napi_callback_info info) {
     napi_value argv[1] = {nullptr};
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
     const std::string level = ArgUtf8(env, argc, argv, 0);
-    bodyclock_set_log_level(level.c_str());
+    yoai_set_log_level(level.c_str());
     return nullptr;
 }
 
@@ -193,7 +193,7 @@ napi_value NativeProviderSet(napi_env env, napi_callback_info info) {
     const std::string model    = ArgUtf8(env, argc, argv, 3);
     const std::string extra    = ArgUtf8(env, argc, argv, 4);
 
-    return Int32(env, bodyclock_provider_set(id.c_str(), base_url.c_str(), api_key.c_str(),
+    return Int32(env, yoai_provider_set(id.c_str(), base_url.c_str(), api_key.c_str(),
                                         model.c_str(), extra.empty() ? nullptr : extra.c_str()));
 }
 
@@ -205,19 +205,19 @@ napi_value NativeProviderRemove(napi_env env, napi_callback_info info) {
 
     const std::string id = ArgUtf8(env, argc, argv, 0);
     napi_value out = nullptr;
-    napi_get_boolean(env, bodyclock_provider_remove(id.c_str()) != 0, &out);
+    napi_get_boolean(env, yoai_provider_remove(id.c_str()) != 0, &out);
     return out;
 }
 
 // nativeProviderClear(): void
 napi_value NativeProviderClear(napi_env /*env*/, napi_callback_info /*info*/) {
-    bodyclock_provider_clear();
+    yoai_provider_clear();
     return nullptr;
 }
 
 // nativeProviders(): string  (newline-separated ids; '' when none)
 napi_value NativeProviders(napi_env env, napi_callback_info /*info*/) {
-    return Utf8(env, bodyclock_providers());
+    return Utf8(env, yoai_providers());
 }
 
 //------------------------------------------------------------------------------
@@ -227,7 +227,7 @@ napi_value NativeProviders(napi_env env, napi_callback_info /*info*/) {
 // nativeLocalAvailable(): boolean -- was this .node built with llama.cpp?
 napi_value NativeLocalAvailable(napi_env env, napi_callback_info /*info*/) {
     napi_value out = nullptr;
-    napi_get_boolean(env, bodyclock_local_available() != 0, &out);
+    napi_get_boolean(env, yoai_local_available() != 0, &out);
     return out;
 }
 
@@ -241,18 +241,18 @@ napi_value NativeLocalSet(napi_env env, napi_callback_info info) {
     const std::string path    = ArgUtf8(env, argc, argv, 1);
     const std::string options = ArgUtf8(env, argc, argv, 2);
 
-    return Int32(env, bodyclock_local_set(id.c_str(), path.c_str(),
+    return Int32(env, yoai_local_set(id.c_str(), path.c_str(),
                                      options.empty() ? nullptr : options.c_str()));
 }
 
 // The worker for nativeLocalLoad: read the weights, then report once and let go.
 //
-// A separate thread for the same reason a turn gets one -- bodyclock_local_load
+// A separate thread for the same reason a turn gets one -- yoai_local_load
 // blocks for seconds reading gigabytes, and doing that on the main process's
 // thread freezes every window at exactly the moment the user is being told the
 // model is getting ready.
 void LoadWorker(std::string id, napi_threadsafe_function tsfn) {
-    const int rc = bodyclock_local_load(id.c_str());
+    const int rc = yoai_local_load(id.c_str());
 
     // Reuses the chat callback's (type, content) shape rather than inventing a
     // second one: the JS side already has a handler of that signature, and one
@@ -280,7 +280,7 @@ napi_value NativeLocalLoad(napi_env env, napi_callback_info info) {
     std::string id = ToUtf8(env, argv[0]);
 
     napi_value work_name = nullptr;
-    napi_create_string_utf8(env, "bodyclock_local_load", NAPI_AUTO_LENGTH, &work_name);
+    napi_create_string_utf8(env, "yoai_local_load", NAPI_AUTO_LENGTH, &work_name);
 
     napi_threadsafe_function tsfn = nullptr;
     if (napi_create_threadsafe_function(env, argv[1], nullptr, work_name,
@@ -310,20 +310,20 @@ napi_value NativeLocalSetThreads(napi_env env, napi_callback_info info) {
     std::string id = ToUtf8(env, argv[0]);
     std::int32_t n = 0;
     napi_get_value_int32(env, argv[1], &n);
-    return Int32(env, bodyclock_local_set_threads(id.c_str(), n));
+    return Int32(env, yoai_local_set_threads(id.c_str(), n));
 }
 
 // nativeLocalForget(id: string): number  (0 = ok)
 //
 // Synchronous and cheap for the same reason: it drops a cache and leaves the
-// weights alone. What it is for is in bodyclock.h -- a new conversation is an
+// weights alone. What it is for is in yoai.h -- a new conversation is an
 // instruction, not something to be inferred from a shorter prompt.
 napi_value NativeLocalForget(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value argv[1] = {nullptr};
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
     const std::string id = ArgUtf8(env, argc, argv, 0);
-    return Int32(env, bodyclock_local_forget(id.c_str()));
+    return Int32(env, yoai_local_forget(id.c_str()));
 }
 
 //------------------------------------------------------------------------------
@@ -349,7 +349,7 @@ napi_value NativeChat(napi_env env, napi_callback_info info) {
     std::string grammar  = ToUtf8(env, argv[3]);
 
     napi_value work_name = nullptr;
-    napi_create_string_utf8(env, "bodyclock_chat", NAPI_AUTO_LENGTH, &work_name);
+    napi_create_string_utf8(env, "yoai_chat", NAPI_AUTO_LENGTH, &work_name);
 
     napi_threadsafe_function tsfn = nullptr;
     if (napi_create_threadsafe_function(env, argv[4], nullptr, work_name,
@@ -415,7 +415,7 @@ napi_value NativeChatCancelAll(napi_env env, napi_callback_info /*info*/) {
 //------------------------------------------------------------------------------
 //
 // No #ifdef, and that is the header's doing rather than an omission: the
-// bodyclock_tts_* entry points are compiled unconditionally and stub out when
+// yoai_tts_* entry points are compiled unconditionally and stub out when
 // the qtts lane is off, so a `build.cmd llama` addon still exports all of this
 // and answers nativeTtsAvailable() with 0. The UI asks that question instead of
 // discovering a missing symbol.
@@ -494,7 +494,7 @@ void CallJsAudio(napi_env env, napi_value js_callback, void* /*context*/, void* 
 //
 // `last` arrives on a call of its own with n_samples 0 -- the header says so --
 // and is dropped here: the worker emits "end" with the run's statistics once
-// bodyclock_tts_say returns, which is strictly later and carries more.
+// yoai_tts_say returns, which is strictly later and carries more.
 int OnTtsAudio(const float* pcm, int n_samples, int /*last*/, void* user_data) {
     if (g_tts_cancel.load(std::memory_order_relaxed)) return 0;
     if (pcm == nullptr || n_samples <= 0) return 1;
@@ -508,20 +508,20 @@ int OnTtsAudio(const float* pcm, int n_samples, int /*last*/, void* user_data) {
 }
 
 void TtsLoadWorker(std::string talker, std::string codec, napi_threadsafe_function tsfn) {
-    const int rc = bodyclock_tts_load(talker.c_str(), codec.c_str());
+    const int rc = yoai_tts_load(talker.c_str(), codec.c_str());
     AudioEvent* ev = new AudioEvent{rc == 0 ? "end" : "error",
-                                rc == 0 ? "" : bodyclock_tts_last_error(),
+                                rc == 0 ? "" : yoai_tts_last_error(),
                                 {}};
     napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
     napi_release_threadsafe_function(tsfn, napi_tsfn_release);
 }
 
 void TtsSayWorker(std::string text, napi_threadsafe_function tsfn) {
-    const char* stats = bodyclock_tts_say(text.c_str(), OnTtsAudio, tsfn);
+    const char* stats = yoai_tts_say(text.c_str(), OnTtsAudio, tsfn);
 
     AudioEvent* ev = stats != nullptr
                        ? new AudioEvent{"end", stats, {}}
-                       : new AudioEvent{"error", bodyclock_tts_last_error(), {}};
+                       : new AudioEvent{"error", yoai_tts_last_error(), {}};
     napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
     napi_release_threadsafe_function(tsfn, napi_tsfn_release);
 
@@ -531,7 +531,7 @@ void TtsSayWorker(std::string text, napi_threadsafe_function tsfn) {
 
 // nativeTtsAvailable(): number -- 1 when this build has the engine.
 napi_value NativeTtsAvailable(napi_env env, napi_callback_info /*info*/) {
-    return Int32(env, bodyclock_tts_available());
+    return Int32(env, yoai_tts_available());
 }
 
 // nativeTtsLoad(talkerPath, codecPath, onDone: (type, content) => void): void
@@ -552,7 +552,7 @@ napi_value NativeTtsLoad(napi_env env, napi_callback_info info) {
     std::string codec  = ToUtf8(env, argv[1]);
 
     napi_value work_name = nullptr;
-    napi_create_string_utf8(env, "bodyclock_tts_load", NAPI_AUTO_LENGTH, &work_name);
+    napi_create_string_utf8(env, "yoai_tts_load", NAPI_AUTO_LENGTH, &work_name);
 
     napi_threadsafe_function tsfn = nullptr;
     if (napi_create_threadsafe_function(env, argv[2], nullptr, work_name,
@@ -567,20 +567,20 @@ napi_value NativeTtsLoad(napi_env env, napi_callback_info info) {
 }
 
 napi_value NativeTtsLoaded(napi_env env, napi_callback_info /*info*/) {
-    return Int32(env, bodyclock_tts_loaded());
+    return Int32(env, yoai_tts_loaded());
 }
 
 napi_value NativeTtsUnload(napi_env env, napi_callback_info /*info*/) {
-    bodyclock_tts_unload();
+    yoai_tts_unload();
     return nullptr;
 }
 
 napi_value NativeTtsModelType(napi_env env, napi_callback_info /*info*/) {
-    return Utf8(env, bodyclock_tts_model_type());
+    return Utf8(env, yoai_tts_model_type());
 }
 
 napi_value NativeTtsSpeakers(napi_env env, napi_callback_info /*info*/) {
-    return Utf8(env, bodyclock_tts_speakers());
+    return Utf8(env, yoai_tts_speakers());
 }
 
 napi_value NativeTtsSetSpeaker(napi_env env, napi_callback_info info) {
@@ -588,7 +588,7 @@ napi_value NativeTtsSetSpeaker(napi_env env, napi_callback_info info) {
     napi_value argv[1] = {nullptr};
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
     const std::string name = ArgUtf8(env, argc, argv, 0);
-    bodyclock_tts_set_speaker(name.c_str());
+    yoai_tts_set_speaker(name.c_str());
     return nullptr;
 }
 
@@ -597,7 +597,7 @@ napi_value NativeTtsSetVoice(napi_env env, napi_callback_info info) {
     napi_value argv[1] = {nullptr};
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
     const std::string instruct = ArgUtf8(env, argc, argv, 0);
-    bodyclock_tts_set_voice(instruct.c_str());
+    yoai_tts_set_voice(instruct.c_str());
     return nullptr;
 }
 
@@ -607,7 +607,7 @@ napi_value NativeTtsSetSeed(napi_env env, napi_callback_info info) {
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
     std::int64_t seed = 0;
     if (argc >= 1) napi_get_value_int64(env, argv[0], &seed);
-    bodyclock_tts_set_seed(static_cast<long long>(seed));
+    yoai_tts_set_seed(static_cast<long long>(seed));
     return nullptr;
 }
 
@@ -617,7 +617,7 @@ napi_value NativeTtsSetStreaming(napi_env env, napi_callback_info info) {
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
     std::int32_t on = 0;
     if (argc >= 1) napi_get_value_int32(env, argv[0], &on);
-    bodyclock_tts_set_streaming(on);
+    yoai_tts_set_streaming(on);
     return nullptr;
 }
 
@@ -627,7 +627,7 @@ napi_value NativeTtsSetThreads(napi_env env, napi_callback_info info) {
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
     std::int32_t threads = 0;
     if (argc >= 1) napi_get_value_int32(env, argv[0], &threads);
-    bodyclock_tts_set_threads(threads);
+    yoai_tts_set_threads(threads);
     return nullptr;
 }
 
@@ -654,7 +654,7 @@ napi_value NativeTtsSay(napi_env env, napi_callback_info info) {
     std::string text = ToUtf8(env, argv[0]);
 
     napi_value work_name = nullptr;
-    napi_create_string_utf8(env, "bodyclock_tts_say", NAPI_AUTO_LENGTH, &work_name);
+    napi_create_string_utf8(env, "yoai_tts_say", NAPI_AUTO_LENGTH, &work_name);
 
     napi_threadsafe_function tsfn = nullptr;
     if (napi_create_threadsafe_function(env, argv[1], nullptr, work_name,
@@ -682,7 +682,7 @@ napi_value NativeTtsCancel(napi_env env, napi_callback_info /*info*/) {
 //------------------------------------------------------------------------------
 //
 // A second engine over the same weights as the speech lane, so a host loads one
-// or the other -- see bodyclock.h. It reuses the audio machinery above because
+// or the other -- see yoai.h. It reuses the audio machinery above because
 // the output side is identical: 24 kHz mono float in chunks, then a JSON
 // summary. What is new is the INPUT: text arrives a token at a time, and the
 // call that ends the reply blocks for the rest of the speech.
@@ -700,9 +700,9 @@ int OnReaderAudio(const float* pcm, int n_samples, int sentence, int /*last*/,
 
 void ReaderLoadWorker(std::string talker, std::string codec, int voices,
                       napi_threadsafe_function tsfn) {
-    const int rc = bodyclock_reader_load(talker.c_str(), codec.c_str(), voices);
+    const int rc = yoai_reader_load(talker.c_str(), codec.c_str(), voices);
     AudioEvent* ev = new AudioEvent{rc == 0 ? "end" : "error",
-                                    rc == 0 ? "" : bodyclock_reader_last_error(),
+                                    rc == 0 ? "" : yoai_reader_last_error(),
                                     {}, -1};
     napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
     napi_release_threadsafe_function(tsfn, napi_tsfn_release);
@@ -713,10 +713,10 @@ void ReaderLoadWorker(std::string talker, std::string codec, int voices,
 // place that knows the stream is over.
 void ReaderFinishWorker(napi_threadsafe_function audio_tsfn,
                         napi_threadsafe_function done_tsfn) {
-    const char* stats = bodyclock_reader_finish();
+    const char* stats = yoai_reader_finish();
     AudioEvent* ev = stats != nullptr
                          ? new AudioEvent{"end", stats, {}, -1}
-                         : new AudioEvent{"error", bodyclock_reader_last_error(), {}, -1};
+                         : new AudioEvent{"error", yoai_reader_last_error(), {}, -1};
     napi_call_threadsafe_function(done_tsfn, ev, napi_tsfn_blocking);
     napi_release_threadsafe_function(done_tsfn, napi_tsfn_release);
     if (audio_tsfn != nullptr) {
@@ -729,7 +729,7 @@ void ReaderFinishWorker(napi_threadsafe_function audio_tsfn,
 napi_threadsafe_function g_reader_audio = nullptr;
 
 napi_value NativeReaderAvailable(napi_env env, napi_callback_info /*info*/) {
-    return Int32(env, bodyclock_reader_available());
+    return Int32(env, yoai_reader_available());
 }
 
 // nativeReaderLoad(talker, codec, voices, onDone: (type, content) => void): void
@@ -749,7 +749,7 @@ napi_value NativeReaderLoad(napi_env env, napi_callback_info info) {
     napi_get_value_int32(env, argv[2], &voices);
 
     napi_value work_name = nullptr;
-    napi_create_string_utf8(env, "bodyclock_reader_load", NAPI_AUTO_LENGTH, &work_name);
+    napi_create_string_utf8(env, "yoai_reader_load", NAPI_AUTO_LENGTH, &work_name);
 
     napi_threadsafe_function tsfn = nullptr;
     if (napi_create_threadsafe_function(env, argv[3], nullptr, work_name, 0, 1,
@@ -764,23 +764,23 @@ napi_value NativeReaderLoad(napi_env env, napi_callback_info info) {
 }
 
 napi_value NativeReaderLoaded(napi_env env, napi_callback_info /*info*/) {
-    return Int32(env, bodyclock_reader_loaded());
+    return Int32(env, yoai_reader_loaded());
 }
 
 napi_value NativeReaderUnload(napi_env env, napi_callback_info /*info*/) {
-    bodyclock_reader_unload();
+    yoai_reader_unload();
     return nullptr;
 }
 
 napi_value NativeReaderModelType(napi_env env, napi_callback_info /*info*/) {
-    return Utf8(env, bodyclock_reader_model_type());
+    return Utf8(env, yoai_reader_model_type());
 }
 
 napi_value NativeReaderSetVoice(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value argv[1] = {nullptr};
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
-    bodyclock_reader_set_voice(ArgUtf8(env, argc, argv, 0).c_str());
+    yoai_reader_set_voice(ArgUtf8(env, argc, argv, 0).c_str());
     return nullptr;
 }
 
@@ -788,7 +788,7 @@ napi_value NativeReaderSetSpeaker(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value argv[1] = {nullptr};
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
-    bodyclock_reader_set_speaker(ArgUtf8(env, argc, argv, 0).c_str());
+    yoai_reader_set_speaker(ArgUtf8(env, argc, argv, 0).c_str());
     return nullptr;
 }
 
@@ -800,8 +800,8 @@ napi_value NativeReaderSetReferenceVoice(napi_env env, napi_callback_info info) 
     napi_value argv[1] = {nullptr};
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
     const std::string path = ArgUtf8(env, argc, argv, 0);
-    const int rc = bodyclock_reader_set_reference_voice(path.c_str());
-    return Utf8(env, rc == 0 ? "" : bodyclock_reader_last_error());
+    const int rc = yoai_reader_set_reference_voice(path.c_str());
+    return Utf8(env, rc == 0 ? "" : yoai_reader_last_error());
 }
 
 napi_value NativeReaderSetSeed(napi_env env, napi_callback_info info) {
@@ -812,7 +812,7 @@ napi_value NativeReaderSetSeed(napi_env env, napi_callback_info info) {
     if (argc >= 1) {
         napi_get_value_double(env, argv[0], &seed);
     }
-    bodyclock_reader_set_seed(static_cast<long long>(seed));
+    yoai_reader_set_seed(static_cast<long long>(seed));
     return nullptr;
 }
 
@@ -826,7 +826,7 @@ napi_value NativeReaderSetSplit(napi_env env, napi_callback_info info) {
     if (argc >= 1) napi_get_value_int32(env, argv[0], &a);
     if (argc >= 2) napi_get_value_int32(env, argv[1], &b);
     if (argc >= 3) napi_get_value_int32(env, argv[2], &c);
-    bodyclock_reader_set_split(a, b, c);
+    yoai_reader_set_split(a, b, c);
     return nullptr;
 }
 
@@ -836,7 +836,7 @@ napi_value NativeReaderSetClauseCuts(napi_env env, napi_callback_info info) {
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
     bool on = false;
     if (argc >= 1) napi_get_value_bool(env, argv[0], &on);
-    bodyclock_reader_set_clause_cuts(on ? 1 : 0);
+    yoai_reader_set_clause_cuts(on ? 1 : 0);
     return nullptr;
 }
 
@@ -846,7 +846,7 @@ napi_value NativeReaderSetThreads(napi_env env, napi_callback_info info) {
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
     std::int32_t n = 0;
     if (argc >= 1) napi_get_value_int32(env, argv[0], &n);
-    bodyclock_reader_set_threads(n);
+    yoai_reader_set_threads(n);
     return nullptr;
 }
 
@@ -864,14 +864,14 @@ napi_value NativeReaderBegin(napi_env env, napi_callback_info info) {
     }
 
     napi_value work_name = nullptr;
-    napi_create_string_utf8(env, "bodyclock_reader", NAPI_AUTO_LENGTH, &work_name);
+    napi_create_string_utf8(env, "yoai_reader", NAPI_AUTO_LENGTH, &work_name);
     if (napi_create_threadsafe_function(env, argv[0], nullptr, work_name, 0, 1,
                                         nullptr, nullptr, nullptr, CallJsAudio,
                                         &g_reader_audio) != napi_ok) {
         napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
         return nullptr;
     }
-    if (bodyclock_reader_begin(OnReaderAudio, g_reader_audio) != 1) {
+    if (yoai_reader_begin(OnReaderAudio, g_reader_audio) != 1) {
         napi_release_threadsafe_function(g_reader_audio, napi_tsfn_release);
         g_reader_audio = nullptr;
         return Int32(env, 0);
@@ -885,7 +885,7 @@ napi_value NativeReaderFeed(napi_env env, napi_callback_info info) {
     napi_value argv[1] = {nullptr};
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
     const std::string delta = ArgUtf8(env, argc, argv, 0);
-    return Int32(env, bodyclock_reader_feed(delta.c_str()));
+    return Int32(env, yoai_reader_feed(delta.c_str()));
 }
 
 // nativeReaderFinish(onDone: (type, content) => void): void
@@ -899,7 +899,7 @@ napi_value NativeReaderFinish(napi_env env, napi_callback_info info) {
     }
 
     napi_value work_name = nullptr;
-    napi_create_string_utf8(env, "bodyclock_reader_finish", NAPI_AUTO_LENGTH, &work_name);
+    napi_create_string_utf8(env, "yoai_reader_finish", NAPI_AUTO_LENGTH, &work_name);
     napi_threadsafe_function done = nullptr;
     if (napi_create_threadsafe_function(env, argv[0], nullptr, work_name, 0, 1,
                                         nullptr, nullptr, nullptr, CallJsAudio,
@@ -915,11 +915,11 @@ napi_value NativeReaderFinish(napi_env env, napi_callback_info info) {
 }
 
 napi_value NativeReaderLastError(napi_env env, napi_callback_info /*info*/) {
-    return Utf8(env, bodyclock_reader_last_error());
+    return Utf8(env, yoai_reader_last_error());
 }
 
 napi_value NativeTtsLastError(napi_env env, napi_callback_info /*info*/) {
-    return Utf8(env, bodyclock_tts_last_error());
+    return Utf8(env, yoai_tts_last_error());
 }
 
 //------------------------------------------------------------------------------
@@ -961,7 +961,7 @@ void OnOmniText(const char* text, void* user_data) {
 }
 
 void OmniLoadWorker(std::string dir, napi_threadsafe_function tsfn) {
-    const int rc = bodyclock_omni_load(dir.c_str());
+    const int rc = yoai_omni_load(dir.c_str());
     AudioEvent* ev = new AudioEvent{rc == 0 ? "end" : "error",
                                     rc == 0 ? "" : "the omni model would not load",
                                     {}};
@@ -976,7 +976,7 @@ void OmniAskWorker(std::vector<std::int16_t> pcm,
     // The text handler is passed whether or not audio was asked for: it costs
     // one string crossing per exchange, and on a text-only ask it arrives at
     // effectively the same moment as "end" anyway.
-    const char* json = bodyclock_omni_ask(pcm.data(), static_cast<int>(pcm.size()),
+    const char* json = yoai_omni_ask(pcm.data(), static_cast<int>(pcm.size()),
                                      prompt.c_str(),
                                      want_audio ? OnOmniAudio : nullptr,
                                      OnOmniText,
@@ -990,7 +990,7 @@ void OmniAskWorker(std::vector<std::int16_t> pcm,
 }
 
 napi_value NativeOmniAvailable(napi_env env, napi_callback_info /*info*/) {
-    return Int32(env, bodyclock_omni_available());
+    return Int32(env, yoai_omni_available());
 }
 
 // nativeOmniLoad(modelDir, onDone: (type, content) => void): void
@@ -1010,7 +1010,7 @@ napi_value NativeOmniLoad(napi_env env, napi_callback_info info) {
     std::string dir = ToUtf8(env, argv[0]);
 
     napi_value work_name = nullptr;
-    napi_create_string_utf8(env, "bodyclock_omni_load", NAPI_AUTO_LENGTH, &work_name);
+    napi_create_string_utf8(env, "yoai_omni_load", NAPI_AUTO_LENGTH, &work_name);
 
     napi_threadsafe_function tsfn = nullptr;
     if (napi_create_threadsafe_function(env, argv[1], nullptr, work_name,
@@ -1025,24 +1025,24 @@ napi_value NativeOmniLoad(napi_env env, napi_callback_info info) {
 }
 
 napi_value NativeOmniLoaded(napi_env env, napi_callback_info /*info*/) {
-    return Int32(env, bodyclock_omni_loaded());
+    return Int32(env, yoai_omni_loaded());
 }
 
 napi_value NativeOmniUnload(napi_env env, napi_callback_info /*info*/) {
-    bodyclock_omni_unload();
+    yoai_omni_unload();
     return nullptr;
 }
 
 // The one lever on the cost that does not need a different model: MNN runs
 // `steps - 1` diffusion forwards per chunk, and what fewer of them coarsens is
-// naturalness -- the thing this engine is carried for. See bodyclock.h.
+// naturalness -- the thing this engine is carried for. See yoai.h.
 napi_value NativeOmniSetDitSteps(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value argv[1] = {nullptr};
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
     std::int32_t steps = 0;
     if (argc >= 1) napi_get_value_int32(env, argv[0], &steps);
-    return Int32(env, bodyclock_omni_set_dit_steps(steps));
+    return Int32(env, yoai_omni_set_dit_steps(steps));
 }
 
 // nativeOmniAsk(pcm: Int16Array, prompt, wantAudio, onEvent): number
@@ -1083,7 +1083,7 @@ napi_value NativeOmniAsk(napi_env env, napi_callback_info info) {
     napi_get_value_bool(env, argv[2], &want_audio);
 
     napi_value work_name = nullptr;
-    napi_create_string_utf8(env, "bodyclock_omni_ask", NAPI_AUTO_LENGTH, &work_name);
+    napi_create_string_utf8(env, "yoai_omni_ask", NAPI_AUTO_LENGTH, &work_name);
 
     napi_threadsafe_function tsfn = nullptr;
     if (napi_create_threadsafe_function(env, argv[3], nullptr, work_name,

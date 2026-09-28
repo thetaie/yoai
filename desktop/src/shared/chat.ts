@@ -58,8 +58,8 @@ export interface WireMessage {
 
 /**
  * One event from a turn, exactly as the C ABI names it, forwarded verbatim from
- * the main process. The vocabulary is documented on bodyclock_chat_handler in
- * src/bodyclock.h; 'end' and 'aborted' are the bridge's own terminal events.
+ * the main process. The vocabulary is documented on yoai_chat_handler in
+ * src/yoai.h; 'end' and 'aborted' are the bridge's own terminal events.
  */
 export interface ChatEvent {
   turnId: number

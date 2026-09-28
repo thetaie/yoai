@@ -15,7 +15,7 @@
 // With a question argument it runs that one turn and exits. Without one it goes
 // interactive and keeps the transcript, so multi-turn context is exercised too.
 
-#include "bodyclock.h"
+#include "yoai.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -106,7 +106,7 @@ bool parse_args(int argc, char** argv, Options* opt) {
         }
     }
 
-    bodyclock_set_log_level(debug ? "debug" : "warn");
+    yoai_set_log_level(debug ? "debug" : "warn");
 
     if (opt->base_url.empty() || opt->api_key.empty() || opt->model.empty()) {
         std::cerr << "yoai-cli: --base-url, --key and --model are all required "
@@ -205,7 +205,7 @@ bool run_turn(const Options& opt, std::vector<Message>* history) {
     st.show_usage    = opt.show_usage;
 
     const std::string json = to_messages_json(*history);
-    const int rc = bodyclock_chat(kProviderId, json.c_str(),
+    const int rc = yoai_chat(kProviderId, json.c_str(),
                              opt.system_prompt.empty() ? nullptr : opt.system_prompt.c_str(),
                              /*grammar=*/nullptr,
                              on_event, &st);
@@ -228,7 +228,7 @@ int main(int argc, char** argv) {
     Options opt;
     if (!parse_args(argc, argv, &opt)) return 2;
 
-    if (bodyclock_provider_set(kProviderId, opt.base_url.c_str(), opt.api_key.c_str(),
+    if (yoai_provider_set(kProviderId, opt.base_url.c_str(), opt.api_key.c_str(),
                           opt.model.c_str(), nullptr) != 0) {
         std::cerr << "yoai-cli: could not register the provider\n";
         return 1;
@@ -244,7 +244,7 @@ int main(int argc, char** argv) {
         return run_turn(opt, &history) ? 0 : 1;
     }
 
-    std::cerr << "bodyclock " << bodyclock_version() << " -- " << opt.model
+    std::cerr << "bodyclock " << yoai_version() << " -- " << opt.model
               << " @ " << opt.base_url << "\n"
                  "Type a message, or Ctrl-D to quit.\n";
     std::string line;

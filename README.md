@@ -16,7 +16,7 @@ the same C ABI, and nothing above it had to learn about lanes.
 
 ```
 src/                  the core -- a static library plus a C ABI
-  bodyclock.h                the whole public surface (~150 lines of contract)
+  yoai.h                the whole public surface (~150 lines of contract)
   llm/                  one streaming client per provider protocol
   client/               HTTP + TLS
   platform/             logging, and the C ABI's implementation
@@ -33,11 +33,11 @@ owns persistence and settings, tells the core which models the user has keys
 for, and asks it to run a turn:
 
 ```c
-bodyclock_provider_set("zhipu/glm-4.7-flash",
+yoai_provider_set("zhipu/glm-4.7-flash",
                   "https://open.bigmodel.cn/api/paas/v4",
                   api_key, "glm-4.7-flash", NULL);
 
-bodyclock_chat("zhipu/glm-4.7-flash", messages_json, NULL, on_event, user_data);
+yoai_chat("zhipu/glm-4.7-flash", messages_json, NULL, on_event, user_data);
 ```
 
 Two consequences worth stating plainly, because they are the design and not an
@@ -46,11 +46,11 @@ implementation detail:
 - **Keys never touch our disk.** The registry is process memory. On HarmonyOS the
   key comes out of the platform's encrypted asset store at the moment it is
   handed to the core, and the app refills the registry after every cold start.
-- **The host owns history.** `bodyclock_chat` takes the whole transcript every turn.
+- **The host owns history.** `yoai_chat` takes the whole transcript every turn.
   One place decides what to keep and what to trim, so two policies cannot
   disagree.
 
-`bodyclock_chat` blocks and streams through a callback on the calling thread;
+`yoai_chat` blocks and streams through a callback on the calling thread;
 returning 0 from that callback cancels the turn. Everything above it — a worker
 thread per turn, a threadsafe function back to the UI — is the host's business,
 which is why the ABI stays this small.

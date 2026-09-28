@@ -6,7 +6,7 @@
  * too, so each handler here validates what it was given rather than trusting
  * that the only caller is our own code.
  *
- * Turns are the one stateful thing. bodyclock_chat streams through a callback
+ * Turns are the one stateful thing. yoai_chat streams through a callback
  * on a worker thread inside the addon; this file forwards each event to the
  * window that asked for it and drops the turn when that window goes away.
  */
@@ -83,7 +83,7 @@ export function registerHandlers(): void {
     return {
       ok: described.ok,
       detail: described.ok ? described.version : described.error,
-      // Asked only when the addon is there: bodyclock_local_available answers
+      // Asked only when the addon is there: yoai_local_available answers
       // truthfully, but it cannot answer at all through a module that did not
       // load, and "no on-device lane" and "no addon" are different problems.
       localAvailable: described.ok ? core().nativeLocalAvailable() : false,

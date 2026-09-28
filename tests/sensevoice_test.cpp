@@ -24,7 +24,7 @@
 #include "voice/asr/fbank/funasr.hpp"
 #include "voice/asr/sensevoice.hpp"
 
-#include "bodyclock.h"
+#include "yoai.h"
 #include "platform/log.hpp"
 
 #include "wav.hpp"
@@ -232,7 +232,7 @@ int main(int argc, char** argv) {
     std::printf("\n");
 
     if (!SenseVoice::available()) {
-        std::printf("this build has no recognition engine -- configure with -DBODYCLOCK_ASR=ON\n");
+        std::printf("this build has no recognition engine -- configure with -DYOAI_ASR=ON\n");
         return g_failures ? 1 : 0;
     }
 
@@ -261,12 +261,12 @@ int main(int argc, char** argv) {
     // path the HarmonyOS module takes, so the JSON the app will parse is checked
     // here rather than first seen on a device.
     if (through_abi) {
-        if (bodyclock_voice_load(argv[1]) != 0) {
-            std::printf("FAIL  bodyclock_voice_load(%s)\n", argv[1]);
+        if (yoai_voice_load(argv[1]) != 0) {
+            std::printf("FAIL  yoai_voice_load(%s)\n", argv[1]);
             return 1;
         }
-        if (no_itn && bodyclock_voice_set_itn(0) != 0) {
-            std::printf("FAIL  bodyclock_voice_set_itn(0)\n");
+        if (no_itn && yoai_voice_set_itn(0) != 0) {
+            std::printf("FAIL  yoai_voice_set_itn(0)\n");
             ++g_failures;
         }
         for (size_t a = 0; a < audio.size(); ++a) {
@@ -288,9 +288,9 @@ int main(int argc, char** argv) {
                 pcm16[i] = static_cast<short>(v);
             }
             const char* json =
-                bodyclock_voice_analyze(&pcm16[0], static_cast<int>(pcm16.size()), 16000);
+                yoai_voice_analyze(&pcm16[0], static_cast<int>(pcm16.size()), 16000);
             if (!json) {
-                std::printf("FAIL  bodyclock_voice_analyze returned null\n");
+                std::printf("FAIL  yoai_voice_analyze returned null\n");
                 ++g_failures;
                 continue;
             }

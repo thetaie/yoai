@@ -5,7 +5,7 @@ package ai.bodyclock.app
  *
  * This is the Android counterpart of the HarmonyOS module's `index.d.ts`, and
  * it follows the same rule: nothing here interprets a result. Every `native*`
- * is a direct translation of an entry point in `src/bodyclock.h`, and the
+ * is a direct translation of an entry point in `src/yoai.h`, and the
  * meaning of each argument lives there rather than being restated here.
  *
  * **Everything that loads or generates BLOCKS**, for seconds to minutes, and

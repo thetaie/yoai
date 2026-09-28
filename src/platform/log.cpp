@@ -13,12 +13,12 @@
 #include <android/log.h>
 #elif defined(__OHOS__)
 #include <hilog/log.h>
-#define BODYCLOCK_USE_HILOG 1
+#define YOAI_USE_HILOG 1
 #elif defined(__APPLE__)
 #include <TargetConditionals.h>
 #if TARGET_OS_IPHONE
 #include <os/log.h>
-#define BODYCLOCK_USE_OSLOG 1
+#define YOAI_USE_OSLOG 1
 #endif
 #elif defined(_WIN32)
 #include <vector>
@@ -44,7 +44,7 @@ constexpr const char* kTag = "bodyclock";
 void emit(int prio, const char* fmt, va_list ap) {
     __android_log_vprint(prio, kTag, fmt, ap);
 }
-#elif defined(BODYCLOCK_USE_HILOG)
+#elif defined(YOAI_USE_HILOG)
 // HarmonyOS. Without this branch the core's log lines went to stderr, which
 // nothing on a device reads -- so the library was effectively silent exactly
 // where it is hardest to attach a debugger.
@@ -58,7 +58,7 @@ void emit(int level, const char* fmt, va_list ap) {
     // %{public}s so the line is not redacted to <private> in DevEco's Log window.
     OH_LOG_Print(LOG_APP, static_cast<::LogLevel>(level), 0x3200, "bodyclock", "%{public}s", buf);
 }
-#elif defined(BODYCLOCK_USE_OSLOG)
+#elif defined(YOAI_USE_OSLOG)
 void emit(os_log_type_t type, const char* fmt, va_list ap) {
     char buf[1024];
     std::vsnprintf(buf, sizeof(buf), fmt, ap);
@@ -178,9 +178,9 @@ void log_info(const char* fmt, ...) {
     va_list ap; va_start(ap, fmt);
 #if defined(__ANDROID__)
     emit(ANDROID_LOG_INFO, fmt, ap);
-#elif defined(BODYCLOCK_USE_HILOG)
+#elif defined(YOAI_USE_HILOG)
     emit(LOG_INFO, fmt, ap);
-#elif defined(BODYCLOCK_USE_OSLOG)
+#elif defined(YOAI_USE_OSLOG)
     emit(OS_LOG_TYPE_INFO, fmt, ap);
 #else
     emit("INFO", fmt, ap);
@@ -195,9 +195,9 @@ void log_warn(const char* fmt, ...) {
     va_list ap; va_start(ap, fmt);
 #if defined(__ANDROID__)
     emit(ANDROID_LOG_WARN, fmt, ap);
-#elif defined(BODYCLOCK_USE_HILOG)
+#elif defined(YOAI_USE_HILOG)
     emit(LOG_WARN, fmt, ap);
-#elif defined(BODYCLOCK_USE_OSLOG)
+#elif defined(YOAI_USE_OSLOG)
     emit(OS_LOG_TYPE_DEFAULT, fmt, ap);
 #else
     emit("WARN", fmt, ap);
@@ -212,9 +212,9 @@ void log_error(const char* fmt, ...) {
     va_list ap; va_start(ap, fmt);
 #if defined(__ANDROID__)
     emit(ANDROID_LOG_ERROR, fmt, ap);
-#elif defined(BODYCLOCK_USE_HILOG)
+#elif defined(YOAI_USE_HILOG)
     emit(LOG_ERROR, fmt, ap);
-#elif defined(BODYCLOCK_USE_OSLOG)
+#elif defined(YOAI_USE_OSLOG)
     emit(OS_LOG_TYPE_ERROR, fmt, ap);
 #else
     emit("ERROR", fmt, ap);
@@ -229,9 +229,9 @@ void log_debug(const char* fmt, ...) {
     va_list ap; va_start(ap, fmt);
 #if defined(__ANDROID__)
     emit(ANDROID_LOG_DEBUG, fmt, ap);
-#elif defined(BODYCLOCK_USE_HILOG)
+#elif defined(YOAI_USE_HILOG)
     emit(LOG_DEBUG, fmt, ap);
-#elif defined(BODYCLOCK_USE_OSLOG)
+#elif defined(YOAI_USE_OSLOG)
     emit(OS_LOG_TYPE_DEBUG, fmt, ap);
 #else
     emit("DEBUG", fmt, ap);

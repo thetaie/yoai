@@ -37,7 +37,7 @@ import { LocalModelStore, PickedFile } from '../core/LocalModelStore';
 import { DEFAULT_FAMILY, Palette, resolvePalette } from '../core/Palettes';
 import { TtsModelPair, TtsModelRef, TtsModelStore } from '../core/TtsModelStore';
 
-/** What bodyclock_tts_say returns (src/bodyclock.h). */
+/** What yoai_tts_say returns (src/yoai.h). */
 interface TtsJson {
   speechSeconds: number;
   seconds: number;

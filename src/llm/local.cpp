@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <mutex>
 
-#ifdef BODYCLOCK_ONDEVICE_LLM
+#ifdef YOAI_ONDEVICE_LLM
 #include "llama.h"
 
 #include <chrono>
@@ -19,7 +19,7 @@ namespace yoai { namespace llm {
 
 namespace {
 
-#ifdef BODYCLOCK_ONDEVICE_LLM
+#ifdef YOAI_ONDEVICE_LLM
 
 /**
  * One-time llama.cpp startup, safe to call from anywhere.
@@ -119,7 +119,7 @@ std::string build_prompt(llama_model*                    model,
     return out;
 }
 
-#endif   // BODYCLOCK_ONDEVICE_LLM
+#endif   // YOAI_ONDEVICE_LLM
 
 bool emit_event(const EventHandler& on_event, EventType type, const std::string& content) {
     Event e;
@@ -207,7 +207,7 @@ bool ThinkSplitter::flush(const Emit& emit_fn) {
 
 //------------------------------------------------------------------------------
 
-#ifdef BODYCLOCK_ONDEVICE_LLM
+#ifdef YOAI_ONDEVICE_LLM
 
 struct LocalClient::Impl {
     LocalOptions opt;
@@ -726,11 +726,11 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>&,
                           const RequestOptions&) {
     emit_event(on_event, EventType::Error,
                "this build has no on-device engine "
-               "(configure with -DBODYCLOCK_ONDEVICE_LLM=ON -DLLAMA_CPP_DIR=...)");
+               "(configure with -DYOAI_ONDEVICE_LLM=ON -DLLAMA_CPP_DIR=...)");
     return false;
 }
 
-#endif  // BODYCLOCK_ONDEVICE_LLM
+#endif  // YOAI_ONDEVICE_LLM
 
 }
 }

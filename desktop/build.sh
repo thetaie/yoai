@@ -133,6 +133,15 @@ if [ -n "$DO_ADDON" ]; then
       "--CDVCPKG_MANIFEST_DIR=$PROJECT_DIR"
       "--CDVCPKG_MANIFEST_MODE=ON"
     )
+    # A tree first configured without the manifest cannot be switched over:
+    # vcpkg refuses, and records the mode it started in. See build.cmd.
+    if grep -q "Z_VCPKG_CHECK_MANIFEST_MODE:INTERNAL=OFF" "$BUILD_DIR/CMakeCache.txt" 2>/dev/null; then
+      echo "[build] build/ was configured before the addon used the root vcpkg.json," >&2
+      echo "[build] and vcpkg cannot switch an existing tree to manifest mode. Start it" >&2
+      echo "[build] over, naming the lanes it had -- clean does not keep them:" >&2
+      echo "[build]   ./build.sh clean addon [llama] [qtts]" >&2
+      exit 1
+    fi
   elif [ -n "$VCPKG_EXPLICIT" ]; then
     echo "vcpkg not found at $VCPKG_ROOT (from VCPKG_ROOT)." >&2
     exit 1
@@ -187,7 +196,7 @@ if [ -n "$DO_ADDON" ]; then
       -exec cp {} "$LSDK/lib/" \;
     echo "[build] llama SDK at $LSDK"
 
-    CMAKE_JS_ARGS+=(--CDBODYCLOCK_ONDEVICE_LLM=ON "--CDLLAMA_CPP_DIR=$LSDK")
+    CMAKE_JS_ARGS+=(--CDYOAI_ONDEVICE_LLM=ON "--CDLLAMA_CPP_DIR=$LSDK")
   fi
 
   # A desktop qwentts.cpp SDK: speech output, with whatever GPU backend this
@@ -292,7 +301,7 @@ if [ -n "$DO_ADDON" ]; then
     fi
     echo "[build] qtts SDK at $QSDK"
 
-    CMAKE_JS_ARGS+=(--CDBODYCLOCK_QTTS=ON "--CDQTTS_DIR=$QSDK")
+    CMAKE_JS_ARGS+=(--CDYOAI_QTTS=ON "--CDQTTS_DIR=$QSDK")
   fi
 
   # The addon is loaded by Electron, not by Node, so it is built against

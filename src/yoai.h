@@ -16,7 +16,7 @@
 // embed the core -- ArkTS through a NAPI module, Kotlin through JNI, Swift
 // through the bridging header, and so on -- without holding a C++ object.
 //
-// Threading: nothing here starts a thread of its own. bodyclock_chat BLOCKS for the
+// Threading: nothing here starts a thread of its own. yoai_chat BLOCKS for the
 // length of the turn, so call it off whatever thread draws. The provider
 // registry is guarded internally and safe to edit from another thread while a
 // turn is in flight; a turn reads a snapshot taken when it started, so an edit
@@ -33,12 +33,12 @@ extern "C" {
 //------------------------------------------------------------------------------
 
 // The core's version string ("0.1.0"), so a host can log what it linked.
-const char* bodyclock_version(void);
+const char* yoai_version(void);
 
 // Process-wide minimum log level, one of "debug", "info", "warn", "error"
 // (case-insensitive). An unrecognized value leaves the level unchanged.
 // Default is "info", so debug output is silent until this is called.
-void bodyclock_set_log_level(const char* level);
+void yoai_set_log_level(const char* level);
 
 //------------------------------------------------------------------------------
 // The day log
@@ -58,14 +58,14 @@ void bodyclock_set_log_level(const char* level);
 //
 // A write returns 0 on success and non-zero on failure. A read returns a JSON
 // string, or NULL on failure. Either way the reason is in
-// bodyclock_timeline_last_error(), which is worth showing: "an end in the
+// yoai_timeline_last_error(), which is worth showing: "an end in the
 // future is refused" is a sentence the screen that asked can act on.
 //
 // TIMES are milliseconds since the Unix epoch, UTC. A DAY is a day number --
-// days since the epoch -- not a date string; see bodyclock_timeline_day_to_iso
+// days since the epoch -- not a date string; see yoai_timeline_day_to_iso
 // for the conversion at the edges.
 
-// Open (creating if needed) `dir`/bodyclock.db and bring the schema up to date.
+// Open (creating if needed) `dir`/yoai.db and bring the schema up to date.
 // `dir` is the host's own sandbox directory and must already exist -- creating
 // it is the host's business, since only the host knows which of its several
 // directories is the one that gets backed up.
@@ -74,38 +74,38 @@ void bodyclock_set_log_level(const char* level);
 // does nothing; calling it with a DIFFERENT directory closes the first and
 // opens the second, which is what a test wants and what a shipping app should
 // never do.
-int bodyclock_timeline_open(const char* dir);
+int yoai_timeline_open(const char* dir);
 
 // Whether a log is open. Everything below fails while this is 0.
-int bodyclock_timeline_opened(void);
+int yoai_timeline_opened(void);
 
 // Close it. Safe when nothing is open. A host does not normally call this --
 // the process ending is enough -- but a test that opens several does.
-void bodyclock_timeline_close(void);
+void yoai_timeline_close(void);
 
 // Make `state_id` the current state as of now, closing whatever was open at the
 // same instant. This is what tapping a cell on the home screen does: it is a
 // SWITCH, not an event, and the previous state's duration falls out of it.
 //
 // Re-tapping the state that is already current succeeds and changes nothing.
-int bodyclock_timeline_switch_to(const char* state_id);
+int yoai_timeline_switch_to(const char* state_id);
 
 // Close the open entry and open nothing. The time that follows is a gap, and
 // stays one. Succeeds and does nothing when already idle.
-int bodyclock_timeline_end(void);
+int yoai_timeline_end(void);
 
 // The same, but as of an instant that has already passed -- the way out of a
 // state nobody switched away from. `at` must be at or after the entry's start
 // and not in the future; both are refused rather than clamped.
-int bodyclock_timeline_end_at(long long at);
+int yoai_timeline_end_at(long long at);
 
 // Reopen the entry closed most recently, absorbing the gap since. Only while
 // idle: once something else is open there is nothing unambiguous to undo.
-int bodyclock_timeline_undo(void);
+int yoai_timeline_undo(void);
 
 // Attach a note to the open entry. Fails while idle -- a note belongs to
 // something.
-int bodyclock_timeline_note_add(const char* text);
+int yoai_timeline_note_add(const char* text);
 
 // What is happening now and what stopped most recently, as one object:
 //
@@ -128,19 +128,19 @@ int bodyclock_timeline_note_add(const char* text);
 // local-time bar means converting each end with its own.
 //
 // The buffer is owned by the core and stays valid until this thread's next
-// bodyclock_timeline_now() call. Copy it to keep it.
-const char* bodyclock_timeline_now(void);
+// yoai_timeline_now() call. Copy it to keep it.
+const char* yoai_timeline_now(void);
 
 // Everything still going on, or finished within the last `hours` hours, newest
 // first, as a JSON array of entries.
 //
 // A rolling window, deliberately not a day: this answers "what have I been
 // doing", which has no reason to stop at midnight. Everything that COMPARES
-// uses bodyclock_timeline_day() instead -- two windows overlap and cannot be
+// uses yoai_timeline_day() instead -- two windows overlap and cannot be
 // compared to each other.
 //
 // Same buffer rules as above, with its own buffer.
-const char* bodyclock_timeline_recent(int hours);
+const char* yoai_timeline_recent(int hours);
 
 // Every entry that TOUCHES `local_day`, oldest first, as a JSON array.
 //
@@ -149,23 +149,23 @@ const char* bodyclock_timeline_recent(int hours);
 // which is why both endpoints carry their own offset.
 //
 // Same buffer rules as above, with its own buffer.
-const char* bodyclock_timeline_day(int local_day);
+const char* yoai_timeline_day(int local_day);
 
 // Today, by the device's clock right now. The one call that consults the
 // current timezone; every past day was numbered when it was lived.
-int bodyclock_timeline_today(void);
+int yoai_timeline_today(void);
 
 // Day number <-> "YYYY-MM-DD", for the edges that speak to people.
-// bodyclock_timeline_iso_to_day returns -1 when the string does not parse.
+// yoai_timeline_iso_to_day returns -1 when the string does not parse.
 //
 // The returned string is owned by the core and valid until this thread's next
-// bodyclock_timeline_day_to_iso() call.
-const char* bodyclock_timeline_day_to_iso(int local_day);
-int         bodyclock_timeline_iso_to_day(const char* iso);
+// yoai_timeline_day_to_iso() call.
+const char* yoai_timeline_day_to_iso(int local_day);
+int         yoai_timeline_iso_to_day(const char* iso);
 
 // Why the last day-log call failed, or "" when the last one succeeded. Never
 // NULL. Thread-local, so one thread's failure is not another's.
-const char* bodyclock_timeline_last_error(void);
+const char* yoai_timeline_last_error(void);
 
 //------------------------------------------------------------------------------
 // Provider registry
@@ -182,7 +182,7 @@ const char* bodyclock_timeline_last_error(void);
 //
 //   id          the host's stable token for this entry, e.g.
 //               "zhipu/glm-4.7-flash". Opaque to the core: whatever you pass
-//               here is what bodyclock_chat takes back and what bodyclock_providers
+//               here is what yoai_chat takes back and what yoai_providers
 //               lists. Required.
 //   base_url    OpenAI-compatible API root WITHOUT the /chat/completions
 //               suffix, e.g. "https://open.bigmodel.cn/api/paas/v4". Required.
@@ -196,18 +196,18 @@ const char* bodyclock_timeline_last_error(void);
 //               for none. A value that is not a parseable object is logged and
 //               ignored, never fatal -- one provider's quirk must not be able
 //               to break a turn.
-int bodyclock_provider_set(const char* id,
+int yoai_provider_set(const char* id,
                       const char* base_url,
                       const char* api_key,
                       const char* model,
                       const char* extra_json);
 
 // Forget one entry. Returns 1 if it was there, 0 if not.
-int bodyclock_provider_remove(const char* id);
+int yoai_provider_remove(const char* id);
 
 // Forget every entry -- what a host calls when the user signs out or clears
 // their keys.
-void bodyclock_provider_clear(void);
+void yoai_provider_clear(void);
 
 // The registered ids, NUL-terminated and newline-separated, or an empty string
 // when none are registered. This is the menu a host offers the user: an id is
@@ -215,16 +215,16 @@ void bodyclock_provider_clear(void);
 // on-device entries are listed together -- see the next section.
 //
 // The buffer is owned by the core and stays valid until this thread's next
-// bodyclock_providers() call -- copy it if you need to keep it. Never NULL.
-const char* bodyclock_providers(void);
+// yoai_providers() call -- copy it if you need to keep it. Never NULL.
+const char* yoai_providers(void);
 
 //------------------------------------------------------------------------------
 // On-device models (llama.cpp + GGUF)
 //------------------------------------------------------------------------------
 //
 // A second kind of entry in the SAME registry as the remote providers above. An
-// on-device id is registered here, then listed by bodyclock_providers, run by
-// bodyclock_chat and forgotten by bodyclock_provider_remove exactly like a remote one --
+// on-device id is registered here, then listed by yoai_providers, run by
+// yoai_chat and forgotten by yoai_provider_remove exactly like a remote one --
 // the host picks a model, not a lane. Which one an id is stays the core's
 // business, so a host that never adds a local model is unaffected by all of
 // this.
@@ -237,21 +237,21 @@ const char* bodyclock_providers(void);
 
 // Whether this build has the engine compiled in: 1 if yes, 0 if it was built
 // without llama.cpp. When 0, everything below still exists and answers
-// truthfully -- bodyclock_local_set succeeds and the entry appears in the menu, but a
+// truthfully -- yoai_local_set succeeds and the entry appears in the menu, but a
 // turn against it reports the absence as an "error" event. A host should call
 // this before offering an "add an on-device model" affordance at all.
-int bodyclock_local_available(void);
+int yoai_local_available(void);
 
 // Register one on-device model, replacing any entry already under `id`. Returns
 // 0 on success, non-zero when a required argument is missing.
 //
 //   id            the host's stable token for this entry, as with
-//                 bodyclock_provider_set. Shares one namespace with the remote
+//                 yoai_provider_set. Shares one namespace with the remote
 //                 entries, so registering a local model under an id already
 //                 held by a remote one replaces it. Required.
 //   model_path    absolute path to a .gguf the process can open. Required. NOT
 //                 validated here -- the file is opened on the first turn (or by
-//                 bodyclock_local_load), so a path that has gone stale reports itself
+//                 yoai_local_load), so a path that has gone stale reports itself
 //                 as an "error" event rather than at registration time.
 //   options_json  optional JSON OBJECT of engine knobs; NULL or empty for the
 //                 defaults, which are tuned for a phone. Unknown members are
@@ -286,7 +286,7 @@ int bodyclock_local_available(void);
 //                   "topK"           int   default 20
 //                   "repeatPenalty"  float default 1.1; 1.0 disables
 //                   "repeatLastN"    int   default 256
-int bodyclock_local_set(const char* id,
+int yoai_local_set(const char* id,
                    const char* model_path,
                    const char* options_json);
 
@@ -297,12 +297,12 @@ int bodyclock_local_set(const char* id,
 // Returns 0 when the model is resident, non-zero for an unknown id, an id that
 // is a remote provider, a build without the engine, or a file that will not
 // load. Idempotent: a second call on a loaded model returns 0 immediately.
-int bodyclock_local_load(const char* id);
+int yoai_local_load(const char* id);
 
 // Change the worker-thread count of an already-registered on-device model,
 // WITHOUT dropping the loaded weights. <= 0 means all cores.
 //
-// bodyclock_local_set would do this too, but it replaces the registry entry and
+// yoai_local_set would do this too, but it replaces the registry entry and
 // therefore discards the cached engine -- re-reading a gigabyte or two off
 // storage between one setting and the next, which makes a sweep both slow and
 // unreliable: what is being compared then includes a cold page cache.
@@ -322,8 +322,8 @@ int bodyclock_local_load(const char* id);
 // SoC's performance-core count, which says nothing about the bus at all. No
 // thread sweep of a language model can separate those -- every point on it is
 // one engine's kernels as much as the hardware. That is what
-// bodyclock_memory_bandwidth below is for.
-int bodyclock_local_set_threads(const char* id, int threads);
+// yoai_memory_bandwidth below is for.
+int yoai_local_set_threads(const char* id, int threads);
 
 // Forget the conversation: drop the KV cache and the token sequence prefix reuse
 // is computed against. The weights stay resident. Returns 0 on success, 1 when
@@ -337,7 +337,7 @@ int bodyclock_local_set_threads(const char* id, int threads);
 // default: llama_context_params::n_rs_seq, the number of recurrent-state
 // snapshots, is 0 unless asked for. Removing a whole sequence is the operation
 // that never fails, and this is the way to ask for it.
-int bodyclock_local_forget(const char* id);
+int yoai_local_forget(const char* id);
 
 // How fast this machine reads memory, measured WITHOUT a language model.
 //
@@ -350,20 +350,20 @@ int bodyclock_local_forget(const char* id);
 //   mib      <= 0 selects 256, past any phone's last-level cache.
 //   passes   <= 0 selects 4.
 //
-// This exists for the same argument bodyclock_local_set_threads was added for,
+// This exists for the same argument yoai_local_set_threads was added for,
 // one step further down. That sweep showed decode saturating at four threads and
 // was read as the memory bus filling up -- but it saturates at the number of
 // performance cores, which is equally consistent with running out of cores worth
 // using. A language model cannot separate those: every number it gives is one
 // engine's kernels as much as the chip. This reads a large buffer and divides.
-const char* bodyclock_memory_bandwidth(int threads, int mib, int passes);
+const char* yoai_memory_bandwidth(int threads, int mib, int passes);
 
 //------------------------------------------------------------------------------
 // Chat
 //------------------------------------------------------------------------------
 
-// Streaming callback for bodyclock_chat, invoked once per event as the turn streams,
-// on the thread that called bodyclock_chat.
+// Streaming callback for yoai_chat, invoked once per event as the turn streams,
+// on the thread that called yoai_chat.
 //
 //   event_type  a stable lowercase tag for the chunk. Never NULL:
 //                 "reply"      answer text
@@ -383,20 +383,20 @@ const char* bodyclock_memory_bandwidth(int threads, int mib, int passes);
 //               tools yet, so today they never fire.
 //   content     UTF-8 payload, NUL-terminated. Never NULL, may be empty. Valid
 //               only for the duration of the call -- copy it to keep it.
-//   user_data   the opaque pointer passed to bodyclock_chat, forwarded verbatim.
+//   user_data   the opaque pointer passed to yoai_chat, forwarded verbatim.
 //
 // Return non-zero to keep streaming, 0 to abort the turn now. Returning 0 is
 // how a host cancels: it tears down the HTTP transfer at the next chunk -- or,
 // on an on-device turn, stops the decode loop at the next token -- so no
 // separate cancel entry point is needed (and none exists).
-typedef int (*bodyclock_chat_handler)(const char* event_type,
+typedef int (*yoai_chat_handler)(const char* event_type,
                                  const char* content,
                                  void* user_data);
 
 // Run one chat turn against a registered provider, streaming it through
 // `on_event`. BLOCKS until the turn ends or the handler aborts it.
 //
-//   provider_id     an id from bodyclock_providers, verbatim. Required; unknown =>
+//   provider_id     an id from yoai_providers, verbatim. Required; unknown =>
 //                   error return.
 //   messages_json   '[{"role":"user"|"assistant"|"system","content":"..."},...]'
 //                   in conversation order, ending with the current user turn.
@@ -416,7 +416,7 @@ typedef int (*bodyclock_chat_handler)(const char* event_type,
 //                   protocol -- so the grammar is logged and ignored there, and
 //                   the reply comes back unconstrained. A caller that must have
 //                   structured output from a remote model wants that provider's
-//                   own `response_format`, through bodyclock_provider_set's
+//                   own `response_format`, through yoai_provider_set's
 //                   `extra_json`.
 //
 //                   A grammar the parser rejects is logged and the turn runs
@@ -438,11 +438,11 @@ typedef int (*bodyclock_chat_handler)(const char* event_type,
 // (401, rate limit, a model that does not exist) is NOT distinguished by the
 // return code -- it arrives as an "error" event first, because that is the text
 // worth showing the user.
-int bodyclock_chat(const char* provider_id,
+int yoai_chat(const char* provider_id,
               const char* messages_json,
               const char* system_prompt,
               const char* grammar,
-              bodyclock_chat_handler on_event,
+              yoai_chat_handler on_event,
               void* user_data);
 
 //------------------------------------------------------------------------------
@@ -461,9 +461,9 @@ int bodyclock_chat(const char* provider_id,
 // So a host that never loads a model still gets the half that matters most.
 
 // Whether this build has the recognition engine compiled in: 1 if yes, 0 if it
-// was built without it. When 0, bodyclock_voice_load fails and says so, and
+// was built without it. When 0, yoai_voice_load fails and says so, and
 // analysis still returns its prosody half. Ask before offering to add a model.
-int bodyclock_voice_available(void);
+int yoai_voice_available(void);
 
 // Read a SenseVoice GGUF. BLOCKS for the length of the load (254 MB at q8), so
 // call it off the drawing thread. Returns 0 when the model is resident.
@@ -471,13 +471,13 @@ int bodyclock_voice_available(void);
 // As with the on-device LLM, `model_path` must be a real filesystem path this
 // process can open -- on HarmonyOS, a file the user granted through the document
 // picker. A second load replaces the first.
-int bodyclock_voice_load(const char* model_path);
+int yoai_voice_load(const char* model_path);
 
 // Whether a model is resident right now.
-int bodyclock_voice_loaded(void);
+int yoai_voice_loaded(void);
 
 // Drop the weights. Analysis afterwards returns prosody only.
-void bodyclock_voice_unload(void);
+void yoai_voice_unload(void);
 
 // Inverse text normalization: with it on, a spoken "five hundred and sixty-seven"
 // is transcribed "567". The model ships with it on. Pass 0 to turn it off, which
@@ -486,13 +486,13 @@ void bodyclock_voice_unload(void);
 //
 // Requires a loaded model; it changes what the model is asked, not how the
 // answer is read.
-int bodyclock_voice_set_itn(int on);
+int yoai_voice_set_itn(int on);
 
 // Worker threads for the encoder pass. <= 0 means all cores. Takes effect on the
 // next analysis. Returns 0 on success.
 //
 // Requires a loaded model, and does NOT reload it -- so a sweep compares thread
-// counts rather than page caches, the same reason bodyclock_local_set_threads
+// counts rather than page caches, the same reason yoai_local_set_threads
 // exists.
 //
 // **The default is 4 and the reason given for it does not hold.** The header it
@@ -506,7 +506,7 @@ int bodyclock_voice_set_itn(int on);
 // This exists so the default can be chosen by measurement instead. Recognition
 // is the first term of the silence a person sits through between speaking and
 // being answered, and it is the term nobody has timed on a phone.
-int bodyclock_voice_set_threads(int threads);
+int yoai_voice_set_threads(int threads);
 
 // Analyse one recording. Returns a JSON object, or NULL on a bad argument.
 //
@@ -530,8 +530,8 @@ int bodyclock_voice_set_threads(int threads);
 // slightly -- good enough to read a table by, not a subtitle track.
 //
 // The buffer is owned by the core and stays valid until this thread's next
-// bodyclock_voice_analyze() call. Copy it to keep it.
-const char* bodyclock_voice_analyze(const short* pcm,
+// yoai_voice_analyze() call. Copy it to keep it.
+const char* yoai_voice_analyze(const short* pcm,
                                int n_samples,
                                int sample_rate);
 
@@ -558,7 +558,7 @@ const char* bodyclock_voice_analyze(const short* pcm,
 
 // Whether this build has the engine compiled in: 1 if yes, 0 if it was built
 // without MNN. When 0 everything below still links and answers truthfully.
-int bodyclock_omni_available(void);
+int yoai_omni_available(void);
 
 // Read a model. BLOCKS.
 //
@@ -569,12 +569,12 @@ int bodyclock_omni_available(void);
 // files has to pick the directory instead.
 //
 // Returns 0 when the model is resident.
-int bodyclock_omni_load(const char* model_dir);
+int yoai_omni_load(const char* model_dir);
 
-int bodyclock_omni_loaded(void);
+int yoai_omni_loaded(void);
 
 // Drop the weights.
-void bodyclock_omni_unload(void);
+void yoai_omni_unload(void);
 
 // How many solver steps the diffusion vocoder takes. Returns 0 on success, or
 // non-zero with no model loaded or for a count below 2.
@@ -588,21 +588,21 @@ void bodyclock_omni_unload(void);
 // The shipped config says 5, which is four forwards; 2 is one.
 //
 // Read at GENERATION time, not load time, so this takes effect on the next ask
-// and the model stays resident -- the same reason bodyclock_local_set_threads
+// and the model stays resident -- the same reason yoai_local_set_threads
 // exists, and it makes a sweep compare step counts rather than page caches.
 //
 // It trades the thing being bought. Fewer steps is a coarser sampler, and what
 // it coarsens is naturalness, which is the whole reason this engine is being
 // considered. So the number to find is not the fastest one: it is the fewest
 // steps that still sound better than the platform voice.
-int bodyclock_omni_set_dit_steps(int steps);
+int yoai_omni_set_dit_steps(int steps);
 
 // Streaming callback for the generated voice, invoked as the waveform is
 // produced. `pcm` is mono float at 24000 Hz -- note that this is NOT the 16 kHz
 // the input side uses, so a host feeding it back to a speaker must say so.
 //
 // Return non-zero to keep going, 0 to abort. `last` is 1 on the final chunk.
-typedef int (*bodyclock_omni_audio_handler)(const float* pcm,
+typedef int (*yoai_omni_audio_handler)(const float* pcm,
                                        int n_samples,
                                        int last,
                                        void* user_data);
@@ -615,7 +615,7 @@ typedef int (*bodyclock_omni_audio_handler)(const float* pcm,
 // below carries the same text, but it only exists when the call returns -- so a
 // host that waits for it shows the answer after the speech that reads it out has
 // already finished. `text` is valid for the duration of the call only.
-typedef void (*bodyclock_omni_text_handler)(const char* text, void* user_data);
+typedef void (*yoai_omni_text_handler)(const char* text, void* user_data);
 
 // Ask the model about one recording, and optionally have it answer aloud.
 //
@@ -663,11 +663,11 @@ typedef void (*bodyclock_omni_text_handler)(const char* text, void* user_data);
 // re-measured, the same clip at the same length both crashes and succeeds, at
 // any thread count. The guard shortens the input rather than avoiding the bug.
 // See src/voice/omni/qwen25_omni.hpp and design/voice.md.
-const char* bodyclock_omni_ask(const short* pcm,
+const char* yoai_omni_ask(const short* pcm,
                           int n_samples,
                           const char* prompt,
-                          bodyclock_omni_audio_handler on_audio,
-                          bodyclock_omni_text_handler on_text,
+                          yoai_omni_audio_handler on_audio,
+                          yoai_omni_text_handler on_text,
                           void* user_data);
 //
 //------------------------------------------------------------------------------
@@ -680,7 +680,7 @@ const char* bodyclock_omni_ask(const short* pcm,
 // thinking. This lane speaks text something else produced -- llama.cpp's, at
 // 14 tok/s -- and measured 1.16x on a desktop for the same sentences.
 //
-// **The voice is written, not cloned.** bodyclock_tts_set_voice takes an English
+// **The voice is written, not cloned.** yoai_tts_set_voice takes an English
 // description and the same description yields the same speaker across different
 // passages. Five other ways of getting a fixed voice out of this model family
 // were tried first and design/voice.md records why each failed; the short form
@@ -689,7 +689,7 @@ const char* bodyclock_omni_ask(const short* pcm,
 //
 // Two GGUF files: the 1.7B VoiceDesign pair is 1.4 GB at Q4_K_M, the 0.6B
 // CustomVoice pair 0.8 GB and about a tenth faster. CustomVoice keeps a written
-// delivery -- see bodyclock_tts_set_speaker.
+// delivery -- see yoai_tts_set_speaker.
 //
 // **On the phone it has TWO speeds: 2.14x for the first twenty to thirty
 // seconds of continuous generation, then 3.52x (1.94x and 3.30x on the 0.6B).**
@@ -712,7 +712,7 @@ const char* bodyclock_omni_ask(const short* pcm,
 // Whether this build has the engine compiled in: 1 if yes, 0 if it was built
 // without qwentts.cpp. When 0 everything below still links and answers
 // truthfully.
-int bodyclock_tts_available(void);
+int yoai_tts_available(void);
 
 // Read the two models. BLOCKS.
 //
@@ -722,14 +722,14 @@ int bodyclock_tts_available(void);
 // siblings relative to a config.
 //
 // Returns 0 when both are resident. On failure the reason is in
-// bodyclock_tts_last_error(), and it is worth showing: the commonest one is a
+// yoai_tts_last_error(), and it is worth showing: the commonest one is a
 // talker of the wrong kind, which is a file name mistake and not a broken model.
-int bodyclock_tts_load(const char* talker_path, const char* codec_path);
+int yoai_tts_load(const char* talker_path, const char* codec_path);
 
-int bodyclock_tts_loaded(void);
+int yoai_tts_loaded(void);
 
 // Drop the weights.
-void bodyclock_tts_unload(void);
+void yoai_tts_unload(void);
 
 // What the loaded talker is: "voice_design", "base" or "custom_voice", or ""
 // with nothing loaded. Owned by the core.
@@ -737,7 +737,7 @@ void bodyclock_tts_unload(void);
 // Worth surfacing because the three take DIFFERENT parameters -- a voice
 // description is required by one and refused by another -- so a host that lets
 // someone pick a file has to be able to say which one they picked.
-const char* bodyclock_tts_model_type(void);
+const char* yoai_tts_model_type(void);
 
 // The named speakers a custom_voice checkpoint carries, as a JSON array of
 // strings -- `[]` for the other two kinds and before a load. Owned by the core
@@ -746,7 +746,7 @@ const char* bodyclock_tts_model_type(void);
 // Read from the model rather than hard-coded. "Nine named speakers" is
 // something this repo took from a model card and never checked, and a list that
 // came out of the file cannot be stale.
-const char* bodyclock_tts_speakers(void);
+const char* yoai_tts_speakers(void);
 
 // Which of them speaks. Takes effect on the next say().
 //
@@ -754,7 +754,7 @@ const char* bodyclock_tts_speakers(void);
 // there, so a name left over from an earlier model cannot break a VoiceDesign
 // run. "" asks the engine for its own default, which on this checkpoint is a
 // speaker rather than silence.
-void bodyclock_tts_set_speaker(const char* name);
+void yoai_tts_set_speaker(const char* name);
 
 // The voice, described in English: "breathy, unhurried but not slow".
 //
@@ -768,7 +768,7 @@ void bodyclock_tts_set_speaker(const char* name);
 //
 // Takes effect on the next say(); the weights stay resident, so a sweep compares
 // descriptions rather than page caches.
-void bodyclock_tts_set_voice(const char* instruct);
+void yoai_tts_set_voice(const char* instruct);
 
 // Sampling. -1 draws a fresh seed per call.
 //
@@ -776,18 +776,18 @@ void bodyclock_tts_set_voice(const char* instruct);
 // there the seed WAS the speaker, and two seeds gave a man and a woman reading
 // the same sentence. The description pins the identity, so this only varies the
 // delivery.
-void bodyclock_tts_set_seed(long long seed);
+void yoai_tts_set_seed(long long seed);
 
 // <= 0 leaves the engine's own default (50) alone.
-void bodyclock_tts_set_top_k(int top_k);
+void yoai_tts_set_top_k(int top_k);
 
 // A recording to sound like, and what is said in it. For a `base` checkpoint,
 // which is the cloning one and takes neither a description nor a named speaker.
 //
 // Returns 0 when the reference is held. **The WAV must be mono, 16-bit, exactly
 // 24000 Hz**, and one that is not is refused rather than converted -- the same
-// rule bodyclock_voice_analyze states at 16 kHz, for the same reason. On failure
-// the reason is in bodyclock_tts_last_error().
+// rule yoai_voice_analyze states at 16 kHz, for the same reason. On failure
+// the reason is in yoai_tts_last_error().
 //
 // The transcript is what makes this IN-CONTEXT cloning rather than a
 // speaker-embedding copy, and design/voice.md records why that distinction
@@ -801,10 +801,10 @@ void bodyclock_tts_set_top_k(int top_k);
 // reference is cheaper and has not been tried.
 //
 // Pass NULL or "" for both to drop it.
-int bodyclock_tts_set_reference(const char* wav_path, const char* transcript);
+int yoai_tts_set_reference(const char* wav_path, const char* transcript);
 
 // Seconds of reference currently held; 0 when none.
-float bodyclock_tts_reference_seconds(void);
+float yoai_tts_reference_seconds(void);
 
 // Whether audio is emitted as it is generated. Non-zero (the default) streams
 // it; 0 decodes the whole utterance in one pass and hands it over once.
@@ -820,9 +820,9 @@ float bodyclock_tts_reference_seconds(void);
 //
 // **Pin the seed before comparing anything here**, or the model generates a
 // different number of frames each time and only the per-frame rates survive.
-void bodyclock_tts_set_streaming(int on);
+void yoai_tts_set_streaming(int on);
 
-// Worker threads for the NEXT bodyclock_tts_load(). <= 0 restores the engine's
+// Worker threads for the NEXT yoai_tts_load(). <= 0 restores the engine's
 // own choice.
 //
 // **Swept on the phone, and the count is not a lever**: four, six and eight sit
@@ -830,11 +830,11 @@ void bodyclock_tts_set_streaming(int on);
 // from heat, and only two threads is clearly worse (12%). The engine's own
 // choice of six costs nothing. It was added expecting the opposite.
 //
-// **Unlike bodyclock_local_set_threads, this one needs a reload**, because
+// **Unlike yoai_local_set_threads, this one needs a reload**, because
 // qwen.h has no thread parameter and the count is consumed once inside qt_init.
 // After the first load that is about a second from page cache, and what is being
 // compared is generation, which the reload does not touch.
-void bodyclock_tts_set_threads(int threads);
+void yoai_tts_set_threads(int threads);
 
 // Streaming callback for the generated voice. `pcm` is mono float at 24000 Hz,
 // the same rate the omni lane produces and not the 16 kHz of the input side.
@@ -845,7 +845,7 @@ void bodyclock_tts_set_threads(int threads);
 // holding each chunk back until the next proved it was not the last, delaying
 // the first chunk. The first chunk arriving early is what the streaming path is
 // for.
-typedef int (*bodyclock_tts_audio_handler)(const float* pcm,
+typedef int (*yoai_tts_audio_handler)(const float* pcm,
                                       int n_samples,
                                       int last,
                                       void* user_data);
@@ -857,7 +857,7 @@ typedef int (*bodyclock_tts_audio_handler)(const float* pcm,
 // handover, not of the engine, and nothing here keeps a copy of the audio.
 //
 // Returns a JSON object, owned by the core and valid until this thread's next
-// call, or NULL on failure (see bodyclock_tts_last_error()):
+// call, or NULL on failure (see yoai_tts_last_error()):
 //
 //   speechSeconds       seconds of audio produced.
 //   seconds             seconds of computation.
@@ -867,7 +867,7 @@ typedef int (*bodyclock_tts_audio_handler)(const float* pcm,
 //                       where nothing arrived early at all.
 //   chunks              handovers. 1 means nothing streamed.
 //   streamed            which path this run took, which is not the same as what
-//                       bodyclock_tts_set_streaming asked for: with no handler
+//                       yoai_tts_set_streaming asked for: with no handler
 //                       there is nobody to stream to.
 //   peakDbfs            the loudest sample.
 //   levelDriftDb        how much the delivery's level wanders over the
@@ -878,12 +878,12 @@ typedef int (*bodyclock_tts_audio_handler)(const float* pcm,
 //                       API cannot prevent -- but one labelled failure cannot
 //                       set a cutoff, and a take nobody minded scored higher.
 //                       Reported so the labels can accumulate.
-const char* bodyclock_tts_say(const char* text,
-                         bodyclock_tts_audio_handler on_audio,
+const char* yoai_tts_say(const char* text,
+                         yoai_tts_audio_handler on_audio,
                          void* user_data);
 
 // Why the last load or say failed. "" after a success. Owned by the core.
-const char* bodyclock_tts_last_error(void);
+const char* yoai_tts_last_error(void);
 
 //
 //------------------------------------------------------------------------------
@@ -910,8 +910,8 @@ const char* bodyclock_tts_last_error(void);
 // owns; feed() returns at once; finish() BLOCKS until the last sample is out.
 
 // Whether this build has the speech engine compiled in. Same engine as the
-// lane above, so this answers the same as bodyclock_tts_available().
-int bodyclock_reader_available(void);
+// lane above, so this answers the same as yoai_tts_available().
+int yoai_reader_available(void);
 
 // Read the two GGUFs into `voices` engines. BLOCKS. `voices` below 1 is 1.
 //
@@ -919,12 +919,12 @@ int bodyclock_reader_available(void);
 // one measured slightly SLOWER rather than faster -- see
 // src/voice/tts/reader.hpp. 1 is the number to pass until a device says
 // otherwise.
-int bodyclock_reader_load(const char* talker_path, const char* codec_path, int voices);
-int bodyclock_reader_loaded(void);
-void bodyclock_reader_unload(void);
+int yoai_reader_load(const char* talker_path, const char* codec_path, int voices);
+int yoai_reader_loaded(void);
+void yoai_reader_unload(void);
 
 // What the loaded talker is: "voice_design", "base" or "custom_voice".
-const char* bodyclock_reader_model_type(void);
+const char* yoai_reader_model_type(void);
 
 // The voice, by the same three routes the lane above documents: a written
 // instruct, a named speaker, or -- only on a `base` checkpoint -- a recording
@@ -936,15 +936,15 @@ const char* bodyclock_reader_model_type(void);
 // changing mid-reply. Anchoring every piece to one embedding removed it on
 // four seeds out of four and cost nothing measurable in speed.
 // src/voice/tts/reader.hpp has the numbers.
-void bodyclock_reader_set_voice(const char* instruct);
-void bodyclock_reader_set_speaker(const char* name);
-int bodyclock_reader_set_reference_voice(const char* wav_path);
+void yoai_reader_set_voice(const char* instruct);
+void yoai_reader_set_speaker(const char* name);
+int yoai_reader_set_reference_voice(const char* wav_path);
 
 // Sampling. The seed defaults to a FIXED one rather than the engine's -1,
 // because -1 is redrawn per piece and a passage cut into four then draws four
 // times -- which is what made sentence-by-sentence synthesis sound stitched the
 // first time this project tried it.
-void bodyclock_reader_set_seed(long long seed);
+void yoai_reader_set_seed(long long seed);
 
 // Where the cuts fall, in CHARACTERS. <= 0 leaves a field alone.
 //
@@ -956,7 +956,7 @@ void bodyclock_reader_set_seed(long long seed);
 //                utterance is the one the engine ends without a release, which
 //                is heard as the reply being cut off. Lengthening it is free --
 //                by then the listener is already listening.
-void bodyclock_reader_set_split(int min_chars, int max_chars, int tail_chars);
+void yoai_reader_set_split(int min_chars, int max_chars, int tail_chars);
 
 // Whether a comma ends a piece once min_chars is reached, the way a full stop
 // does. Off by default.
@@ -967,17 +967,17 @@ void bodyclock_reader_set_split(int min_chars, int max_chars, int tail_chars);
 // 45-character reply had both its pieces dispatched in the same millisecond.
 // What it costs is the unit: a clause rather than a sentence, which is shorter
 // than the one that sounded best. See src/voice/tts/reader.hpp.
-void bodyclock_reader_set_clause_cuts(int on);
+void yoai_reader_set_clause_cuts(int on);
 
 // Worker threads per engine for the NEXT load. <= 0 leaves the engine's choice.
-void bodyclock_reader_set_threads(int threads);
+void yoai_reader_set_threads(int threads);
 
 // Generated audio, in reading order. `pcm` is mono float at 24000 Hz.
 //
 // `sentence` is which piece these samples belong to, so a host can see where
 // the seams are. `last` arrives on a call of its own with `n_samples` 0, once,
 // matching the speech lane above. Return non-zero to continue, 0 to stop.
-typedef int (*bodyclock_reader_audio_handler)(const float* pcm,
+typedef int (*yoai_reader_audio_handler)(const float* pcm,
                                          int n_samples,
                                          int sentence,
                                          int last,
@@ -986,17 +986,17 @@ typedef int (*bodyclock_reader_audio_handler)(const float* pcm,
 // Start reading. Returns 1 when the engines are running, 0 otherwise.
 //
 // `on_audio` NULL generates and discards, as in the lane above.
-int bodyclock_reader_begin(bodyclock_reader_audio_handler on_audio, void* user_data);
+int yoai_reader_begin(yoai_reader_audio_handler on_audio, void* user_data);
 
 // Add text. Returns at once. Whatever has become a complete sentence is
 // dispatched; the last fragment is held back, because another token could
 // extend it and a piece handed to an engine cannot be taken back.
-int bodyclock_reader_feed(const char* delta);
+int yoai_reader_feed(const char* delta);
 
 // No more text. BLOCKS until the last sample has been handed over.
 //
 // Returns a JSON object, owned by the core and valid until this thread's next
-// call, or NULL on failure (see bodyclock_reader_last_error()):
+// call, or NULL on failure (see yoai_reader_last_error()):
 //
 //   sentences           pieces the reply was cut into.
 //   speechSeconds       seconds of audio handed over.
@@ -1015,10 +1015,10 @@ int bodyclock_reader_feed(const char* delta);
 //                       when they did. 0 means the engines stayed ahead.
 //   heldSeconds         the most audio ever held back waiting for an earlier
 //                       piece, which is also the memory.
-const char* bodyclock_reader_finish(void);
+const char* yoai_reader_finish(void);
 
 // Why the last call returned 0 or NULL. Empty after a success.
-const char* bodyclock_reader_last_error(void);
+const char* yoai_reader_last_error(void);
 
 //------------------------------------------------------------------------------
 // Model bundles
@@ -1038,11 +1038,11 @@ const char* bodyclock_reader_last_error(void);
 //
 // Returns NULL when the file is missing, truncated, or not a bundle. The buffer
 // is owned by the core and valid until this thread's next call.
-const char* bodyclock_bundle_list(const char* bundle_path);
+const char* yoai_bundle_list(const char* bundle_path);
 
 // Called as extraction runs. `fraction` is 0..1 over the whole payload.
 // Return non-zero to continue, 0 to abort -- an abort removes what was written.
-typedef int (*bodyclock_bundle_progress)(const char* name,
+typedef int (*yoai_bundle_progress)(const char* name,
                                     double fraction,
                                     void* user_data);
 
@@ -1055,9 +1055,9 @@ typedef int (*bodyclock_bundle_progress)(const char* name,
 // Entry names are validated: absolute paths, drive letters, backslashes and
 // ".." anywhere cause the whole extraction to be refused. A bundle is a file the
 // user copied from somewhere.
-int bodyclock_bundle_extract(const char* bundle_path,
+int yoai_bundle_extract(const char* bundle_path,
                         const char* dest_dir,
-                        bodyclock_bundle_progress on_progress,
+                        yoai_bundle_progress on_progress,
                         void* user_data);
 
 #ifdef __cplusplus

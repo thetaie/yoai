@@ -233,7 +233,7 @@ Timeline* Timeline::open(const std::string& dir, std::string* err) {
     if (!path.empty() && path[path.size() - 1] != '/' && path[path.size() - 1] != '\\') {
         path += "/";
     }
-    path += "bodyclock.db";
+    path += "yoai.db";
 
     if (sqlite3_open(path.c_str(), &self->impl_->db) != SQLITE_OK) {
         if (err) {

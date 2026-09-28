@@ -125,7 +125,7 @@ int main(int argc, char** argv) {
 
     if (!yoai::voice::SenseVoice::available()) {
         std::fprintf(stderr,
-                     "this build has no recognition engine -- configure with -DBODYCLOCK_ASR=ON\n");
+                     "this build has no recognition engine -- configure with -DYOAI_ASR=ON\n");
         return 1;
     }
 

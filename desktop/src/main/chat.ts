@@ -13,7 +13,7 @@
  * feature from wanting one at all; this is the one that was asked for, and a
  * per-model override can be added over the top of it without moving anything.
  *
- * Sent with every turn and stored nowhere else: bodyclock_chat takes it as an
+ * Sent with every turn and stored nowhere else: yoai_chat takes it as an
  * argument, the core keeps no session state, and the saved transcript holds
  * only what the two sides actually said.
  */

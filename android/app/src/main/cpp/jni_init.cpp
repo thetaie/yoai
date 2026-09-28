@@ -1,7 +1,7 @@
-// The JNI bridge. Everything here is a thin translation of src/bodyclock.h into
+// The JNI bridge. Everything here is a thin translation of src/yoai.h into
 // what Kotlin can call; no policy lives at this layer.
 //
-// **Threading.** bodyclock_chat() and bodyclock_tts_say() both BLOCK and both
+// **Threading.** yoai_chat() and yoai_tts_say() both BLOCK and both
 // invoke their handler ON THE CALLING THREAD, so the JNIEnv of the call frame
 // is valid throughout and no AttachCurrentThread dance is needed. The Kotlin
 // side is responsible for not calling them on the main thread; see Bodyclock.kt.
@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-#include "bodyclock.h"
+#include "yoai.h"
 
 namespace {
 
@@ -113,17 +113,17 @@ extern "C" {
 //------------------------------------------------------------------------------
 
 JNIEXPORT jstring JNICALL BC(nativeVersion)(JNIEnv* env, jobject) {
-    return from_utf8(env, bodyclock_version());
+    return from_utf8(env, yoai_version());
 }
 
 JNIEXPORT void JNICALL BC(nativeSetLogLevel)(JNIEnv* env, jobject, jstring level) {
     const std::string s = to_utf8(env, level);
-    bodyclock_set_log_level(s.c_str());
+    yoai_set_log_level(s.c_str());
 }
 
 JNIEXPORT jstring JNICALL BC(nativeMemoryBandwidth)(JNIEnv* env, jobject,
                                                     jint threads, jint mib, jint passes) {
-    return from_utf8(env, bodyclock_memory_bandwidth(threads, mib, passes));
+    return from_utf8(env, yoai_memory_bandwidth(threads, mib, passes));
 }
 
 //------------------------------------------------------------------------------
@@ -135,71 +135,71 @@ JNIEXPORT jstring JNICALL BC(nativeMemoryBandwidth)(JNIEnv* env, jobject,
 // only reason the home screen can read the current state during composition
 // instead of through a coroutine and a loading state.
 //
-// The reads return JSON whose shape is documented in src/bodyclock.h. Nothing
+// The reads return JSON whose shape is documented in src/yoai.h. Nothing
 // here parses it: the Kotlin side does, once, in Timeline.kt.
 
 JNIEXPORT jint JNICALL BC(nativeTimelineOpen)(JNIEnv* env, jobject, jstring dir) {
     const std::string s = to_utf8(env, dir);
-    return bodyclock_timeline_open(s.c_str());
+    return yoai_timeline_open(s.c_str());
 }
 
 JNIEXPORT jboolean JNICALL BC(nativeTimelineOpened)(JNIEnv*, jobject) {
-    return bodyclock_timeline_opened() != 0 ? JNI_TRUE : JNI_FALSE;
+    return yoai_timeline_opened() != 0 ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL BC(nativeTimelineClose)(JNIEnv*, jobject) {
-    bodyclock_timeline_close();
+    yoai_timeline_close();
 }
 
 JNIEXPORT jint JNICALL BC(nativeTimelineSwitchTo)(JNIEnv* env, jobject, jstring state_id) {
     const std::string s = to_utf8(env, state_id);
-    return bodyclock_timeline_switch_to(s.c_str());
+    return yoai_timeline_switch_to(s.c_str());
 }
 
 JNIEXPORT jint JNICALL BC(nativeTimelineEnd)(JNIEnv*, jobject) {
-    return bodyclock_timeline_end();
+    return yoai_timeline_end();
 }
 
 JNIEXPORT jint JNICALL BC(nativeTimelineEndAt)(JNIEnv*, jobject, jlong at) {
-    return bodyclock_timeline_end_at(at);
+    return yoai_timeline_end_at(at);
 }
 
 JNIEXPORT jint JNICALL BC(nativeTimelineUndo)(JNIEnv*, jobject) {
-    return bodyclock_timeline_undo();
+    return yoai_timeline_undo();
 }
 
 JNIEXPORT jint JNICALL BC(nativeTimelineNoteAdd)(JNIEnv* env, jobject, jstring text) {
     const std::string s = to_utf8(env, text);
-    return bodyclock_timeline_note_add(s.c_str());
+    return yoai_timeline_note_add(s.c_str());
 }
 
 JNIEXPORT jstring JNICALL BC(nativeTimelineNow)(JNIEnv* env, jobject) {
-    return from_utf8(env, bodyclock_timeline_now());
+    return from_utf8(env, yoai_timeline_now());
 }
 
 JNIEXPORT jstring JNICALL BC(nativeTimelineRecent)(JNIEnv* env, jobject, jint hours) {
-    return from_utf8(env, bodyclock_timeline_recent(hours));
+    return from_utf8(env, yoai_timeline_recent(hours));
 }
 
 JNIEXPORT jstring JNICALL BC(nativeTimelineDay)(JNIEnv* env, jobject, jint local_day) {
-    return from_utf8(env, bodyclock_timeline_day(local_day));
+    return from_utf8(env, yoai_timeline_day(local_day));
 }
 
 JNIEXPORT jint JNICALL BC(nativeTimelineToday)(JNIEnv*, jobject) {
-    return bodyclock_timeline_today();
+    return yoai_timeline_today();
 }
 
 JNIEXPORT jstring JNICALL BC(nativeTimelineDayToIso)(JNIEnv* env, jobject, jint local_day) {
-    return from_utf8(env, bodyclock_timeline_day_to_iso(local_day));
+    return from_utf8(env, yoai_timeline_day_to_iso(local_day));
 }
 
 JNIEXPORT jint JNICALL BC(nativeTimelineIsoToDay)(JNIEnv* env, jobject, jstring iso) {
     const std::string s = to_utf8(env, iso);
-    return bodyclock_timeline_iso_to_day(s.c_str());
+    return yoai_timeline_iso_to_day(s.c_str());
 }
 
 JNIEXPORT jstring JNICALL BC(nativeTimelineLastError)(JNIEnv* env, jobject) {
-    return from_utf8(env, bodyclock_timeline_last_error());
+    return from_utf8(env, yoai_timeline_last_error());
 }
 
 //------------------------------------------------------------------------------
@@ -207,28 +207,28 @@ JNIEXPORT jstring JNICALL BC(nativeTimelineLastError)(JNIEnv* env, jobject) {
 //------------------------------------------------------------------------------
 
 JNIEXPORT jboolean JNICALL BC(nativeVoiceAvailable)(JNIEnv*, jobject) {
-    return bodyclock_voice_available() != 0 ? JNI_TRUE : JNI_FALSE;
+    return yoai_voice_available() != 0 ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jint JNICALL BC(nativeVoiceLoad)(JNIEnv* env, jobject, jstring model_path) {
     const std::string p = to_utf8(env, model_path);
-    return bodyclock_voice_load(p.c_str());
+    return yoai_voice_load(p.c_str());
 }
 
 JNIEXPORT jboolean JNICALL BC(nativeVoiceLoaded)(JNIEnv*, jobject) {
-    return bodyclock_voice_loaded() != 0 ? JNI_TRUE : JNI_FALSE;
+    return yoai_voice_loaded() != 0 ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL BC(nativeVoiceUnload)(JNIEnv*, jobject) {
-    bodyclock_voice_unload();
+    yoai_voice_unload();
 }
 
 JNIEXPORT jint JNICALL BC(nativeVoiceSetThreads)(JNIEnv*, jobject, jint threads) {
-    return bodyclock_voice_set_threads(threads);
+    return yoai_voice_set_threads(threads);
 }
 
 JNIEXPORT jint JNICALL BC(nativeVoiceSetItn)(JNIEnv*, jobject, jboolean on) {
-    return bodyclock_voice_set_itn(on == JNI_TRUE ? 1 : 0);
+    return yoai_voice_set_itn(on == JNI_TRUE ? 1 : 0);
 }
 
 // The samples are copied out of the JVM heap rather than pinned: analysis holds
@@ -242,7 +242,7 @@ JNIEXPORT jstring JNICALL BC(nativeVoiceAnalyze)(JNIEnv* env, jobject,
     if (n > 0) {
         env->GetShortArrayRegion(pcm, 0, n, buf.data());
     }
-    return from_utf8(env, bodyclock_voice_analyze(buf.data(), static_cast<int>(n), sample_rate));
+    return from_utf8(env, yoai_voice_analyze(buf.data(), static_cast<int>(n), sample_rate));
 }
 
 //------------------------------------------------------------------------------
@@ -250,67 +250,67 @@ JNIEXPORT jstring JNICALL BC(nativeVoiceAnalyze)(JNIEnv* env, jobject,
 //------------------------------------------------------------------------------
 
 JNIEXPORT jboolean JNICALL BC(nativeTtsAvailable)(JNIEnv*, jobject) {
-    return bodyclock_tts_available() != 0 ? JNI_TRUE : JNI_FALSE;
+    return yoai_tts_available() != 0 ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jint JNICALL BC(nativeTtsLoad)(JNIEnv* env, jobject,
                                          jstring talker_path, jstring codec_path) {
     const std::string t = to_utf8(env, talker_path);
     const std::string c = to_utf8(env, codec_path);
-    return bodyclock_tts_load(t.c_str(), c.c_str());
+    return yoai_tts_load(t.c_str(), c.c_str());
 }
 
 JNIEXPORT jboolean JNICALL BC(nativeTtsLoaded)(JNIEnv*, jobject) {
-    return bodyclock_tts_loaded() != 0 ? JNI_TRUE : JNI_FALSE;
+    return yoai_tts_loaded() != 0 ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL BC(nativeTtsUnload)(JNIEnv*, jobject) {
-    bodyclock_tts_unload();
+    yoai_tts_unload();
 }
 
 JNIEXPORT jstring JNICALL BC(nativeTtsModelType)(JNIEnv* env, jobject) {
-    return from_utf8(env, bodyclock_tts_model_type());
+    return from_utf8(env, yoai_tts_model_type());
 }
 
 JNIEXPORT jstring JNICALL BC(nativeTtsSpeakers)(JNIEnv* env, jobject) {
-    return from_utf8(env, bodyclock_tts_speakers());
+    return from_utf8(env, yoai_tts_speakers());
 }
 
 JNIEXPORT void JNICALL BC(nativeTtsSetSpeaker)(JNIEnv* env, jobject, jstring name) {
     const std::string s = to_utf8(env, name);
-    bodyclock_tts_set_speaker(or_null(s));
+    yoai_tts_set_speaker(or_null(s));
 }
 
 JNIEXPORT void JNICALL BC(nativeTtsSetVoice)(JNIEnv* env, jobject, jstring instruct) {
     const std::string s = to_utf8(env, instruct);
-    bodyclock_tts_set_voice(or_null(s));
+    yoai_tts_set_voice(or_null(s));
 }
 
 JNIEXPORT void JNICALL BC(nativeTtsSetSeed)(JNIEnv*, jobject, jlong seed) {
-    bodyclock_tts_set_seed(static_cast<long long>(seed));
+    yoai_tts_set_seed(static_cast<long long>(seed));
 }
 
 JNIEXPORT void JNICALL BC(nativeTtsSetTopK)(JNIEnv*, jobject, jint top_k) {
-    bodyclock_tts_set_top_k(top_k);
+    yoai_tts_set_top_k(top_k);
 }
 
 JNIEXPORT jint JNICALL BC(nativeTtsSetReference)(JNIEnv* env, jobject,
                                                  jstring wav_path, jstring transcript) {
     const std::string w = to_utf8(env, wav_path);
     const std::string t = to_utf8(env, transcript);
-    return bodyclock_tts_set_reference(or_null(w), or_null(t));
+    return yoai_tts_set_reference(or_null(w), or_null(t));
 }
 
 JNIEXPORT jfloat JNICALL BC(nativeTtsReferenceSeconds)(JNIEnv*, jobject) {
-    return bodyclock_tts_reference_seconds();
+    return yoai_tts_reference_seconds();
 }
 
 JNIEXPORT void JNICALL BC(nativeTtsSetStreaming)(JNIEnv*, jobject, jboolean on) {
-    bodyclock_tts_set_streaming(on == JNI_TRUE ? 1 : 0);
+    yoai_tts_set_streaming(on == JNI_TRUE ? 1 : 0);
 }
 
 JNIEXPORT void JNICALL BC(nativeTtsSetThreads)(JNIEnv*, jobject, jint threads) {
-    bodyclock_tts_set_threads(threads);
+    yoai_tts_set_threads(threads);
 }
 
 // `sink` may be null, which is the measurement case: the timings come back and
@@ -320,7 +320,7 @@ JNIEXPORT jstring JNICALL BC(nativeTtsSay)(JNIEnv* env, jobject, jstring text, j
     const std::string t = to_utf8(env, text);
 
     if (sink == nullptr) {
-        return from_utf8(env, bodyclock_tts_say(t.c_str(), nullptr, nullptr));
+        return from_utf8(env, yoai_tts_say(t.c_str(), nullptr, nullptr));
     }
 
     jclass cls = env->GetObjectClass(sink);
@@ -332,11 +332,11 @@ JNIEXPORT jstring JNICALL BC(nativeTtsSay)(JNIEnv* env, jobject, jstring text, j
     }
 
     CallbackCtx ctx{env, sink, m};
-    return from_utf8(env, bodyclock_tts_say(t.c_str(), audio_handler, &ctx));
+    return from_utf8(env, yoai_tts_say(t.c_str(), audio_handler, &ctx));
 }
 
 JNIEXPORT jstring JNICALL BC(nativeTtsLastError)(JNIEnv* env, jobject) {
-    return from_utf8(env, bodyclock_tts_last_error());
+    return from_utf8(env, yoai_tts_last_error());
 }
 
 //------------------------------------------------------------------------------
@@ -344,7 +344,7 @@ JNIEXPORT jstring JNICALL BC(nativeTtsLastError)(JNIEnv* env, jobject) {
 //------------------------------------------------------------------------------
 
 JNIEXPORT jboolean JNICALL BC(nativeLocalAvailable)(JNIEnv*, jobject) {
-    return bodyclock_local_available() != 0 ? JNI_TRUE : JNI_FALSE;
+    return yoai_local_available() != 0 ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jint JNICALL BC(nativeLocalSet)(JNIEnv* env, jobject, jstring id,
@@ -352,18 +352,18 @@ JNIEXPORT jint JNICALL BC(nativeLocalSet)(JNIEnv* env, jobject, jstring id,
     const std::string i = to_utf8(env, id);
     const std::string p = to_utf8(env, model_path);
     const std::string o = to_utf8(env, options_json);
-    return bodyclock_local_set(i.c_str(), p.c_str(), or_null(o));
+    return yoai_local_set(i.c_str(), p.c_str(), or_null(o));
 }
 
 JNIEXPORT jint JNICALL BC(nativeLocalLoad)(JNIEnv* env, jobject, jstring id) {
     const std::string i = to_utf8(env, id);
-    return bodyclock_local_load(i.c_str());
+    return yoai_local_load(i.c_str());
 }
 
 JNIEXPORT jint JNICALL BC(nativeLocalSetThreads)(JNIEnv* env, jobject,
                                                  jstring id, jint threads) {
     const std::string i = to_utf8(env, id);
-    return bodyclock_local_set_threads(i.c_str(), threads);
+    return yoai_local_set_threads(i.c_str(), threads);
 }
 
 JNIEXPORT jint JNICALL BC(nativeChat)(JNIEnv* env, jobject, jstring provider_id,
@@ -383,7 +383,7 @@ JNIEXPORT jint JNICALL BC(nativeChat)(JNIEnv* env, jobject, jstring provider_id,
     if (method == nullptr) { return 1; }
 
     CallbackCtx ctx{env, sink, method};
-    return bodyclock_chat(p.c_str(), m.c_str(), or_null(s), or_null(g), chat_handler, &ctx);
+    return yoai_chat(p.c_str(), m.c_str(), or_null(s), or_null(g), chat_handler, &ctx);
 }
 
 }  // extern "C"

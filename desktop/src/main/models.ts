@@ -117,7 +117,7 @@ export function setActiveId(id: string): void {
  * key from the key store; for an on-device one, handing over the file path.
  *
  * Returns false when the model cannot run -- no key for its vendor, or no file.
- * The core is then left WITHOUT the entry, deliberately: bodyclock_providers()
+ * The core is then left WITHOUT the entry, deliberately: yoai_providers()
  * is the picker's source of truth, so an entry that cannot run must not appear
  * in it.
  */
@@ -127,7 +127,7 @@ export function register(cfg: ModelConfig): boolean {
     if (path === undefined || path.length === 0) {
       return false
     }
-    // '' for the options: the core's defaults are documented in src/bodyclock.h
+    // '' for the options: the core's defaults are documented in src/yoai.h
     // and were tuned on a phone. They are a reasonable desktop starting point
     // and there is no settings screen for them yet; when there is, it goes here.
     const rc = core().nativeLocalSet(cfg.id, path, '')
@@ -209,7 +209,7 @@ export function syncToCore(): number {
  * happening. The first turn pays for the weights otherwise, which is the one
  * moment the user is already waiting.
  *
- * Safe to run behind the window: bodyclock_local_load takes no lock the rest of
+ * Safe to run behind the window: yoai_local_load takes no lock the rest of
  * the ABI needs -- unlike the TTS one -- and the addon runs it on a worker
  * thread. Nothing waits on the result; it is logged and dropped.
  */

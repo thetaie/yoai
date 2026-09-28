@@ -22,7 +22,7 @@ entry" control anywhere on the screen. Ending is the separate gesture and leaves
 a gap on purpose; nothing fills one in later.
 
 None of those rules is implemented here. They are in the core, behind the
-`bodyclock_timeline_*` half of [src/bodyclock.h](../src/bodyclock.h), and
+`yoai_timeline_*` half of [src/yoai.h](../src/yoai.h), and
 `day/Timeline.kt` is a JSON reader over it with no opinions of its own. The list
 on the home screen is a **rolling 24-hour window**, deliberately not "today" —
 see design/README.md for why the two are not interchangeable.

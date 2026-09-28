@@ -42,7 +42,7 @@ import { ICON_TOOLBAR, icon } from '../core/Icons';
 import { DEFAULT_FAMILY, Palette, resolvePalette } from '../core/Palettes';
 import { VOICE_SAMPLE_RATE, VoiceRecorder } from '../core/VoiceRecorder';
 
-/** What bodyclock_omni_ask returns (src/bodyclock.h). */
+/** What yoai_omni_ask returns (src/yoai.h). */
 interface OmniJson {
   text: string;
   audioSeconds: number;

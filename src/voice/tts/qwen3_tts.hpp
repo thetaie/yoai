@@ -42,7 +42,7 @@
 // here should be written as though the next lever will cross 1x.
 // design/voice.md has all of it.
 //
-// Stubs out without BODYCLOCK_QTTS, exactly like omni: available() is false,
+// Stubs out without YOAI_QTTS, exactly like omni: available() is false,
 // load() fails with a message, and the app still builds and links.
 
 #pragma once
@@ -361,7 +361,7 @@ public:
     //
     // temperature 0 is argmax on that stack. top_k <= 0 and top_p >= 1 disable
     // the respective cutoff. set_top_k() above is the talker's alone and is
-    // kept because bodyclock_tts_set_top_k is part of the C ABI.
+    // kept because yoai_tts_set_top_k is part of the C ABI.
     void set_sampling(const QttsSampling& sampling);
     const QttsSampling& sampling() const;
 

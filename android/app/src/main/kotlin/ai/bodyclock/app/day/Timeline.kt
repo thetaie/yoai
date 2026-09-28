@@ -8,7 +8,7 @@ import org.json.JSONObject
 /**
  * The day log, as Kotlin sees it.
  *
- * A thin reader over the C ABI in `src/bodyclock.h`: it parses the JSON and
+ * A thin reader over the C ABI in `src/yoai.h`: it parses the JSON and
  * nothing else. **No rule about what a day is lives here** -- not "a switch
  * closes the open entry", not "a gap is the absence of a row", not how a local
  * day is numbered. All of that is in `src/store/timeline.hpp`, once, because it

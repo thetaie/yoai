@@ -65,7 +65,7 @@ bool seed_entry(const std::string& dir, const char* state,
                 long long started_at, int started_tz,
                 long long ended_at, int ended_tz) {
     sqlite3* db = 0;
-    if (sqlite3_open((dir + "/bodyclock.db").c_str(), &db) != SQLITE_OK) {
+    if (sqlite3_open((dir + "/yoai.db").c_str(), &db) != SQLITE_OK) {
         std::printf("FAIL  fixture: cannot open the database\n");
         ++g_failures;
         sqlite3_close(db);

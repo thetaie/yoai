@@ -94,7 +94,7 @@ struct Index {
     const stored: string = await ModelStore.activeId(this.ctx());
 
     // Only offer what the core will actually run: an entry with no key behind
-    // it is absent from bodyclock_providers(), and picking it could only fail.
+    // it is absent from yoai_providers(), and picking it could only fail.
     const runnable: string = bodyclock.nativeProviders();
     const ready: Set<string> = new Set<string>(runnable.length === 0 ? [] : runnable.split('\n'));
 

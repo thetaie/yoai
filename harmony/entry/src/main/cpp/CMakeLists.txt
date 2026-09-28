@@ -15,31 +15,31 @@ set(NATIVERENDER_ROOT_PATH ${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${NATIVERENDER_ROOT_PATH})
 
 # entry/src/main/cpp -> main -> src -> entry -> harmony -> repo root
-get_filename_component(BODYCLOCK_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../.." ABSOLUTE)
+get_filename_component(YOAI_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../.." ABSOLUTE)
 # harmony/prebuilt/ is the one home for prebuilt native artifacts, from the two
 # halves of harmony/build: <abi>/ for the core's vcpkg dependencies (`deps`) and
 # llama-sdk/<abi>/ for the on-device engine (`llama`, resolved further down).
 # Named once here so the shared parent is visible in the code rather than implied
 # by two similar strings.
-set(BODYCLOCK_PREBUILT_ROOT "${BODYCLOCK_REPO_ROOT}/harmony/prebuilt")
-set(BODYCLOCK_PREBUILT      "${BODYCLOCK_PREBUILT_ROOT}/${OHOS_ARCH}")
+set(YOAI_PREBUILT_ROOT "${YOAI_REPO_ROOT}/harmony/prebuilt")
+set(YOAI_PREBUILT      "${YOAI_PREBUILT_ROOT}/${OHOS_ARCH}")
 
-if(NOT EXISTS "${BODYCLOCK_PREBUILT}/lib")
+if(NOT EXISTS "${YOAI_PREBUILT}/lib")
     message(FATAL_ERROR
-        "No prebuilt dependencies for ${OHOS_ARCH} at ${BODYCLOCK_PREBUILT}.\n"
+        "No prebuilt dependencies for ${OHOS_ARCH} at ${YOAI_PREBUILT}.\n"
         "Run harmony/build.cmd ${OHOS_ARCH} (or ./build.sh ${OHOS_ARCH}) first.")
 endif()
 
 # find_package() inside the core resolves against the prebuilt tree.
 # FIND_ROOT_PATH matters because the OHOS toolchain sets
 # CMAKE_FIND_ROOT_PATH_MODE_* to ONLY, so a plain PREFIX_PATH is not consulted.
-list(PREPEND CMAKE_PREFIX_PATH    "${BODYCLOCK_PREBUILT}")
-list(PREPEND CMAKE_FIND_ROOT_PATH "${BODYCLOCK_PREBUILT}")
+list(PREPEND CMAKE_PREFIX_PATH    "${YOAI_PREBUILT}")
+list(PREPEND CMAKE_FIND_ROOT_PATH "${YOAI_PREBUILT}")
 
 # Cached + FORCE: the root CMakeLists declares this as an option(), so a plain
 # set() would lose to the cache on the second configure. No CLI harness on a
 # device -- a HAP has nowhere to put a companion executable.
-set(BODYCLOCK_BUILD_CLI OFF CACHE BOOL "" FORCE)
+set(YOAI_BUILD_CLI OFF CACHE BOOL "" FORCE)
 
 # On-device LLM: llama.cpp cross-compiled for this ABI, linked STATICALLY into
 # libbodyclock.so. A HAP has nowhere to put a loose companion .so, and the device will
@@ -61,7 +61,7 @@ set(BODYCLOCK_BUILD_CLI OFF CACHE BOOL "" FORCE)
 # fail loudly in the root CMakeLists, which checks the archives and the API level
 # too, not be silently ignored here.
 if(NOT DEFINED LLAMA_CPP_DIR)
-    set(_llama_sdk "${BODYCLOCK_PREBUILT_ROOT}/llama-sdk/${OHOS_ARCH}")
+    set(_llama_sdk "${YOAI_PREBUILT_ROOT}/llama-sdk/${OHOS_ARCH}")
     # Re-configure when the SDK appears or goes away. Without this the probe runs
     # only on a configure that something ELSE triggered, so deleting the SDK
     # leaves a generated build.ninja still naming libllama.a as a link input and
@@ -70,28 +70,28 @@ if(NOT DEFINED LLAMA_CPP_DIR)
     # file covers a built SDK being removed, the parent directory covers one
     # appearing where there was none.
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-                 "${BODYCLOCK_PREBUILT_ROOT}/llama-sdk"
+                 "${YOAI_PREBUILT_ROOT}/llama-sdk"
                  "${_llama_sdk}/include/llama.h")
     if(EXISTS "${_llama_sdk}/include/llama.h")
         set(LLAMA_CPP_DIR "${_llama_sdk}")
     endif()
 endif()
 if(DEFINED LLAMA_CPP_DIR)
-    set(BODYCLOCK_ONDEVICE_LLM ON CACHE BOOL "" FORCE)
+    set(YOAI_ONDEVICE_LLM ON CACHE BOOL "" FORCE)
     # Speech recognition rides on the SAME SDK and costs much less: it links the
     # ggml archives and never touches libllama, so anything that can build the
     # on-device LLM can build this for free. There is no separate switch on the
     # app side for the same reason there is none for the LLM -- the SDK's
     # presence is the switch.
-    set(BODYCLOCK_ASR ON CACHE BOOL "" FORCE)
+    set(YOAI_ASR ON CACHE BOOL "" FORCE)
     message(STATUS "bodyclock_napi: on-device LLM and recognition from ${LLAMA_CPP_DIR}")
 else()
     # FORCEd OFF, not merely left alone: now that the SDK's presence is the
     # switch, deleting it must actually turn the lane off. Without this a cached
     # ON from an earlier configure survives and the root CMakeLists fails
     # demanding LLAMA_CPP_DIR.
-    set(BODYCLOCK_ONDEVICE_LLM OFF CACHE BOOL "" FORCE)
-    set(BODYCLOCK_ASR OFF CACHE BOOL "" FORCE)
+    set(YOAI_ONDEVICE_LLM OFF CACHE BOOL "" FORCE)
+    set(YOAI_ASR OFF CACHE BOOL "" FORCE)
 endif()
 
 # The omni lane, and it is opt-in twice over: the SDK has to exist AND the
@@ -105,16 +105,16 @@ endif()
 # putting omni.cpp back in the root CMakeLists as well as uncommenting this.
 #
 # if(NOT DEFINED MNN_DIR)
-#     set(_mnn_sdk "${BODYCLOCK_PREBUILT_ROOT}/mnn-sdk/${OHOS_ARCH}")
+#     set(_mnn_sdk "${YOAI_PREBUILT_ROOT}/mnn-sdk/${OHOS_ARCH}")
 #     if(EXISTS "${_mnn_sdk}/include/llm/llm.hpp")
 #         set(MNN_DIR "${_mnn_sdk}")
 #     endif()
 # endif()
 # if(DEFINED MNN_DIR)
-#     set(BODYCLOCK_MNN ON CACHE BOOL "" FORCE)
+#     set(YOAI_MNN ON CACHE BOOL "" FORCE)
 #     message(STATUS "bodyclock_napi: omni speech output from ${MNN_DIR}")
 # else()
-set(BODYCLOCK_MNN OFF CACHE BOOL "" FORCE)
+set(YOAI_MNN OFF CACHE BOOL "" FORCE)
 # endif()
 
 # Speech output, the third engine, discovered exactly like llama: the SDK's
@@ -123,24 +123,24 @@ set(BODYCLOCK_MNN OFF CACHE BOOL "" FORCE)
 # It also decides WHICH ggml the library links, because it ships one of its own
 # and the root CMakeLists refuses to link two. That is settled there, not here.
 if(NOT DEFINED QTTS_DIR)
-    set(_qtts_sdk "${BODYCLOCK_PREBUILT_ROOT}/qtts-sdk/${OHOS_ARCH}")
+    set(_qtts_sdk "${YOAI_PREBUILT_ROOT}/qtts-sdk/${OHOS_ARCH}")
     # Same reason as the llama probe: without this, deleting the SDK leaves a
     # build.ninja still naming libqwen-core.a as a link input.
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-                 "${BODYCLOCK_PREBUILT_ROOT}/qtts-sdk"
+                 "${YOAI_PREBUILT_ROOT}/qtts-sdk"
                  "${_qtts_sdk}/include/qwen.h")
     if(EXISTS "${_qtts_sdk}/include/qwen.h")
         set(QTTS_DIR "${_qtts_sdk}")
     endif()
 endif()
 if(DEFINED QTTS_DIR)
-    set(BODYCLOCK_QTTS ON CACHE BOOL "" FORCE)
+    set(YOAI_QTTS ON CACHE BOOL "" FORCE)
     message(STATUS "bodyclock_napi: speech output from ${QTTS_DIR}")
 else()
-    set(BODYCLOCK_QTTS OFF CACHE BOOL "" FORCE)
+    set(YOAI_QTTS OFF CACHE BOOL "" FORCE)
 endif()
 
-add_subdirectory("${BODYCLOCK_REPO_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/bodyclock-core")
+add_subdirectory("${YOAI_REPO_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/bodyclock-core")
 
 # The target is bodyclock_napi but the artifact must be libbodyclock.so: it has to match
 # nm_modname in napi_init.cpp and the `import ... from 'libbodyclock.so'` on the
@@ -149,7 +149,7 @@ add_subdirectory("${BODYCLOCK_REPO_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/bodyclock
 add_library(bodyclock_napi SHARED napi_init.cpp)
 set_target_properties(bodyclock_napi PROPERTIES OUTPUT_NAME bodyclock)
 
-target_include_directories(bodyclock_napi PRIVATE "${BODYCLOCK_REPO_ROOT}/src")
+target_include_directories(bodyclock_napi PRIVATE "${YOAI_REPO_ROOT}/src")
 
 # libace_napi: the N-API implementation. libhilog_ndk: native logging, so the
 # worker thread's output lands in DevEco's Log window beside the ArkTS logs.

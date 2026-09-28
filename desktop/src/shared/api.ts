@@ -7,7 +7,7 @@
  * the point -- a bridge that grew by `ipcRenderer.invoke(anything)` would be a
  * bridge with no surface to review.
  *
- * Read alongside src/bodyclock.h: `chat` and `models` are that header's
+ * Read alongside src/yoai.h: `chat` and `models` are that header's
  * vocabulary with the blocking parts moved off the drawing thread, and nothing
  * in between reinterprets an event.
  */
@@ -110,7 +110,7 @@ export interface TtsStatus {
   tokenizerPath: string
   /**
    * The voice, described in English. On a voice_design checkpoint this is not a
-   * preference: bodyclock.h REQUIRES an instruct there, and say() fails without
+   * preference: yoai.h REQUIRES an instruct there, and say() fails without
    * one. Optional on custom_voice, refused by base.
    */
   voice: string
@@ -147,8 +147,8 @@ export interface TtsStatus {
  *
  * `pcm` is **mono float samples at 24 kHz** -- the rate is not carried in the
  * samples, so it is stated here and in native/src/binding.cpp and nowhere else.
- * `stats` is the JSON bodyclock_tts_say returns: speechSeconds, realtime,
- * firstAudioSeconds, chunks, peakDbfs and the rest, documented in bodyclock.h.
+ * `stats` is the JSON yoai_tts_say returns: speechSeconds, realtime,
+ * firstAudioSeconds, chunks, peakDbfs and the rest, documented in yoai.h.
  */
 export interface TtsEvent {
   type: 'audio' | 'end' | 'error'
@@ -195,7 +195,7 @@ export interface OmniEvent {
    * which point the speech reading those words had finished playing.
    */
   text?: string
-  /** On 'end': the reply text and the timings, as JSON. See bodyclock.h. */
+  /** On 'end': the reply text and the timings, as JSON. See yoai.h. */
   stats?: string
   error?: string
 }
@@ -225,7 +225,7 @@ export interface ReaderEvent {
   pcm?: Float32Array
   /** On 'audio': which piece these samples belong to, so seams can be logged. */
   sentence?: number
-  /** On 'end': the timings, as JSON. See bodyclock.h. */
+  /** On 'end': the timings, as JSON. See yoai.h. */
   stats?: string
   error?: string
 }
@@ -289,7 +289,7 @@ export interface BodyclockApi {
      *
      * A turn replays the whole transcript, so this is not what makes the next
      * prompt correct -- it is what stops the last conversation being in the
-     * cache underneath it. See src/bodyclock.h on bodyclock_local_forget.
+     * cache underneath it. See src/yoai.h on yoai_local_forget.
      */
     forget(): Promise<number>
     /** Subscribe to every turn's events. Returns the unsubscribe function. */

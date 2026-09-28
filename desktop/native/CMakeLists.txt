@@ -12,7 +12,7 @@ project(bodyclock_addon CXX)
 # Driven by cmake-js, which supplies CMAKE_JS_INC (the Node headers), CMAKE_JS_SRC
 # (the Windows delay-load hook) and CMAKE_JS_LIB, and passes everything else
 # through from ../build.{cmd,sh}: the vcpkg toolchain that resolves curl and
-# OpenSSL, and the on-device lane's -DBODYCLOCK_ONDEVICE_LLM / -DLLAMA_CPP_DIR.
+# OpenSSL, and the on-device lane's -DYOAI_ONDEVICE_LLM / -DLLAMA_CPP_DIR.
 
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -28,11 +28,11 @@ add_definitions(-DNAPI_VERSION=8)
 # The core
 #-------------------------------------------------------------------------------
 #
-# The root build defaults BODYCLOCK_BUILD_CLI to ON off-device, which would build
+# The root build defaults YOAI_BUILD_CLI to ON off-device, which would build
 # the CLI harness and four test executables every time the addon is rebuilt.
 # Nothing here runs them, so they are turned off before the subdirectory is read
 # -- FORCE because they are cached options and a stale ON would survive.
-set(BODYCLOCK_BUILD_CLI OFF CACHE BOOL "" FORCE)
+set(YOAI_BUILD_CLI OFF CACHE BOOL "" FORCE)
 
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../.." "${CMAKE_CURRENT_BINARY_DIR}/bodyclock-core")
 

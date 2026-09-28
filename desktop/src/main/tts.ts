@@ -17,7 +17,7 @@
  *
  * `tokenizer` and not `codec` for the FILE: it is named qwen-tokenizer-12hz-*
  * on disk, qwentts prints `tokenizer=qwen3_tts_tokenizer_12hz` when it loads,
- * and bodyclock.h's own prose calls it the 12 Hz audio tokenizer even though
+ * and yoai.h's own prose calls it the 12 Hz audio tokenizer even though
  * its parameter kept the older name.
  *
  * Nothing here holds audio. PCM crosses to the renderer as it arrives and the
@@ -43,7 +43,7 @@ interface Stored {
 
 /**
  * The voice, described in English, because on this checkpoint that IS the
- * voice: bodyclock.h says an instruct is REQUIRED by voice_design, optional on
+ * voice: yoai.h says an instruct is REQUIRED by voice_design, optional on
  * custom_voice and refused by base. Without one, say() fails -- which is not
  * obvious from the outside, because loading succeeds and the failure only
  * arrives on the first utterance.
@@ -138,7 +138,7 @@ export function available(): boolean {
 /**
  * The last status handed out, and whether an utterance is in flight.
  *
- * bodyclock_tts_say holds the core's TTS mutex for the WHOLE synthesis, and
+ * yoai_tts_say holds the core's TTS mutex for the WHOLE synthesis, and
  * every status entry point -- loaded, model_type, speakers, last_error --
  * takes that same mutex. So asking "is it loaded?" while it is speaking blocks
  * the MAIN PROCESS'S JS THREAD for seconds, and the audio chunks the engine is
@@ -188,7 +188,7 @@ export function status(): TtsStatus {
     voice: s.voice,
     autoSpeak: s.autoSpeak,
     speaker: s.speaker,
-    // Read from the loaded model, not from a list kept here: bodyclock.h says
+    // Read from the loaded model, not from a list kept here: yoai.h says
     // "nine named speakers" was taken from a model card once and never checked,
     // and a list that came out of the file cannot be stale.
     speakers: speakerNames(),
@@ -243,7 +243,7 @@ export function load(): Promise<string> {
   }
 
   // Primed before the lock is taken, so the copy served while loading is the
-  // current one. bodyclock_tts_load holds the same mutex a say does, and a
+  // current one. yoai_tts_load holds the same mutex a say does, and a
   // status call landing on it would block the main process for the whole read.
   status()
   busy = true

@@ -2,7 +2,7 @@
 
 The fourth host on the same core, after `harmony/`, `android/` and `cli/`. It
 links `bodyclock_core` through a Node-API addon and reaches it with the same C
-ABI everything else uses — `src/bodyclock.h` is the contract here too, and
+ABI everything else uses — `src/yoai.h` is the contract here too, and
 nothing in this directory reimplements a line of it.
 
 ## One directory, not two
@@ -90,7 +90,7 @@ build.cmd clean llama            # Windows
 `clean` is not optional when changing the lane set — CMake caches it, so adding
 `llama` to a tree configured without it silently builds the same addon again.
 
-The settings screen asks `bodyclock_local_available()` before offering the
+The settings screen asks `yoai_local_available()` before offering the
 file picker, so a build without the lane says so rather than failing later. The
 `.gguf` is referenced where it sits: never copied, and removing the model never
 deletes the file. A file that has moved by the next launch is dropped from the

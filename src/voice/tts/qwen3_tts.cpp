@@ -5,7 +5,7 @@
 #include <chrono>
 #include <string>
 
-#ifdef BODYCLOCK_QTTS
+#ifdef YOAI_QTTS
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -13,7 +13,7 @@
 #include <vector>
 #include <qwen.h>
 
-#ifdef BODYCLOCK_QTTS_VULKAN_PROBE
+#ifdef YOAI_QTTS_VULKAN_PROBE
 #    include <vulkan/vulkan.h>
 #endif
 #endif
@@ -28,7 +28,7 @@ int Qtts::sample_rate() {
     return 24000;
 }
 
-#ifdef BODYCLOCK_QTTS
+#ifdef YOAI_QTTS
 
 namespace {
 
@@ -210,8 +210,8 @@ bool read_reference_wav(const std::string& path, std::vector<float>* out, std::s
     }
 }
 
-#ifdef BODYCLOCK_QTTS_VULKAN
-#ifdef BODYCLOCK_QTTS_VULKAN_PROBE
+#ifdef YOAI_QTTS_VULKAN
+#ifdef YOAI_QTTS_VULKAN_PROBE
 // What kind of memory does this machine's GPU have?
 //
 // THREE answers and not two, because "the probe failed" and "the GPU shares
@@ -370,7 +370,7 @@ void apply_vulkan_env() {
     // first load of a process was enough: ggml reads the environment when it
     // CREATES a device, so the correct answers from every later load arrived
     // after the device they would have changed.
-#if defined(BODYCLOCK_QTTS_VULKAN_PROBE)
+#if defined(YOAI_QTTS_VULKAN_PROBE)
     const GpuMemory mem = vulkan_gpu_memory();
 #else
     const GpuMemory mem = GpuMemory::Unknown;
@@ -596,7 +596,7 @@ bool Qtts::load(const std::string& talker_path, const std::string& codec_path) {
     // logs the count it settled on -- "[Load] ... (CPU threads: N)" -- which is
     // what says whether the patch is in this build at all.
     apply_thread_env(m->threads);
-#ifdef BODYCLOCK_QTTS_VULKAN
+#ifdef YOAI_QTTS_VULKAN
     apply_vulkan_env();
 #endif
 
@@ -979,7 +979,7 @@ bool Qtts::say(const std::string& text, QttsAudioSink sink, void* user_data, Qtt
     return true;
 }
 
-#else   // !BODYCLOCK_QTTS
+#else   // !YOAI_QTTS
 
 // The supported off state, not a degraded one. Everything links and answers
 // truthfully, so a build without the SDK is a build without a described voice
@@ -1002,7 +1002,7 @@ Qtts::~Qtts() { delete impl_; }
 bool Qtts::loaded() const { return false; }
 
 bool Qtts::load(const std::string&, const std::string&) {
-    impl_->error = "this build has no qwentts.cpp (BODYCLOCK_QTTS off)";
+    impl_->error = "this build has no qwentts.cpp (YOAI_QTTS off)";
     platform::log_error("qtts: %s", impl_->error.c_str());
     return false;
 }
@@ -1022,12 +1022,12 @@ void Qtts::set_speaker(const std::string& name) { impl_->speaker = name; }
 const std::string& Qtts::speaker() const { return impl_->speaker; }
 
 bool Qtts::set_reference(const std::string&, const std::string&) {
-    impl_->error = "this build has no qwentts.cpp (BODYCLOCK_QTTS off)";
+    impl_->error = "this build has no qwentts.cpp (YOAI_QTTS off)";
     return false;
 }
 
 bool Qtts::set_reference_voice(const std::string&) {
-    impl_->error = "this build has no qwentts.cpp (BODYCLOCK_QTTS off)";
+    impl_->error = "this build has no qwentts.cpp (YOAI_QTTS off)";
     return false;
 }
 
@@ -1059,11 +1059,11 @@ bool Qtts::say(const std::string&, QttsAudioSink, void*, QttsResult* out) {
     if (out) {
         *out = QttsResult();
     }
-    impl_->error = "this build has no qwentts.cpp (BODYCLOCK_QTTS off)";
+    impl_->error = "this build has no qwentts.cpp (YOAI_QTTS off)";
     return false;
 }
 
-#endif  // BODYCLOCK_QTTS
+#endif  // YOAI_QTTS
 
 }  // namespace voice
 }  // namespace yoai

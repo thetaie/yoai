@@ -131,7 +131,7 @@ public:
     // MNN runs `steps - 1` DiT forwards per chunk, so 5 is four and 2 is one.
     // It is the only lever on this lane's 3.7x that does not need a different
     // model -- and it trades exactly what the lane is for, because a coarser
-    // sampler is a less natural voice. See the note in src/bodyclock.h.
+    // sampler is a less natural voice. See the note in src/yoai.h.
     bool set_dit_steps(int steps);
 
     // Ask about one recording.

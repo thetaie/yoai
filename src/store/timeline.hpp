@@ -8,7 +8,7 @@
 // here once instead of being reimplemented per host.
 //
 // It owns three tables -- states, entries, notes -- but NOT the file they are
-// in. bodyclock.db is the app's one database, and what comes next goes in it
+// in. yoai.db is the app's one database, and what comes next goes in it
 // too: embeddings carry a foreign key into entries, and so will photos, tags
 // and the rest. They are unprefixed because the file is the namespace and the
 // names are already distinct; a module prefix would claim `entries` for this
@@ -133,7 +133,7 @@ struct Now {
 // `err` with something a log line can carry.
 class Timeline {
 public:
-    // Opens (creating if needed) `dir`/bodyclock.db and brings the schema up to
+    // Opens (creating if needed) `dir`/yoai.db and brings the schema up to
     // date. `dir` must already exist -- it is the host's sandbox directory, and
     // creating it is the host's business.
     //

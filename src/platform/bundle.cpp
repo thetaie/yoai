@@ -10,16 +10,16 @@
 #if defined(_WIN32)
 #include <direct.h>
 #include <io.h>
-#define BODYCLOCK_MKDIR(p) _mkdir(p)
-#define BODYCLOCK_UNLINK(p) _unlink(p)
-#define BODYCLOCK_RMDIR(p) _rmdir(p)
+#define YOAI_MKDIR(p) _mkdir(p)
+#define YOAI_UNLINK(p) _unlink(p)
+#define YOAI_RMDIR(p) _rmdir(p)
 #else
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-#define BODYCLOCK_MKDIR(p) mkdir(p, 0700)
-#define BODYCLOCK_UNLINK(p) unlink(p)
-#define BODYCLOCK_RMDIR(p) rmdir(p)
+#define YOAI_MKDIR(p) mkdir(p, 0700)
+#define YOAI_UNLINK(p) unlink(p)
+#define YOAI_RMDIR(p) rmdir(p)
 #endif
 
 namespace yoai {
@@ -86,7 +86,7 @@ bool name_is_safe(const std::string& name) {
 }
 
 bool make_dir(const std::string& path) {
-    if (BODYCLOCK_MKDIR(path.c_str()) == 0) {
+    if (YOAI_MKDIR(path.c_str()) == 0) {
         return true;
     }
     // Already there is success: extraction runs over a tree it may have made
@@ -167,9 +167,9 @@ bool read_table(std::FILE* f, std::vector<BundleEntry>* out, unsigned long long*
 void remove_written(const std::string& dest_dir, const std::vector<BundleEntry>& entries,
                     size_t upto) {
     for (size_t i = 0; i < upto && i < entries.size(); ++i) {
-        BODYCLOCK_UNLINK((dest_dir + "/" + entries[i].name).c_str());
+        YOAI_UNLINK((dest_dir + "/" + entries[i].name).c_str());
     }
-    BODYCLOCK_RMDIR(dest_dir.c_str());
+    YOAI_RMDIR(dest_dir.c_str());
 }
 
 }  // namespace

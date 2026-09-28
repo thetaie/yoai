@@ -481,7 +481,7 @@ necessarily shows the model its own scale — "-1 very unpleasant, 0 neutral" �
 the penalty lands on the handful of tokens the grammar allows as the answer.
 
 Both are now automatic: a non-empty grammar makes the turn deterministic in
-`llm/local.cpp`, documented at `bodyclock_chat`. The generalisation is worth
+`llm/local.cpp`, documented at `yoai_chat`. The generalisation is worth
 keeping — **a reply that is a value, not prose, must not be sampled like
 prose.**
 
@@ -1170,7 +1170,7 @@ are not the analysis boundaries; see the segmentation section.
 ### It is built, and it matches the reference
 
 `src/voice/` now carries the port: `fbank.*` for the front end and `sensevoice.*`
-for the encoder, behind `-DBODYCLOCK_ASR=ON`, linking the ggml archives and not
+for the encoder, behind `-DYOAI_ASR=ON`, linking the ggml archives and not
 libllama. `build.cmd asr` (or `./build.sh asr`) assembles a desktop ggml SDK and
 turns the lane on; `yoai-sensevoice-test` exercises it.
 
@@ -1210,7 +1210,7 @@ durations had been computed as though they were 16 kHz, and every one came out
 
 ### On the device: one call, and a page to read it with
 
-The C ABI is `bodyclock_voice_*`, and `bodyclock_voice_analyze` returns **one JSON
+The C ABI is `yoai_voice_*`, and `yoai_voice_analyze` returns **one JSON
 object carrying both halves** — transcript, the four tags, per-token times, and
 the prosody profile with each utterance's measurements and its deviations.
 
@@ -1258,7 +1258,7 @@ a speed on its own. Tools print the reciprocal too: `llama-tts` reports "audio
 time = 3.82x process time", which is RTF 0.26. Where a raw tool figure is quoted
 it is marked as one.
 
-**Encoder speed, measured**, swept with `bodyclock_voice_set_threads` without
+**Encoder speed, measured**, swept with `yoai_voice_set_threads` without
 reloading the weights:
 
 | threads | 1 | 2 | 4 | 6 | 8 |
@@ -1889,7 +1889,7 @@ away did not.
 
 **Measured** on the device through the `/asr` bench, Qwen3.5-2B `Q4_K_M`
 (1.28 GB) in llama.cpp, two runs per setting, the model resident throughout —
-`bodyclock_local_set_threads` changes the count without dropping the weights,
+`yoai_local_set_threads` changes the count without dropping the weights,
 so no run pays for a cold page cache:
 
 | threads | 1 | 2 | 4 | 6 | 8 |
@@ -1943,7 +1943,7 @@ out of cores worth using.
 
 #### Measured without a model: the chip does at least 24.4 GB/s
 
-`bodyclock_memory_bandwidth` reads a 256 MiB buffer with no engine involved —
+`yoai_memory_bandwidth` reads a 256 MiB buffer with no engine involved —
 threads claiming 4 MiB chunks from a shared counter, four accumulators to keep
 loads in flight, the buffer written before the clock starts. Swept the same way
 as the decode bench, on the same device:
@@ -2175,7 +2175,7 @@ below 1, not instead of getting it there.
 #### The diffusion steps were the one free lever, and they are worth 0.9 RTF
 
 `dit_steps` is a plain config value MNN reads at generation time, so
-`bodyclock_omni_set_dit_steps` changes it without dropping the weights. MNN runs
+`yoai_omni_set_dit_steps` changes it without dropping the weights. MNN runs
 `steps - 1` DiT forwards per chunk. **Measured on the phone:**
 
 | `dit_steps` | DiT forwards | RTF | by ear |
@@ -2204,7 +2204,7 @@ The "~1.4 RTF for predit and BigVGAN" above is a subtraction, not a reading. It
 can now be read, because MNN keeps the numbers and simply does not expose them:
 the Talker is a separate `Llm` with a separate `LlmContext`, so none of its work
 appears in the engine's own counters. `third/patches/mnn-talker-context.patch`
-adds one virtual, `getTalkerContext()`, and `bodyclock_omni_ask` reports the
+adds one virtual, `getTalkerContext()`, and `yoai_omni_ask` reports the
 three fields it carries. **Desktop, `dit_steps` 5, 2.30 s of speech:**
 
 | | seconds | as a ratio to the speech |
@@ -2316,7 +2316,7 @@ own.
 s and the exchange ends at 6.5 s — on a longer reply, 3.8 s against 70.3 s — and
 until this session the reply text appeared only when the whole call returned, so
 the page showed the answer after the speech reading it had finished playing.
-`bodyclock_omni_ask` now takes a text handler and fires it the moment the
+`yoai_omni_ask` now takes a text handler and fires it the moment the
 thinker stops.
 
 **What was NOT established**, so it is not quietly assumed later: whether MNN's
@@ -2612,7 +2612,7 @@ see "The GPU runs, and the platform kills it" below.
 qwentts.cpp cross-compiles for HarmonyOS and the lane is wired end to end —
 [harmony/build.cmd](../harmony/build.cmd) `qtts` assembling
 `harmony/prebuilt/qtts-sdk/<abi>/`, `src/voice/qtts.*` behind a
-`bodyclock_tts_*` C ABI, NAPI bindings, and `/tts` to drive it.
+`yoai_tts_*` C ABI, NAPI bindings, and `/tts` to drive it.
 
 **The device has two speeds and every subsection but the last measured only the
 first.** It holds one rate for the first twenty to thirty seconds of continuous
@@ -2673,7 +2673,7 @@ left context per chunk. That is a real mechanism, the codec was the outlier, and
 two phone runs seemed to show it: 8 chunks gave 76.1 ms/frame against 13 chunks'
 79.4, and a per-frame rate should not rise with length.
 
-`bodyclock_tts_set_streaming` was added to settle it, with a pinned seed so both
+`yoai_tts_set_streaming` was added to settle it, with a pinned seed so both
 modes generate the identical 41 frames. Seven runs, four threads, alternating,
 over two minutes:
 
@@ -2938,7 +2938,7 @@ cheaper: on the desktop it was the other row scoring stable identity and good
 prosody, and the recording it would clone is the one judged best of everything
 generated here.
 
-`bodyclock_tts_set_reference` now takes a WAV and its transcript, and
+`yoai_tts_set_reference` now takes a WAV and its transcript, and
 `src/voice/tts/qwen3_tts.cpp` carries a RIFF reader strict enough to refuse anything that
 is not mono 16-bit at exactly 24 kHz — the same no-resampler rule the
 recognition lane states at 16 kHz, for the same reason. The page shows the
@@ -3306,7 +3306,7 @@ already on disk: the other checkout on this machine had the finished fix applied
 by hand. Nothing recorded that it was there, which is why `third/` now does.
 
 **Shape three: a question with the answer missing from it.**
-`bodyclock_local_set_threads` was added to settle whether decode is
+`yoai_local_set_threads` was added to settle whether decode is
 bandwidth-bound, and framed as two outcomes — a flat curve meaning the wall is
 per-chip, a rising one meaning it is per-core. The curve rose to four threads
 and then flattened, and that was read as the first outcome.
@@ -3316,7 +3316,7 @@ the cores ran out and nothing at all about the bus. That reading was not on the
 ballot, so the measurement could not return it, and the wrong one was picked by
 elimination. No thread sweep of a language model can separate the two, because
 every point on it is one engine's kernels as much as the hardware — which is why
-`bodyclock_memory_bandwidth` had to exist.
+`yoai_memory_bandwidth` had to exist.
 
 The 0.6B row is the same shape with the ballot narrowed by one question instead
 of one option. "Can the small talker reach real time" was answered correctly —
@@ -3413,8 +3413,8 @@ base as +47% a frame for 280 extra frames.
 
 **That is the transferable result, and it is not about CosyVoice3.** The lever
 was named as untried in four places — the checkpoint summary, the levers table
-and the cloning section, all above, and `bodyclock.h`'s
-`bodyclock_tts_set_reference`. It has now been pulled once, on a different
+and the cloning section, all above, and `yoai.h`'s
+`yoai_tts_set_reference`. It has now been pulled once, on a different
 engine, and the two halves did not move together: the fixed charge scaled with
 the reference's length, the per-frame rate did not. The cloning section above
 predicted both would. Qwen3-TTS base pays 24 s at 0.6B and 40 s at 1.7B per

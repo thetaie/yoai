@@ -10,7 +10,7 @@ where.
 
 Engine-backed files are named after the model they run (`qwen25_omni`,
 `qwen3_tts`). The class names (`Omni`, `Qtts`) and the C ABI in
-`src/bodyclock.h` are unchanged. Everything is in namespace `yoai::voice`.
+`src/yoai.h` are unchanged. Everything is in namespace `yoai::voice`.
 
 ### asr/ -- audio in, text out
 
@@ -18,7 +18,7 @@ Engine-backed files are named after the model they run (`qwen25_omni`,
 |---|---|---|---|
 | [fbank/funasr](asr/fbank/funasr.hpp) | `FunAsrFbank`: the 80-bin log-mel front end SenseVoice was trained on, plus low-frame-rate stacking (7 frames, hop 6, 560 wide), matching FunASR's output bit for bit | none | always built |
 | [fbank/common](asr/fbank/common.hpp) | What a front end has that is not a model's convention: the radix-2 FFT | none | always built |
-| [sensevoice](asr/sensevoice.hpp) | SenseVoiceSmall: SAN-M encoder, greedy CTC, tokens with 60 ms timestamps, language / emotion / event tags | ggml | `BODYCLOCK_ASR` |
+| [sensevoice](asr/sensevoice.hpp) | SenseVoiceSmall: SAN-M encoder, greedy CTC, tokens with 60 ms timestamps, language / emotion / event tags | ggml | `YOAI_ASR` |
 
 ### prosody/ -- what the voice says about the speaker, from the signal alone
 
@@ -30,13 +30,13 @@ Engine-backed files are named after the model they run (`qwen25_omni`,
 
 | File | What it does | Engine | Build flag |
 |---|---|---|---|
-| [qwen25_omni](omni/qwen25_omni.hpp) | Qwen2.5-Omni: audio in, a text reply and the model's own voice out | MNN | `BODYCLOCK_MNN` |
+| [qwen25_omni](omni/qwen25_omni.hpp) | Qwen2.5-Omni: audio in, a text reply and the model's own voice out | MNN | `YOAI_MNN` |
 
 ### tts/ -- text in, speech out
 
 | File | What it does | Engine | Build flag |
 |---|---|---|---|
-| [qwen3_tts](tts/qwen3_tts.hpp) | Qwen3-TTS: text in, speech out, with a voice described in words, a named speaker, or a reference recording | qwentts.cpp | `BODYCLOCK_QTTS` |
+| [qwen3_tts](tts/qwen3_tts.hpp) | Qwen3-TTS: text in, speech out, with a voice described in words, a named speaker, or a reference recording | qwentts.cpp | `YOAI_QTTS` |
 | [reader](tts/reader.hpp) | A passage read aloud on top of Qtts: ordered streaming across engines, seam shaping, incremental `begin` / `feed` / `finish` | via Qtts | always built |
 
 ### text/ -- streamed text cut into pieces that can be acted on one by one
@@ -64,9 +64,9 @@ and `text/` have no engine and work in every build.
 
 | Flag | Needs |
 |---|---|
-| `BODYCLOCK_ASR` | ggml archives under `LLAMA_CPP_DIR` |
-| `BODYCLOCK_MNN` | `-DMNN_DIR=<sdk>`, including the rapidjson libMNN was built with. `BODYCLOCK_MNN_VULKAN` if that MNN has the Vulkan backend |
-| `BODYCLOCK_QTTS` | `-DQTTS_DIR=<sdk>` with `qwen.h` and `qwen-core`. Vulkan tuning is chosen at load time (see `apply_vulkan_env` in `tts/qwen3_tts.cpp`) |
+| `YOAI_ASR` | ggml archives under `LLAMA_CPP_DIR` |
+| `YOAI_MNN` | `-DMNN_DIR=<sdk>`, including the rapidjson libMNN was built with. `YOAI_MNN_VULKAN` if that MNN has the Vulkan backend |
+| `YOAI_QTTS` | `-DQTTS_DIR=<sdk>` with `qwen.h` and `qwen-core`. Vulkan tuning is chosen at load time (see `apply_vulkan_env` in `tts/qwen3_tts.cpp`) |
 
 ## Threading
 

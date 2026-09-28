@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#ifdef BODYCLOCK_MNN
+#ifdef YOAI_MNN
 #if !defined(_WIN32)
 #include <dirent.h>
 #include <errno.h>
@@ -20,7 +20,7 @@
 #include <ostream>
 #include <sstream>
 
-#ifdef BODYCLOCK_MNN_VULKAN
+#ifdef YOAI_MNN_VULKAN
 // Declared here rather than in an MNN header, because it is not part of MNN's
 // API: it exists only to be referenced. See the call in load().
 extern "C" void MNNForceLinkVulkanRuntime();
@@ -40,7 +40,7 @@ float Omni::max_seconds() {
     return 28.0f;
 }
 
-#ifdef BODYCLOCK_MNN
+#ifdef YOAI_MNN
 
 namespace {
 
@@ -234,7 +234,7 @@ bool Omni::load(const std::string& model_dir) {
     m->loaded = false;
     m->llm.reset();
 
-#ifdef BODYCLOCK_MNN_VULKAN
+#ifdef YOAI_MNN_VULKAN
     // Before createLLM, because the backend has to be registered before anything
     // asks for it. This call does nothing; REFERENCING it is the point, and the
     // reason is in the patch it needs -- a static libMNN leaves the Vulkan
@@ -627,7 +627,7 @@ bool Omni::ask(const float* pcm, size_t n_samples, const std::string& prompt,
     return true;
 }
 
-#else   // !BODYCLOCK_MNN
+#else   // !YOAI_MNN
 
 struct Omni::Impl {
     int unused;
@@ -658,7 +658,7 @@ bool Omni::ask(const float*, size_t, const std::string&, OmniAudioSink, OmniText
     return false;
 }
 
-#endif  // BODYCLOCK_MNN
+#endif  // YOAI_MNN
 
 }  // namespace voice
 }  // namespace yoai

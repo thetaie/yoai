@@ -12,11 +12,11 @@
 # script in this repo. help, -h or --help prints usage().
 #
 # `tts` assembles a qwentts.cpp SDK into build/qtts-sdk/ and configures with
-# -DBODYCLOCK_QTTS=ON -- speech output for the tools in cli/, without the
+# -DYOAI_QTTS=ON -- speech output for the tools in cli/, without the
 # desktop app.
 #
 # `asr` assembles a desktop ggml SDK into build/llama-sdk/ from a llama.cpp
-# checkout and configures with -DBODYCLOCK_ASR=ON. Only ggml is built --
+# checkout and configures with -DYOAI_ASR=ON. Only ggml is built --
 # recognition does not link llama -- so this is a couple of minutes, not the
 # twenty the full engine takes.
 set -euo pipefail
@@ -137,11 +137,11 @@ fi
 # configured without it would change nothing. Said here, before any SDK is
 # built, rather than after minutes of building one.
 if [ -f "$BUILD_DIR/CMakeCache.txt" ]; then
-  if [ -n "$DO_ASR" ] && ! grep -q "BODYCLOCK_ASR:BOOL=ON" "$BUILD_DIR/CMakeCache.txt"; then
+  if [ -n "$DO_ASR" ] && ! grep -q "YOAI_ASR:BOOL=ON" "$BUILD_DIR/CMakeCache.txt"; then
     echo "[build] build/ was configured without asr; re-run as: ./build.sh clean asr" >&2
     exit 1
   fi
-  if [ -n "$DO_TTS" ] && ! grep -q "BODYCLOCK_QTTS:BOOL=ON" "$BUILD_DIR/CMakeCache.txt"; then
+  if [ -n "$DO_TTS" ] && ! grep -q "YOAI_QTTS:BOOL=ON" "$BUILD_DIR/CMakeCache.txt"; then
     echo "[build] build/ was configured without tts; re-run as: ./build.sh clean tts" >&2
     exit 1
   fi
@@ -182,7 +182,7 @@ if [ -n "$DO_ASR" ]; then
     -exec cp {} "$LSDK/lib/" \;
   echo "[build] ggml SDK at $LSDK"
 
-  CMAKE_ARGS+=(-DBODYCLOCK_ASR=ON -DLLAMA_CPP_DIR="$LSDK")
+  CMAKE_ARGS+=(-DYOAI_ASR=ON -DLLAMA_CPP_DIR="$LSDK")
 fi
 
 # A qwentts.cpp SDK for this build, so the core can speak without the desktop
@@ -265,7 +265,7 @@ if [ -n "$DO_TTS" ]; then
   fi
   echo "[build] tts SDK at $QSDK"
 
-  CMAKE_ARGS+=(-DBODYCLOCK_QTTS=ON -DQTTS_DIR="$QSDK")
+  CMAKE_ARGS+=(-DYOAI_QTTS=ON -DQTTS_DIR="$QSDK")
 fi
 
 if [ ! -f "$BUILD_DIR/build.ninja" ] && [ ! -f "$BUILD_DIR/Makefile" ]; then

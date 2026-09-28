@@ -2,7 +2,7 @@
  * The conversation, plus whatever the current turn has produced so far.
  *
  * A reply arrives in two streams -- 'thinking' and 'reply' -- and they are kept
- * apart all the way to the screen, the way src/bodyclock.h delivers them: the
+ * apart all the way to the screen, the way src/yoai.h delivers them: the
  * reasoning is collapsed, because a reasoning model's chain-of-thought is not
  * part of the answer.
  */

@@ -127,7 +127,7 @@ export class ModelStore {
    * key from the secure store; for an on-device one, handing over the file path.
    *
    * Returns false when the model cannot run -- no key for its vendor, or no path.
-   * The core is then left WITHOUT the entry, deliberately: bodyclock_providers() is
+   * The core is then left WITHOUT the entry, deliberately: yoai_providers() is
    * the picker's source of truth, so an entry that cannot run must not appear
    * in it.
    */
@@ -138,7 +138,7 @@ export class ModelStore {
         return false;
       }
       // '' for the options: the core's defaults are already tuned for a phone,
-      // and the app has no settings screen for them. See src/bodyclock.h if that
+      // and the app has no settings screen for them. See src/yoai.h if that
       // changes.
       const rc: number = bodyclock.nativeLocalSet(cfg.id, path, '');
       if (rc !== 0) {

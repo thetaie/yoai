@@ -17,7 +17,7 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { app } from 'electron'
 
-/** (type, content), the C ABI's own event shape. See bodyclock_chat_handler. */
+/** (type, content), the C ABI's own event shape. See yoai_chat_handler. */
 export type NativeHandler = (type: string, content: string) => void
 
 export interface BodyclockNative {
@@ -78,7 +78,7 @@ export interface BodyclockNative {
   //--- Reading a reply while it is still being written -------------------------
   // A SECOND engine over the same two GGUFs as the lane above, so only one of
   // them should be loaded: together they hold the weights twice. See
-  // src/bodyclock.h and src/voice/tts/reader.hpp.
+  // src/yoai.h and src/voice/tts/reader.hpp.
   nativeReaderAvailable(): number
   nativeReaderLoad(
     talkerPath: string,

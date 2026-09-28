@@ -1,4 +1,4 @@
-// Implementation of the public C ABI (src/bodyclock.h).
+// Implementation of the public C ABI (src/yoai.h).
 //
 // Thin by design: the registry is a map, and a remote turn is one
 // OpenAIChatClient built from a copy of the matching entry. No session state, no
@@ -10,7 +10,7 @@
 // Reloading per turn would make on-device chat unusable, which is why this file
 // keeps clients for one kind of entry and not the other.
 
-#include "bodyclock.h"
+#include "yoai.h"
 
 #include "client/http_client.hpp"
 #include "llm/local.hpp"
@@ -65,7 +65,7 @@ double wall_seconds_since(wall_clk::time_point started) {
 //------------------------------------------------------------------------------
 
 // One entry, of either kind. A tagged struct rather than two maps because the
-// id namespace is shared: bodyclock_chat, bodyclock_providers and bodyclock_provider_remove all
+// id namespace is shared: yoai_chat, yoai_providers and yoai_provider_remove all
 // take an id without being told which lane it is, and two maps would let the
 // same id exist twice with nothing deciding which one wins.
 struct Entry {
@@ -79,7 +79,7 @@ std::mutex& registry_mutex() {
     return m;
 }
 
-// Guarded by registry_mutex(). Ordered rather than hashed so bodyclock_providers()
+// Guarded by registry_mutex(). Ordered rather than hashed so yoai_providers()
 // lists ids in a stable order -- a menu that reshuffles itself when a key is
 // added would be a UI bug sourced here.
 std::map<std::string, Entry>& registry() {
@@ -120,7 +120,7 @@ bool lookup(const std::string& id, Entry* out) {
 //
 // The client is constructed under the lock -- cheap, it only initializes the
 // llama.cpp backend -- but the WEIGHTS are not read here: that happens on the
-// first ainvoke() or in bodyclock_local_load, both of which run with no lock held.
+// first ainvoke() or in yoai_local_load, both of which run with no lock held.
 // Holding the registry mutex across a multi-second, multi-gigabyte read would
 // stall every other entry point in this file for the duration.
 std::shared_ptr<LocalClient> local_client_for(const std::string& id) {
@@ -139,7 +139,7 @@ std::shared_ptr<LocalClient> local_client_for(const std::string& id) {
 // Expects registry_mutex() to be HELD -- the erase has to be atomic with the
 // registry edit that made the engine stale.
 //
-// Safe to call during a turn: bodyclock_chat holds its own shared_ptr for the
+// Safe to call during a turn: yoai_chat holds its own shared_ptr for the
 // duration, so erasing here only means the NEXT turn builds a fresh engine. The
 // running one finishes against the model it started with, and the weights are
 // freed when it lets go.
@@ -217,7 +217,7 @@ void apply_local_options(const char* options_json, LocalOptions* opt) {
     doc.Parse(options_json);
     if (doc.HasParseError() || !doc.IsObject()) {
         yoai::platform::log_warn(
-            "bodyclock_local_set: ignoring options_json, not a JSON object: %.120s", options_json);
+            "yoai_local_set: ignoring options_json, not a JSON object: %.120s", options_json);
         return;
     }
 
@@ -266,7 +266,7 @@ bool parse_messages(const char* json, std::vector<ChatMessage>* out) {
     return true;
 }
 
-// Backing store for bodyclock_providers()' return value. Thread-local so two threads
+// Backing store for yoai_providers()' return value. Thread-local so two threads
 // listing at once do not overwrite each other's buffer.
 std::string& providers_buffer() {
     static thread_local std::string buf;
@@ -288,7 +288,7 @@ std::mutex& timeline_mutex() {
 
 // Guarded by timeline_mutex(). A shared_ptr rather than a raw owner so that a
 // read already in flight keeps the store alive across a concurrent
-// bodyclock_timeline_close(): the pointer is copied out under the lock and the
+// yoai_timeline_close(): the pointer is copied out under the lock and the
 // COPY is what the call runs against, the same way lookup() copies a registry
 // entry so a turn is unaffected by an edit beside it.
 std::shared_ptr<Timeline>& timeline_slot() {
@@ -337,7 +337,7 @@ std::shared_ptr<Timeline> timeline_checked() {
     std::lock_guard<std::mutex> lock(timeline_mutex());
     std::shared_ptr<Timeline> t = timeline_slot();
     if (!t) {
-        timeline_error() = "no day log is open -- call bodyclock_timeline_open first";
+        timeline_error() = "no day log is open -- call yoai_timeline_open first";
     }
     return t;
 }
@@ -347,7 +347,7 @@ void write_json_string(rapidjson::Writer<rapidjson::StringBuffer>& w,
     w.String(s.data(), static_cast<rapidjson::SizeType>(s.size()));
 }
 
-// One entry, notes and all. The shape is documented in bodyclock.h; keep the
+// One entry, notes and all. The shape is documented in yoai.h; keep the
 // two in step, because a host reads only the header.
 void write_entry(rapidjson::Writer<rapidjson::StringBuffer>& w,
                  const yoai::store::Entry& e) {
@@ -396,11 +396,11 @@ const char* timeline_entries_json(std::vector<yoai::store::Entry>& entries,
 // Diagnostics
 //------------------------------------------------------------------------------
 
-extern "C" const char* bodyclock_version(void) {
+extern "C" const char* yoai_version(void) {
     return "0.1.0";
 }
 
-extern "C" void bodyclock_set_log_level(const char* level) {
+extern "C" void yoai_set_log_level(const char* level) {
     if (blank(level)) return;
     yoai::platform::set_log_level(level);
 }
@@ -409,10 +409,10 @@ extern "C" void bodyclock_set_log_level(const char* level) {
 // The day log
 //------------------------------------------------------------------------------
 
-extern "C" int bodyclock_timeline_open(const char* dir) {
+extern "C" int yoai_timeline_open(const char* dir) {
     timeline_error().clear();
     if (blank(dir)) {
-        timeline_error() = "bodyclock_timeline_open: dir is required";
+        timeline_error() = "yoai_timeline_open: dir is required";
         return 1;
     }
 
@@ -440,18 +440,18 @@ extern "C" int bodyclock_timeline_open(const char* dir) {
     return 0;
 }
 
-extern "C" int bodyclock_timeline_opened(void) {
+extern "C" int yoai_timeline_opened(void) {
     std::lock_guard<std::mutex> lock(timeline_mutex());
     return timeline_slot() ? 1 : 0;
 }
 
-extern "C" void bodyclock_timeline_close(void) {
+extern "C" void yoai_timeline_close(void) {
     std::lock_guard<std::mutex> lock(timeline_mutex());
     timeline_slot().reset();
     timeline_dir().clear();
 }
 
-extern "C" int bodyclock_timeline_switch_to(const char* state_id) {
+extern "C" int yoai_timeline_switch_to(const char* state_id) {
     std::shared_ptr<Timeline> t = timeline_checked();
     if (!t) return 1;
     std::string err;
@@ -462,7 +462,7 @@ extern "C" int bodyclock_timeline_switch_to(const char* state_id) {
     return 0;
 }
 
-extern "C" int bodyclock_timeline_end(void) {
+extern "C" int yoai_timeline_end(void) {
     std::shared_ptr<Timeline> t = timeline_checked();
     if (!t) return 1;
     std::string err;
@@ -473,7 +473,7 @@ extern "C" int bodyclock_timeline_end(void) {
     return 0;
 }
 
-extern "C" int bodyclock_timeline_end_at(long long at) {
+extern "C" int yoai_timeline_end_at(long long at) {
     std::shared_ptr<Timeline> t = timeline_checked();
     if (!t) return 1;
     std::string err;
@@ -484,7 +484,7 @@ extern "C" int bodyclock_timeline_end_at(long long at) {
     return 0;
 }
 
-extern "C" int bodyclock_timeline_undo(void) {
+extern "C" int yoai_timeline_undo(void) {
     std::shared_ptr<Timeline> t = timeline_checked();
     if (!t) return 1;
     std::string err;
@@ -495,7 +495,7 @@ extern "C" int bodyclock_timeline_undo(void) {
     return 0;
 }
 
-extern "C" int bodyclock_timeline_note_add(const char* text) {
+extern "C" int yoai_timeline_note_add(const char* text) {
     std::shared_ptr<Timeline> t = timeline_checked();
     if (!t) return 1;
     std::string err;
@@ -506,7 +506,7 @@ extern "C" int bodyclock_timeline_note_add(const char* text) {
     return 0;
 }
 
-extern "C" const char* bodyclock_timeline_now(void) {
+extern "C" const char* yoai_timeline_now(void) {
     std::shared_ptr<Timeline> t = timeline_checked();
     if (!t) return nullptr;
 
@@ -538,7 +538,7 @@ extern "C" const char* bodyclock_timeline_now(void) {
     return timeline_now_buffer().c_str();
 }
 
-extern "C" const char* bodyclock_timeline_recent(int hours) {
+extern "C" const char* yoai_timeline_recent(int hours) {
     std::shared_ptr<Timeline> t = timeline_checked();
     if (!t) return nullptr;
 
@@ -551,7 +551,7 @@ extern "C" const char* bodyclock_timeline_recent(int hours) {
     return timeline_entries_json(entries, timeline_recent_buffer());
 }
 
-extern "C" const char* bodyclock_timeline_day(int local_day) {
+extern "C" const char* yoai_timeline_day(int local_day) {
     std::shared_ptr<Timeline> t = timeline_checked();
     if (!t) return nullptr;
 
@@ -569,21 +569,21 @@ extern "C" const char* bodyclock_timeline_day(int local_day) {
 // none. They leave timeline_last_error() alone for the same reason: there is
 // nothing for them to report and clearing it would discard the message from the
 // call the host is probably about to ask about.
-extern "C" int bodyclock_timeline_today(void) {
+extern "C" int yoai_timeline_today(void) {
     return Timeline::today_local_day();
 }
 
-extern "C" const char* bodyclock_timeline_day_to_iso(int local_day) {
+extern "C" const char* yoai_timeline_day_to_iso(int local_day) {
     timeline_iso_buffer() = Timeline::day_to_iso(local_day);
     return timeline_iso_buffer().c_str();
 }
 
-extern "C" int bodyclock_timeline_iso_to_day(const char* iso) {
+extern "C" int yoai_timeline_iso_to_day(const char* iso) {
     if (blank(iso)) return -1;
     return Timeline::iso_to_day(iso);
 }
 
-extern "C" const char* bodyclock_timeline_last_error(void) {
+extern "C" const char* yoai_timeline_last_error(void) {
     return timeline_error().c_str();
 }
 
@@ -591,13 +591,13 @@ extern "C" const char* bodyclock_timeline_last_error(void) {
 // Provider registry
 //------------------------------------------------------------------------------
 
-extern "C" int bodyclock_provider_set(const char* id,
+extern "C" int yoai_provider_set(const char* id,
                                  const char* base_url,
                                  const char* api_key,
                                  const char* model,
                                  const char* extra_json) {
     if (blank(id) || blank(base_url) || blank(api_key) || blank(model)) {
-        yoai::platform::log_warn("bodyclock_provider_set: id, base_url, api_key and model are all required");
+        yoai::platform::log_warn("yoai_provider_set: id, base_url, api_key and model are all required");
         return 1;
     }
 
@@ -627,20 +627,20 @@ extern "C" int bodyclock_provider_set(const char* id,
     return 0;
 }
 
-extern "C" int bodyclock_provider_remove(const char* id) {
+extern "C" int yoai_provider_remove(const char* id) {
     if (blank(id)) return 0;
     std::lock_guard<std::mutex> lock(registry_mutex());
     forget_local_client(id);
     return registry().erase(id) > 0 ? 1 : 0;
 }
 
-extern "C" void bodyclock_provider_clear(void) {
+extern "C" void yoai_provider_clear(void) {
     std::lock_guard<std::mutex> lock(registry_mutex());
     registry().clear();
     local_clients().clear();
 }
 
-extern "C" const char* bodyclock_providers(void) {
+extern "C" const char* yoai_providers(void) {
     std::string& buf = providers_buffer();
     buf.clear();
     std::lock_guard<std::mutex> lock(registry_mutex());
@@ -655,15 +655,15 @@ extern "C" const char* bodyclock_providers(void) {
 // On-device models
 //------------------------------------------------------------------------------
 
-extern "C" int bodyclock_local_available(void) {
+extern "C" int yoai_local_available(void) {
     return LocalClient::available() ? 1 : 0;
 }
 
-extern "C" int bodyclock_local_set(const char* id,
+extern "C" int yoai_local_set(const char* id,
                               const char* model_path,
                               const char* options_json) {
     if (blank(id) || blank(model_path)) {
-        yoai::platform::log_warn("bodyclock_local_set: id and model_path are both required");
+        yoai::platform::log_warn("yoai_local_set: id and model_path are both required");
         return 1;
     }
 
@@ -687,31 +687,31 @@ extern "C" int bodyclock_local_set(const char* id,
     return 0;
 }
 
-extern "C" int bodyclock_local_load(const char* id) {
+extern "C" int yoai_local_load(const char* id) {
     if (blank(id)) return 1;
 
     // Outside the registry lock, deliberately: this reads gigabytes.
     std::shared_ptr<LocalClient> client = local_client_for(id);
     if (!client) {
-        yoai::platform::log_warn("bodyclock_local_load: %s is not an on-device model", id);
+        yoai::platform::log_warn("yoai_local_load: %s is not an on-device model", id);
         return 1;
     }
 
     std::string err;
     if (!client->load(err)) {
-        yoai::platform::log_warn("bodyclock_local_load(%s): %s", id, err.c_str());
+        yoai::platform::log_warn("yoai_local_load(%s): %s", id, err.c_str());
         return 1;
     }
     return 0;
 }
 
-extern "C" int bodyclock_local_set_threads(const char* id, int threads) {
+extern "C" int yoai_local_set_threads(const char* id, int threads) {
     if (blank(id)) return 1;
 
     std::shared_ptr<LocalClient> client = local_client_for(id);
     if (!client) {
         yoai::platform::log_warn(
-            "bodyclock_local_set_threads: %s is not an on-device model", id);
+            "yoai_local_set_threads: %s is not an on-device model", id);
         return 1;
     }
     client->setThreads(threads);
@@ -722,12 +722,12 @@ extern "C" int bodyclock_local_set_threads(const char* id, int threads) {
     return 0;
 }
 
-extern "C" int bodyclock_local_forget(const char* id) {
+extern "C" int yoai_local_forget(const char* id) {
     if (blank(id)) return 1;
 
     std::shared_ptr<LocalClient> client = local_client_for(id);
     if (!client) {
-        yoai::platform::log_warn("bodyclock_local_forget: %s is not an on-device model", id);
+        yoai::platform::log_warn("yoai_local_forget: %s is not an on-device model", id);
         return 1;
     }
     client->forget();
@@ -735,7 +735,7 @@ extern "C" int bodyclock_local_forget(const char* id) {
     return 0;
 }
 
-extern "C" const char* bodyclock_memory_bandwidth(int threads, int mib, int passes) {
+extern "C" const char* yoai_memory_bandwidth(int threads, int mib, int passes) {
     yoai::platform::MemoryBandwidth m;
     if (!yoai::platform::measure_memory_bandwidth(threads, mib, passes, &m)) {
         return nullptr;
@@ -764,11 +764,11 @@ extern "C" const char* bodyclock_memory_bandwidth(int threads, int mib, int pass
 // Chat
 //------------------------------------------------------------------------------
 
-extern "C" int bodyclock_chat(const char* provider_id,
+extern "C" int yoai_chat(const char* provider_id,
                          const char* messages_json,
                          const char* system_prompt,
                          const char* grammar,
-                         bodyclock_chat_handler on_event,
+                         yoai_chat_handler on_event,
                          void* user_data) {
     if (on_event == nullptr) return 1;
 
@@ -776,7 +776,7 @@ extern "C" int bodyclock_chat(const char* provider_id,
     // return code: the host has a place to show text and no way to turn an int
     // into one.
     auto fail = [&](const std::string& msg) {
-        yoai::platform::log_warn("bodyclock_chat: %s", msg.c_str());
+        yoai::platform::log_warn("yoai_chat: %s", msg.c_str());
         on_event("error", msg.c_str(), user_data);
         return 1;
     };
@@ -905,7 +905,7 @@ bool& voice_loaded() {
     return loaded;
 }
 
-// Thread-local for the same reason bodyclock_providers()' buffer is: two threads
+// Thread-local for the same reason yoai_providers()' buffer is: two threads
 // asking at once must not overwrite each other's answer.
 std::string& voice_buffer() {
     static thread_local std::string buf;
@@ -984,13 +984,13 @@ void append_piece(std::string* text, const std::string& piece) {
 
 }  // namespace
 
-extern "C" int bodyclock_voice_available(void) {
+extern "C" int yoai_voice_available(void) {
     return yoai::voice::SenseVoice::available() ? 1 : 0;
 }
 
-extern "C" int bodyclock_voice_load(const char* model_path) {
+extern "C" int yoai_voice_load(const char* model_path) {
     if (blank(model_path)) {
-        yoai::platform::log_warn("bodyclock_voice_load: model_path is required");
+        yoai::platform::log_warn("yoai_voice_load: model_path is required");
         return 1;
     }
     std::lock_guard<std::mutex> guard(voice_mutex());
@@ -998,12 +998,12 @@ extern "C" int bodyclock_voice_load(const char* model_path) {
     return voice_loaded() ? 0 : 1;
 }
 
-extern "C" int bodyclock_voice_loaded(void) {
+extern "C" int yoai_voice_loaded(void) {
     std::lock_guard<std::mutex> guard(voice_mutex());
     return voice_loaded() ? 1 : 0;
 }
 
-extern "C" void bodyclock_voice_unload(void) {
+extern "C" void yoai_voice_unload(void) {
     std::lock_guard<std::mutex> guard(voice_mutex());
     // There is no unload on the recognizer itself: the weights go when the
     // process does, or when another load replaces them. Forgetting the flag is
@@ -1011,19 +1011,19 @@ extern "C" void bodyclock_voice_unload(void) {
     voice_loaded() = false;
 }
 
-extern "C" int bodyclock_voice_set_itn(int on) {
+extern "C" int yoai_voice_set_itn(int on) {
     std::lock_guard<std::mutex> guard(voice_mutex());
     if (!voice_loaded()) {
-        yoai::platform::log_warn("bodyclock_voice_set_itn: no model is loaded");
+        yoai::platform::log_warn("yoai_voice_set_itn: no model is loaded");
         return 1;
     }
     return recognizer().set_inverse_text_normalization(on != 0) ? 0 : 1;
 }
 
-extern "C" int bodyclock_voice_set_threads(int threads) {
+extern "C" int yoai_voice_set_threads(int threads) {
     std::lock_guard<std::mutex> guard(voice_mutex());
     if (!voice_loaded()) {
-        yoai::platform::log_warn("bodyclock_voice_set_threads: no model is loaded");
+        yoai::platform::log_warn("yoai_voice_set_threads: no model is loaded");
         return 1;
     }
     recognizer().set_threads(threads);
@@ -1034,16 +1034,16 @@ extern "C" int bodyclock_voice_set_threads(int threads) {
     return 0;
 }
 
-extern "C" const char* bodyclock_voice_analyze(const short* pcm,
+extern "C" const char* yoai_voice_analyze(const short* pcm,
                                           int n_samples,
                                           int sample_rate) {
     if (pcm == nullptr || n_samples <= 0) {
-        yoai::platform::log_warn("bodyclock_voice_analyze: pcm and n_samples are required");
+        yoai::platform::log_warn("yoai_voice_analyze: pcm and n_samples are required");
         return nullptr;
     }
     if (sample_rate != 16000) {
         yoai::platform::log_error(
-            "bodyclock_voice_analyze: sample_rate is %d, must be 16000 -- the core carries "
+            "yoai_voice_analyze: sample_rate is %d, must be 16000 -- the core carries "
             "no resampler, capture at 16 kHz",
             sample_rate);
         return nullptr;
@@ -1231,8 +1231,8 @@ std::string& omni_buffer() {
 // one struct for both because the engine gives them one `user_data` between
 // them -- they are always two halves of the same host.
 struct OmniSinkBridge {
-    bodyclock_omni_audio_handler handler;
-    bodyclock_omni_text_handler  on_text;
+    yoai_omni_audio_handler handler;
+    yoai_omni_text_handler  on_text;
     void*                   user_data;
 };
 
@@ -1255,44 +1255,44 @@ void omni_text_sink(const char* text, void* user_data) {
 
 }  // namespace
 
-extern "C" int bodyclock_omni_available(void) {
+extern "C" int yoai_omni_available(void) {
     return yoai::voice::Omni::available() ? 1 : 0;
 }
 
-extern "C" int bodyclock_omni_load(const char* model_dir) {
+extern "C" int yoai_omni_load(const char* model_dir) {
     if (blank(model_dir)) {
-        yoai::platform::log_warn("bodyclock_omni_load: model_dir is required");
+        yoai::platform::log_warn("yoai_omni_load: model_dir is required");
         return 1;
     }
     std::lock_guard<std::mutex> guard(omni_mutex());
     return omni().load(model_dir) ? 0 : 1;
 }
 
-extern "C" int bodyclock_omni_loaded(void) {
+extern "C" int yoai_omni_loaded(void) {
     std::lock_guard<std::mutex> guard(omni_mutex());
     return omni().loaded() ? 1 : 0;
 }
 
-extern "C" int bodyclock_omni_set_dit_steps(int steps) {
+extern "C" int yoai_omni_set_dit_steps(int steps) {
     std::lock_guard<std::mutex> guard(omni_mutex());
     return omni().set_dit_steps(steps) ? 0 : 1;
 }
 
-extern "C" void bodyclock_omni_unload(void) {
+extern "C" void yoai_omni_unload(void) {
     // Nothing to release explicitly: the engine drops its weights when another
     // load replaces them or the process ends. Kept for symmetry with the other
     // lanes, and so a host has one place to say "I am done with this".
-    yoai::platform::log_info("bodyclock_omni_unload: weights stay until replaced");
+    yoai::platform::log_info("yoai_omni_unload: weights stay until replaced");
 }
 
-extern "C" const char* bodyclock_omni_ask(const short* pcm,
+extern "C" const char* yoai_omni_ask(const short* pcm,
                                      int n_samples,
                                      const char* prompt,
-                                     bodyclock_omni_audio_handler on_audio,
-                                     bodyclock_omni_text_handler on_text,
+                                     yoai_omni_audio_handler on_audio,
+                                     yoai_omni_text_handler on_text,
                                      void* user_data) {
     if (pcm == nullptr || n_samples <= 0 || blank(prompt)) {
-        yoai::platform::log_warn("bodyclock_omni_ask: pcm, n_samples and prompt are required");
+        yoai::platform::log_warn("yoai_omni_ask: pcm, n_samples and prompt are required");
         return nullptr;
     }
 
@@ -1396,7 +1396,7 @@ std::string& tts_speakers_buffer() {
 }
 
 struct TtsSinkBridge {
-    bodyclock_tts_audio_handler handler;
+    yoai_tts_audio_handler handler;
     void*                       user_data;
 };
 
@@ -1411,13 +1411,13 @@ bool tts_sink(const float* pcm, size_t n_samples, bool last, void* user_data) {
 
 }  // namespace
 
-extern "C" int bodyclock_tts_available(void) {
+extern "C" int yoai_tts_available(void) {
     return yoai::voice::Qtts::available() ? 1 : 0;
 }
 
-extern "C" int bodyclock_tts_load(const char* talker_path, const char* codec_path) {
+extern "C" int yoai_tts_load(const char* talker_path, const char* codec_path) {
     if (blank(talker_path) || blank(codec_path)) {
-        yoai::platform::log_warn("bodyclock_tts_load: both model paths are required");
+        yoai::platform::log_warn("yoai_tts_load: both model paths are required");
         return 1;
     }
     std::lock_guard<std::mutex> guard(tts_mutex());
@@ -1427,29 +1427,29 @@ extern "C" int bodyclock_tts_load(const char* talker_path, const char* codec_pat
     return ok ? 0 : 1;
 }
 
-extern "C" int bodyclock_tts_loaded(void) {
+extern "C" int yoai_tts_loaded(void) {
     std::lock_guard<std::mutex> guard(tts_mutex());
     return tts().loaded() ? 1 : 0;
 }
 
-extern "C" void bodyclock_tts_unload(void) {
+extern "C" void yoai_tts_unload(void) {
     std::lock_guard<std::mutex> guard(tts_mutex());
     tts().unload();
     tts_model_type().clear();
 }
 
-extern "C" const char* bodyclock_tts_model_type(void) {
+extern "C" const char* yoai_tts_model_type(void) {
     std::lock_guard<std::mutex> guard(tts_mutex());
     tts_model_type() = tts().model_type();
     return tts_model_type().c_str();
 }
 
-extern "C" void bodyclock_tts_set_voice(const char* instruct) {
+extern "C" void yoai_tts_set_voice(const char* instruct) {
     std::lock_guard<std::mutex> guard(tts_mutex());
     tts().set_voice(instruct ? instruct : "");
 }
 
-extern "C" const char* bodyclock_tts_speakers(void) {
+extern "C" const char* yoai_tts_speakers(void) {
     std::lock_guard<std::mutex> guard(tts_mutex());
     const std::vector<std::string> names = tts().speakers();
 
@@ -1465,22 +1465,22 @@ extern "C" const char* bodyclock_tts_speakers(void) {
     return tts_speakers_buffer().c_str();
 }
 
-extern "C" void bodyclock_tts_set_speaker(const char* name) {
+extern "C" void yoai_tts_set_speaker(const char* name) {
     std::lock_guard<std::mutex> guard(tts_mutex());
     tts().set_speaker(name ? name : "");
 }
 
-extern "C" void bodyclock_tts_set_seed(long long seed) {
+extern "C" void yoai_tts_set_seed(long long seed) {
     std::lock_guard<std::mutex> guard(tts_mutex());
     tts().set_seed(seed);
 }
 
-extern "C" void bodyclock_tts_set_top_k(int top_k) {
+extern "C" void yoai_tts_set_top_k(int top_k) {
     std::lock_guard<std::mutex> guard(tts_mutex());
     tts().set_top_k(top_k);
 }
 
-extern "C" int bodyclock_tts_set_reference(const char* wav_path, const char* transcript) {
+extern "C" int yoai_tts_set_reference(const char* wav_path, const char* transcript) {
     std::lock_guard<std::mutex> guard(tts_mutex());
     if (blank(wav_path) && blank(transcript)) {
         tts().clear_reference();
@@ -1493,31 +1493,31 @@ extern "C" int bodyclock_tts_set_reference(const char* wav_path, const char* tra
     return ok ? 0 : 1;
 }
 
-extern "C" float bodyclock_tts_reference_seconds(void) {
+extern "C" float yoai_tts_reference_seconds(void) {
     std::lock_guard<std::mutex> guard(tts_mutex());
     return tts().reference_seconds();
 }
 
-extern "C" void bodyclock_tts_set_streaming(int on) {
+extern "C" void yoai_tts_set_streaming(int on) {
     std::lock_guard<std::mutex> guard(tts_mutex());
     tts().set_streaming(on != 0);
 }
 
-extern "C" void bodyclock_tts_set_threads(int threads) {
+extern "C" void yoai_tts_set_threads(int threads) {
     std::lock_guard<std::mutex> guard(tts_mutex());
     tts().set_threads(threads);
 }
 
-extern "C" const char* bodyclock_tts_last_error(void) {
+extern "C" const char* yoai_tts_last_error(void) {
     std::lock_guard<std::mutex> guard(tts_mutex());
     return tts_error().c_str();
 }
 
-extern "C" const char* bodyclock_tts_say(const char* text,
-                                    bodyclock_tts_audio_handler on_audio,
+extern "C" const char* yoai_tts_say(const char* text,
+                                    yoai_tts_audio_handler on_audio,
                                     void* user_data) {
     if (blank(text)) {
-        yoai::platform::log_warn("bodyclock_tts_say: text is required");
+        yoai::platform::log_warn("yoai_tts_say: text is required");
         return nullptr;
     }
 
@@ -1574,7 +1574,7 @@ std::string& bundle_buffer() {
 
 // Carries the host's C callback across the C++ progress signature.
 struct BundleProgressBridge {
-    bodyclock_bundle_progress handler;
+    yoai_bundle_progress handler;
     void*                user_data;
 };
 
@@ -1590,9 +1590,9 @@ bool bundle_progress_bridge(const char* name, unsigned long long done,
 
 }  // namespace
 
-extern "C" const char* bodyclock_bundle_list(const char* bundle_path) {
+extern "C" const char* yoai_bundle_list(const char* bundle_path) {
     if (blank(bundle_path)) {
-        yoai::platform::log_warn("bodyclock_bundle_list: bundle_path is required");
+        yoai::platform::log_warn("yoai_bundle_list: bundle_path is required");
         return nullptr;
     }
 
@@ -1623,13 +1623,13 @@ extern "C" const char* bodyclock_bundle_list(const char* bundle_path) {
     return bundle_buffer().c_str();
 }
 
-extern "C" int bodyclock_bundle_extract(const char* bundle_path,
+extern "C" int yoai_bundle_extract(const char* bundle_path,
                                    const char* dest_dir,
-                                   bodyclock_bundle_progress on_progress,
+                                   yoai_bundle_progress on_progress,
                                    void* user_data) {
     if (blank(bundle_path) || blank(dest_dir)) {
         yoai::platform::log_warn(
-            "bodyclock_bundle_extract: bundle_path and dest_dir are both required");
+            "yoai_bundle_extract: bundle_path and dest_dir are both required");
         return 1;
     }
 
@@ -1652,7 +1652,7 @@ extern "C" int bodyclock_bundle_extract(const char* bundle_path,
 namespace {
 
 // A SECOND engine instance over the same weights as the lane above, which is
-// why bodyclock.h says to load one or the other. Kept separate rather than
+// why yoai.h says to load one or the other. Kept separate rather than
 // folded into tts() because that lane works and this one is being judged; the
 // day it wins, the other goes rather than the two being merged.
 std::mutex& reader_mutex() {
@@ -1683,7 +1683,7 @@ std::string& reader_model_type() {
 }
 
 struct ReaderSinkBridge {
-    bodyclock_reader_audio_handler handler;
+    yoai_reader_audio_handler handler;
     void*                          user_data;
 };
 
@@ -1706,15 +1706,15 @@ bool reader_sink(const float* pcm, size_t n_samples, int sentence, bool last, vo
 
 }  // namespace
 
-extern "C" int bodyclock_reader_available(void) {
+extern "C" int yoai_reader_available(void) {
     return yoai::voice::Reader::available() ? 1 : 0;
 }
 
-extern "C" int bodyclock_reader_load(const char* talker_path, const char* codec_path,
-                                     int voices) {
+extern "C" int yoai_reader_load(const char* talker_path, const char* codec_path,
+                                int voices) {
     if (blank(talker_path) || blank(codec_path)) {
         reader_error() = "talker_path and codec_path are both required";
-        yoai::platform::log_warn("bodyclock_reader_load: %s", reader_error().c_str());
+        yoai::platform::log_warn("yoai_reader_load: %s", reader_error().c_str());
         return 1;
     }
     std::lock_guard<std::mutex> guard(reader_mutex());
@@ -1727,34 +1727,34 @@ extern "C" int bodyclock_reader_load(const char* talker_path, const char* codec_
     return 0;
 }
 
-extern "C" int bodyclock_reader_loaded(void) {
+extern "C" int yoai_reader_loaded(void) {
     std::lock_guard<std::mutex> guard(reader_mutex());
     return reader().loaded() ? 1 : 0;
 }
 
-extern "C" void bodyclock_reader_unload(void) {
+extern "C" void yoai_reader_unload(void) {
     std::lock_guard<std::mutex> guard(reader_mutex());
     reader().unload();
     reader_model_type().clear();
 }
 
-extern "C" const char* bodyclock_reader_model_type(void) {
+extern "C" const char* yoai_reader_model_type(void) {
     std::lock_guard<std::mutex> guard(reader_mutex());
     reader_model_type() = reader().model_type();
     return reader_model_type().c_str();
 }
 
-extern "C" void bodyclock_reader_set_voice(const char* instruct) {
+extern "C" void yoai_reader_set_voice(const char* instruct) {
     std::lock_guard<std::mutex> guard(reader_mutex());
     reader().set_voice(instruct ? instruct : "");
 }
 
-extern "C" void bodyclock_reader_set_speaker(const char* name) {
+extern "C" void yoai_reader_set_speaker(const char* name) {
     std::lock_guard<std::mutex> guard(reader_mutex());
     reader().set_speaker(name ? name : "");
 }
 
-extern "C" int bodyclock_reader_set_reference_voice(const char* wav_path) {
+extern "C" int yoai_reader_set_reference_voice(const char* wav_path) {
     if (blank(wav_path)) {
         reader_error() = "a reference voice needs a WAV";
         return 1;
@@ -1768,12 +1768,12 @@ extern "C" int bodyclock_reader_set_reference_voice(const char* wav_path) {
     return 0;
 }
 
-extern "C" void bodyclock_reader_set_seed(long long seed) {
+extern "C" void yoai_reader_set_seed(long long seed) {
     std::lock_guard<std::mutex> guard(reader_mutex());
     reader().set_seed(seed);
 }
 
-extern "C" void bodyclock_reader_set_split(int min_chars, int max_chars, int tail_chars) {
+extern "C" void yoai_reader_set_split(int min_chars, int max_chars, int tail_chars) {
     std::lock_guard<std::mutex> guard(reader_mutex());
     // Each field independently, so a host can set one and leave the measured
     // defaults in place for the others.
@@ -1790,20 +1790,20 @@ extern "C" void bodyclock_reader_set_split(int min_chars, int max_chars, int tai
     reader().set_split(opt);
 }
 
-extern "C" void bodyclock_reader_set_clause_cuts(int on) {
+extern "C" void yoai_reader_set_clause_cuts(int on) {
     std::lock_guard<std::mutex> guard(reader_mutex());
     yoai::voice::SplitOptions opt = reader().split();
     opt.clause_cuts = (on != 0);
     reader().set_split(opt);
 }
 
-extern "C" void bodyclock_reader_set_threads(int threads) {
+extern "C" void yoai_reader_set_threads(int threads) {
     std::lock_guard<std::mutex> guard(reader_mutex());
     reader().set_threads(threads);
 }
 
-extern "C" int bodyclock_reader_begin(bodyclock_reader_audio_handler on_audio,
-                                      void* user_data) {
+extern "C" int yoai_reader_begin(yoai_reader_audio_handler on_audio,
+                                 void* user_data) {
     std::lock_guard<std::mutex> guard(reader_mutex());
     reader_bridge().handler   = on_audio;
     reader_bridge().user_data = user_data;
@@ -1815,7 +1815,7 @@ extern "C" int bodyclock_reader_begin(bodyclock_reader_audio_handler on_audio,
     return 1;
 }
 
-extern "C" int bodyclock_reader_feed(const char* delta) {
+extern "C" int yoai_reader_feed(const char* delta) {
     if (delta == 0 || *delta == 0) {
         return 1;   // nothing to add is not a failure
     }
@@ -1827,7 +1827,7 @@ extern "C" int bodyclock_reader_feed(const char* delta) {
     return reader().feed(delta) ? 1 : 0;
 }
 
-extern "C" const char* bodyclock_reader_finish(void) {
+extern "C" const char* yoai_reader_finish(void) {
     yoai::voice::ReaderResult result;
     // Also without the lock: finish() BLOCKS for the rest of the speech, and
     // holding the configuration mutex for that long would freeze every status
@@ -1857,6 +1857,6 @@ extern "C" const char* bodyclock_reader_finish(void) {
     return reader_buffer().c_str();
 }
 
-extern "C" const char* bodyclock_reader_last_error(void) {
+extern "C" const char* yoai_reader_last_error(void) {
     return reader_error().c_str();
 }

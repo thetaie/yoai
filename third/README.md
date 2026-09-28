@@ -15,6 +15,7 @@ differently:
 | | what it gives us | used by |
 | --- | --- | --- |
 | [**sqlite3/**](sqlite3/README.md) | the SQLite amalgamation, compiled straight into the core | `CMakeLists.txt` |
+| [**sqlite-vec/**](sqlite-vec/README.md) | vector search as a SQLite virtual table, compiled in beside it | `CMakeLists.txt`, for `src/memory` |
 | [**rapidjson/**](rapidjson/README.md) | RapidJSON's headers, pinned to one upstream commit | `CMakeLists.txt`, for `src/llm` and `src/platform` |
 | [**lucide/**](lucide/README.md) | a pinned copy of the icon set; the source of truth for icon path data | the apps' icon tables, via [design/icons.md](../design/icons.md) |
 

@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#ifdef BODYCLOCK_ASR
+#ifdef YOAI_ASR
 #include "ggml.h"
 #include "ggml-alloc.h"
 #include "ggml-backend.h"
@@ -21,7 +21,7 @@
 namespace yoai {
 namespace voice {
 
-#ifdef BODYCLOCK_ASR
+#ifdef YOAI_ASR
 
 namespace {
 
@@ -673,7 +673,7 @@ bool SenseVoice::transcribe(const float* pcm, size_t n_samples, Transcript* out)
     return true;
 }
 
-#else   // !BODYCLOCK_ASR
+#else   // !YOAI_ASR
 
 // The lane compiles out to a truthful stub rather than disappearing, so a host
 // links the same symbols either way and asks available() before offering voice
@@ -705,7 +705,7 @@ bool SenseVoice::transcribe(const float*, size_t, Transcript* out) {
     return false;
 }
 
-#endif  // BODYCLOCK_ASR
+#endif  // YOAI_ASR
 
 }  // namespace voice
 }  // namespace yoai

@@ -9,11 +9,11 @@ rem With no arguments it configures if needed and builds, like every other
 rem build script in this repo. help, -h or --help prints :usage below.
 rem
 rem `tts` assembles a qwentts.cpp SDK into build\qtts-sdk\ and configures with
-rem -DBODYCLOCK_QTTS=ON -- speech output for the tools in cli\, without the
+rem -DYOAI_QTTS=ON -- speech output for the tools in cli\, without the
 rem desktop app. See :qtts_sdk.
 rem
 rem `asr` assembles a desktop ggml SDK into build\llama-sdk\ from a llama.cpp
-rem checkout and configures with -DBODYCLOCK_ASR=ON. Only ggml is built --
+rem checkout and configures with -DYOAI_ASR=ON. Only ggml is built --
 rem recognition does not link llama -- so this is a couple of minutes, not the
 rem twenty the full engine takes.
 setlocal EnableExtensions EnableDelayedExpansion
@@ -65,13 +65,13 @@ rem was configured without it would change nothing. Said here, before any SDK
 rem is built, rather than after minutes of building one.
 if exist "%BUILD_DIR%\build.ninja" (
     if defined DO_ASR (
-        findstr /C:"BODYCLOCK_ASR:BOOL=ON" "%BUILD_DIR%\CMakeCache.txt" >nul 2>&1 || (
+        findstr /C:"YOAI_ASR:BOOL=ON" "%BUILD_DIR%\CMakeCache.txt" >nul 2>&1 || (
             echo [build] build\ was configured without asr; re-run as: build.cmd clean asr>&2
             exit /b 1
         )
     )
     if defined DO_TTS (
-        findstr /C:"BODYCLOCK_QTTS:BOOL=ON" "%BUILD_DIR%\CMakeCache.txt" >nul 2>&1 || (
+        findstr /C:"YOAI_QTTS:BOOL=ON" "%BUILD_DIR%\CMakeCache.txt" >nul 2>&1 || (
             echo [build] build\ was configured without tts; re-run as: build.cmd clean tts>&2
             exit /b 1
         )
@@ -85,14 +85,14 @@ set "ASR_ON="
 set "ASR_DIR="
 if defined DO_ASR (
     call :ggml_sdk || exit /b 1
-    set "ASR_ON=-DBODYCLOCK_ASR=ON"
+    set "ASR_ON=-DYOAI_ASR=ON"
     set ASR_DIR="-DLLAMA_CPP_DIR=%BUILD_DIR%\llama-sdk"
 )
 set "TTS_ON="
 set "TTS_DIR="
 if defined DO_TTS (
     call :qtts_sdk || exit /b 1
-    set "TTS_ON=-DBODYCLOCK_QTTS=ON"
+    set "TTS_ON=-DYOAI_QTTS=ON"
     set TTS_DIR="-DQTTS_DIR=%BUILD_DIR%\qtts-sdk"
 )
 
