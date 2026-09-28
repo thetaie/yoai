@@ -3354,6 +3354,111 @@ The first two shapes are errors in arithmetic and in reading. This one is an
 error in the experiment: **an option left out of the question cannot be chosen
 by the answer.**
 
+## Base with one vector: what steers the voice, and what does not
+
+**The conversation voice is now 1.7B Base, anchored by a speaker vector** —
+qwen.h's clone mode A — and the table under "The answer" above no longer
+decides it. Every Base figure in that table was mode B, the reference's codes
+held in context for every frame. Mode A holds one vector and nothing else, and
+on the desktop GPU it runs at **RTF 0.57–0.59, against 0.57 for CustomVoice
+back to back and VoiceDesign's 0.57–0.58**: the talkers are the same 1.7B, 28
+layers at hidden 2048, and a vector in one prompt slot adds nothing per frame.
+src/voice/tts/reader.hpp has the runs.
+
+Why Base and not the other two, for a reply read in pieces as it is written:
+
+| | across pieces of one reply | RTF, desktop GPU |
+| --- | --- | --- |
+| Base, mode A | register held: spread 1.31 st on average, 0.59–1.68 over four seeds | 0.57–0.59 |
+| CustomVoice, named speaker | spread 3.09 st on average; one piece in sixteen came out **five semitones low** | 0.57 |
+| VoiceDesign, described | not measured split; nothing but the description ties the pieces | 0.57–0.58 |
+| Base, mode B | identity and prosody, by the reference in context | not measured; 1.97 on the CPU with a 22 s reference, against VoiceDesign's 1.16 there |
+
+So **VoiceDesign becomes a tool rather than a voice**: describe one, render a
+passage, and extract that as a reference. A synthesized reference anchors
+slightly worse than a recording — 1.68 st mean against 1.31 — and still far
+better than none, at 3.09.
+
+### The vector
+
+It is the model's own speaker encoder applied to a recording, and it is exactly
+as wide as the talker: **2048 values for 1.7B, 1024 for 0.6B**, so one file per
+model size. The Q4_K_M and Q8_0 talkers of each size produce **bit-identical**
+vectors from the same recording — the speaker encoder is not quantized — so the
+quantization does not need one of its own. Extracting takes about 4.5 s for a
+17-second recording; the result is saved as a `.spk` (raw f32, the format
+qwentts.cpp's qwen-codec writes) and loading one costs nothing.
+speaker/01_female holds the one shipped.
+
+### Everything in the prompt is a vector; only one slot is a control
+
+The talker is fed a sequence of vectors and nothing else, so anything could in
+principle be written into any position. What differs is **what each position
+saw in training**:
+
+- **The speaker slot** saw the encoder's continuous output — a different vector
+  for every speaker and every recording. It was trained to read a space, so a
+  vector it never saw (a new recording, the mean of two) still lands in it.
+- **The instruct and text positions** are table lookups
+  (`text_projection(text_embedding(token))`, prompt-builder.h) — in training,
+  always one of about 150,000 discrete points, in sequences that are language.
+  A vector between two tokens, or one built by hand, is off that manifold, and
+  what the model does with it cannot be predicted.
+
+That is why a voice can be steered by a vector on Base and not on VoiceDesign.
+VoiceDesign has no speaker slot at all (base: text; voice_design: text and
+instruct; custom_voice: text and a speaker id), and the engine refuses a `.spk`
+for any checkpoint but Base. Interpolating two descriptions' vectors, or a soft
+prompt, would work on the instruct positions only as far as the model
+generalizes — a soft prompt works for language models because it is optimized
+by gradient, which is training, and ggml does not do it.
+
+### Emotion and pace have no vector
+
+Base takes no instruct, and nothing in qwen.h controls emotion or speed. What
+could, in order of how likely it is to work — **none of it measured**:
+
+- **The speaker vector may carry some style.** An encoder trained to tell
+  speakers apart should ignore mood, but they rarely do entirely. Speed is the
+  least likely to survive: the vector is pooled over the whole recording, and a
+  statistic over time discards tempo. If a style does survive, its direction —
+  `emb(cheerful) − emb(calm)`, same speaker — could be added to the anchor as a
+  continuous control.
+- **Mode B controls by example.** Its reference sits in context and the model
+  continues it, prosody and pace included: a quickly spoken reference should
+  give quicker speech. It costs context per frame; a 22 s reference ran at RTF
+  1.97 on the CPU against 1.16 without one, and a 3–5 s reference, 40–60 frames
+  against 280, has not been measured.
+- **Steering the talker's activations** — adding a direction to its residual
+  stream, found by contrasting fast and slow runs — would mean changing the
+  engine's graph, and nobody has shown it works on this model.
+
+The experiment that answers the first two: one speaker reads the same passage
+slow, normal, fast and cheerful; each take becomes a `.spk` and a mode B
+reference; the same text is rendered from all eight and measured for
+characters a second, F0 and RTF.
+
+### The text is the one channel that is free
+
+The model reacts to what it reads. **Two full stops in a row are spoken as a
+hesitation — an audible "呃"** before the next sentence. It was found as a
+defect, when a line break was turned into a full stop after one that was
+already there, and src/voice/text/speakable.cpp now never writes two. The same
+channel may carry more — "……", "——", written fillers such as "嗯……", final
+particles — and none of those has been listened to.
+
+### Why a long reply sounds read aloud, and what is being done
+
+Every piece is its own generation and starts from a sentence's opening state,
+so every piece is read at the same pace; a whole take varies it across the
+passage. **The one lever measured is cutting less**: 30 characters a piece
+sounded better than 12. Later pieces now wait for 30 to 80 characters
+(SplitOptions::later_min_chars) and are cut early only when the listener has
+under a second of audio left — which helps most when the writer is faster than
+the speech. Two further levers are unbuilt: conditioning each piece on the
+previous one's last seconds through mode B, so the pace carries over, and a
+per-piece time-stretch of a few percent from a pace plan over the reply.
+
 ## CosyVoice3 was built and measured, and the reference length is the result
 
 Looked at for one reason: **streaming text input**. Every engine here takes a

@@ -129,6 +129,21 @@ export const S = {
   settingsReaderRefPick: '选择文件',
   settingsReaderRefBusy: '处理中…',
   settingsReaderRefReset: '恢复默认',
+  settingsReaderRefRecord: '录制',
+  recordTitle: '录一段自己的声音',
+  recordScript:
+    '今天天气不错，我打算下午去湖边走一走。那里的风景很好，春天有花，秋天有鸟。如果你也有空，我们可以一起去，顺便找家小店喝杯茶，聊聊最近的事情。回来的时候，记得提醒我买点水果。',
+  recordNote:
+    '用平常说话的语气，把上面这段读完，约 20 秒。找个安静的地方，离麦克风一拳左右。录好后先回放听一下，再点“用这段录音”。',
+  recordNoMic: '打不开麦克风',
+  recordStart: '开始录音',
+  recordStop: '停止',
+  recordAgain: '重录',
+  recordPlay: '回放',
+  recordUse: '用这段录音',
+  recordSaving: '正在提取…',
+  recordTooShort: '太短了，至少录 10 秒。',
+  recordClipped: '声音过载（削波），离麦克风远一点再录一遍。',
   settingsReaderRefNote:
     '可选 .wav 录音（单声道、16 位、24 kHz；实测用过 17 秒和 22 秒的录音）或 .spk 向量。录音首次使用时提取一次，约需数秒，之后直接读缓存；.spk 须与模型尺寸一致（1.7B 为 2048 维，0.6B 为 1024 维）。默认读取 speaker/01_female。回复分段合成，每一段都锚到同一个音色上，否则段与段之间会换音区——实测十六段里有一段低了五个半音。',
   settingsReaderMin: '攒够多少字再开口',

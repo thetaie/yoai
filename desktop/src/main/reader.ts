@@ -19,7 +19,7 @@
  */
 import { app } from 'electron'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ReaderStatus } from '../shared/api'
 import { core } from './core'
@@ -237,6 +237,27 @@ function applyReference(): Promise<string> {
       resolve('')
     })
   })
+}
+
+/**
+ * A take recorded in the settings screen, kept and used as the reference voice.
+ *
+ * Kept as the recording rather than only as its embedding, so it can be
+ * extracted again for the other model size, or played back later. Under
+ * userData/speaker/, one file per take, named by when it was made.
+ */
+export async function useRecording(wav: Uint8Array): Promise<string> {
+  // A take the page could have made is seconds of 16-bit mono at 24 kHz; the
+  // cap is far past that, so only something that is not a take reaches it.
+  if (wav.length < 44 || wav.length > 32 * 1024 * 1024) {
+    return 'not a recording this page could have made'
+  }
+  const dir = join(app.getPath('userData'), 'speaker')
+  mkdirSync(dir, { recursive: true })
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15)
+  const path = join(dir, `recording-${stamp}.wav`)
+  writeFileSync(path, wav)
+  return setReference(path)
 }
 
 /**

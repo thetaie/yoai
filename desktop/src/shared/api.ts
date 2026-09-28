@@ -86,6 +86,7 @@ export const CHANNELS = {
   readerCancel: 'reader:cancel',
   readerPickReference: 'reader:pickReference',
   readerResetReference: 'reader:resetReference',
+  readerUseRecording: 'reader:useRecording',
   /** Main -> renderer: PCM chunks in reading order, then the timings. */
   readerEvent: 'reader:event',
 
@@ -381,6 +382,11 @@ export interface YoaiApi {
     pickReference(): Promise<string | null>
     /** Back to the bundled reference voice. '' or why it could not be used. */
     resetReference(): Promise<string>
+    /**
+     * Keep a take recorded on this page -- a 16-bit mono WAV at 24 kHz -- and use
+     * it as the reference voice. '' or why it could not be used.
+     */
+    useRecording(wav: Uint8Array): Promise<string>
     /** Open a stream. False when the engine is not loaded or one is open. */
     begin(): Promise<boolean>
     /** Add text. Returns at once; the audio arrives through onEvent. */

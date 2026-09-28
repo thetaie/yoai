@@ -426,6 +426,9 @@ export function registerHandlers(): void {
     return reader.setReference(result.filePaths[0])
   })
   handle<[], string>(CHANNELS.readerResetReference, () => reader.setReference(''))
+  handle<[Uint8Array], string>(CHANNELS.readerUseRecording, (wav) =>
+    wav instanceof Uint8Array ? reader.useRecording(wav) : Promise.resolve('not a recording')
+  )
 
   // The stream itself. begin() installs a sink that forwards to the window that
   // asked; feed() and finish() are fire-and-forget from the renderer's side,

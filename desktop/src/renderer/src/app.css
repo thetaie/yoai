@@ -248,6 +248,40 @@ select {
   color: var(--bc-danger);
 }
 
+/* Recording a reference voice, under the voice settings. */
+.recorder {
+  margin-top: 10px;
+}
+
+.recorder-script {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--bc-radius);
+  background: var(--bc-bg-page);
+  line-height: 1.8;
+}
+
+.recorder-clock {
+  font-variant-numeric: tabular-nums;
+  margin-right: 10px;
+}
+
+.recorder-meter {
+  display: inline-block;
+  vertical-align: middle;
+  width: 120px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bc-divider);
+  overflow: hidden;
+}
+
+.recorder-meter > span {
+  display: block;
+  height: 100%;
+  background: var(--bc-brand);
+}
+
 /* A reply rendered from markdown. `normal` because the bubble's pre-wrap would
    show the newlines between rendered blocks as blank lines; a code block keeps
    its own whitespace below. Margins only between blocks, so the bubble's

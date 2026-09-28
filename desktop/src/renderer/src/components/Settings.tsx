@@ -24,6 +24,7 @@ import type { ModelLoadState, ReaderStatus, OmniStatus, TtsStatus } from '@share
 import type { CoreStatus, InterfacePrefs } from '@shared/store'
 import { FAMILY_LABEL, S } from '../strings'
 import * as tts from '../tts'
+import { VoiceRecorder } from './VoiceRecorder'
 
 interface Props {
   status: CoreStatus
@@ -70,6 +71,8 @@ export function Settings({
   const [readerStatus, setReaderStatus] = useState<ReaderStatus | null>(null)
   /** A reference voice being picked, or extracted from a recording. */
   const [refBusy, setRefBusy] = useState(false)
+  /** The recorder open under the reference voice. */
+  const [recording, setRecording] = useState(false)
   const [readerNote, setReaderNote] = useState<{ text: string; tone: 'danger' | 'success' } | null>(
     null
   )
@@ -597,6 +600,13 @@ export function Settings({
                     )}
                     <button
                       className="btn"
+                      disabled={refBusy || recording}
+                      onClick={() => setRecording(true)}
+                    >
+                      {S.settingsReaderRefRecord}
+                    </button>
+                    <button
+                      className="btn"
                       disabled={refBusy}
                       onClick={() => void chooseReference('pick')}
                     >
@@ -604,6 +614,15 @@ export function Settings({
                     </button>
                   </div>
                 </div>
+                {recording && (
+                  <VoiceRecorder
+                    onUsed={() => {
+                      setRecording(false)
+                      void window.yoai.reader.status().then(setReaderStatus)
+                    }}
+                    onClose={() => setRecording(false)}
+                  />
+                )}
                 <span className="field-note">{S.settingsReaderRefNote}</span>
 
                 {/* No 载入 button: the voice loads by itself once both files are
