@@ -1,7 +1,7 @@
-package ai.bodyclock.app
+package com.yoai.bodyclock
 
-import ai.bodyclock.app.day.HomeScreen
-import ai.bodyclock.app.ui.BodyClockTheme
+import com.yoai.bodyclock.day.HomeScreen
+import com.yoai.bodyclock.ui.YoaiTheme
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -20,14 +20,14 @@ import androidx.activity.enableEdgeToEdge
  * The palette family is fixed to the default here. The picker that changes it
  * is design round 1g, which is a settings screen and not yet built; when it
  * lands it reads a stored preference and passes it in, which is why
- * [BodyClockTheme] takes a family rather than looking one up.
+ * [YoaiTheme] takes a family rather than looking one up.
  */
 class HomeActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            BodyClockTheme {
+            YoaiTheme {
                 HomeScreen()
             }
         }

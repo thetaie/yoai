@@ -22,8 +22,9 @@ Four decisions worth keeping:
   run behind the ring instead of stopping short of it — that overlap is what
   puts the figure inside the day rather than inside a circle. At small sizes it
   drops out entirely (see below) and the mark still works.
-- **The mark carries no text.** The wordmark is the words `Body Clock`, set
-  separately. One asset set serves all eleven languages.
+- **The mark carries no text.** The wordmark is the name, set separately --
+  still the old name, `Body Clock`, until it is redrawn for YoAI (see "How the
+  name is written"). One asset set serves all eleven languages.
 
 ## Geometry
 
@@ -143,7 +144,8 @@ to match:
 
 ## Horizontal wordmark (`13c`)
 
-For the website and the tablet sidebar: `B` + the ring as the `o` + `dy Clock`.
+For the website and the tablet sidebar: `B` + the ring as the `o` + `dy Clock`
+-- the old name; not yet redrawn for YoAI.
 The letters are 600 weight, `letter-spacing: -0.03em`, in the UI font. Minimum
 height 18px.
 
@@ -158,20 +160,18 @@ The app-icon slot always uses the `16d` mark, never the wordmark.
 
 ## How the name is written
 
-`Body Clock`, with the space — that is the term the name means, and the
-wordmark depends on it, since the ring stands in for the `o` of *Body* and the
-rest is set as `dy Clock`.
+`YoAI` — capital Y, lowercase o, capital AI — everywhere a person reads it:
+`app_name`, the launcher label `EntryAbility_label`, `EntryAbility_desc` and the
+strings that speak the name inside the app. One spelling; with no space in it,
+the launcher label needs no exception of its own.
 
-**The launcher label is the one exception: `BodyClock`, closed up.** It is a
-separate resource from the app name — `EntryAbility_label` in each locale, not
-`app_name` — and closing the space buys back about half a character of width,
-measured at 5–6% of the label across several UI sans faces. That is deliberate;
-do not "fix" it to match. Everywhere else the name keeps its space, including
-`app_name`, `EntryAbility_desc` and the two strings that speak the name inside
-the app.
+The app was called `Body Clock` before, and the drawn assets above still say
+so: the horizontal wordmark is `B` + the ring as the `o` + `dy Clock`. YoAI has
+its `o` in the same place, second letter, so the same idea carries over, but the
+wordmark has not been redrawn.
 
-Where a single token is needed — a bundle id, a domain, a file name — use
-lowercase `bodyclock`. Never `BodyClock` as a second display spelling.
+Where a single token is needed it is lowercase `yoai` (`libyoai.so`); the
+bundle id is `com.yoai.bodyclock`.
 
 ## The HarmonyOS assets
 

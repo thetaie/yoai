@@ -2,7 +2,7 @@
  * The bridge, and the only thing the page can see.
  *
  * Runs in the renderer's process with contextIsolation on, so what is handed to
- * `window.bodyclock` is a plain object of functions and nothing else: no
+ * `window.yoai` is a plain object of functions and nothing else: no
  * ipcRenderer, no module, no require. Every call forwards to a named handler in
  * src/main/ipc.ts, and the shape is src/shared/api.ts -- so the surface is
  * declared in one file, implemented in another, and exposed here.
@@ -14,7 +14,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import {
   API_KEY,
-  BodyclockApi,
+  YoaiApi,
   CHANNELS,
   ChatSettings,
   OmniEvent,
@@ -29,7 +29,7 @@ import type { ChatEvent, ChatMessage, WireMessage } from '../shared/chat'
 import type { ModelConfig } from '../shared/provider'
 import type { CoreStatus, InterfacePrefs, KeySaveResult, SessionMeta } from '../shared/store'
 
-const api: BodyclockApi = {
+const api: YoaiApi = {
   coreStatus: () => ipcRenderer.invoke(CHANNELS.coreStatus) as Promise<CoreStatus>,
 
   models: {

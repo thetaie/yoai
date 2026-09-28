@@ -22,7 +22,7 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar-head">
-        <span className="wordmark">Body Clock</span>
+        <span className="wordmark">YoAI</span>
         <button className="btn btn-quiet" onClick={onNew} title="新对话">
           ＋
         </button>

@@ -67,18 +67,18 @@ export function App(): JSX.Element {
   //----------------------------------------------------------------------------
 
   const reloadModels = useCallback(async () => {
-    setModels(await window.bodyclock.models.list())
-    setActiveId(await window.bodyclock.models.activeId())
+    setModels(await window.yoai.models.list())
+    setActiveId(await window.yoai.models.activeId())
   }, [])
 
   const reloadSessions = useCallback(async () => {
-    setSessions(await window.bodyclock.sessions.index())
+    setSessions(await window.yoai.sessions.index())
   }, [])
 
   useEffect(() => {
     void (async () => {
-      setStatus(await window.bodyclock.coreStatus())
-      setPrefs(await window.bodyclock.prefs.get())
+      setStatus(await window.yoai.coreStatus())
+      setPrefs(await window.yoai.prefs.get())
       await reloadModels()
       await reloadSessions()
     })()
@@ -104,7 +104,7 @@ export function App(): JSX.Element {
   }, [prefs.paletteFamily, prefs.fontScale, resolvedMode])
 
   const changePrefs = (patch: Partial<InterfacePrefs>): void => {
-    void window.bodyclock.prefs.set(patch).then(setPrefs)
+    void window.yoai.prefs.set(patch).then(setPrefs)
   }
 
   //----------------------------------------------------------------------------
@@ -113,7 +113,7 @@ export function App(): JSX.Element {
 
   const persist = useCallback(
     async (id: string, msgs: ChatMessage[]) => {
-      await window.bodyclock.sessions.save(id, msgs)
+      await window.yoai.sessions.save(id, msgs)
       await reloadSessions()
     },
     [reloadSessions]
@@ -124,7 +124,7 @@ export function App(): JSX.Element {
       return // switching mid-turn would stream into the wrong transcript
     }
     setSessionId(id)
-    setThread(await window.bodyclock.sessions.messages(id))
+    setThread(await window.yoai.sessions.messages(id))
     setUsage(null)
     setView('chat')
   }
@@ -137,7 +137,7 @@ export function App(): JSX.Element {
     // enough for a remote provider, which is handed the whole conversation every
     // turn and keeps nothing; an on-device one keeps a KV cache, and the next
     // prompt having one message in it does not by itself empty it.
-    void window.bodyclock.chat.forget().catch(() => undefined)
+    void window.yoai.chat.forget().catch(() => undefined)
     setSessionId(newSessionId())
     setThread([])
     setUsage(null)
@@ -145,7 +145,7 @@ export function App(): JSX.Element {
   }
 
   const dropSession = async (id: string): Promise<void> => {
-    await window.bodyclock.sessions.remove(id)
+    await window.yoai.sessions.remove(id)
     await reloadSessions()
     if (id === sessionId) {
       newSession()
@@ -153,7 +153,7 @@ export function App(): JSX.Element {
   }
 
   const clearSessions = async (): Promise<void> => {
-    await window.bodyclock.sessions.clear()
+    await window.yoai.sessions.clear()
     await reloadSessions()
     newSession()
   }
@@ -275,7 +275,7 @@ export function App(): JSX.Element {
       // the Talker then spends most of a minute saying it. onText puts those
       // words on screen at the moment they exist, so the page is not silent
       // while the speech it is reading out plays.
-      const om = await window.bodyclock.omni.status()
+      const om = await window.yoai.omni.status()
       if (om.available && om.loaded && om.enabled) {
         try {
           const r = await omni.ask(text, (t) => {
@@ -320,7 +320,7 @@ export function App(): JSX.Element {
         return
       }
 
-      const { systemPrompt } = await window.bodyclock.chat.settings()
+      const { systemPrompt } = await window.yoai.chat.settings()
 
       // The reading lane, decided BEFORE the turn starts because it has to be
       // open before the first token arrives. Asked fresh for the same reason
@@ -392,7 +392,7 @@ export function App(): JSX.Element {
             }
           } else if (!aborted && reply.length > 0) {
             void (async () => {
-              const st = await window.bodyclock.tts.status()
+              const st = await window.yoai.tts.status()
               if (st.available && st.loaded && st.autoSpeak) {
                 void tts.speak(turnSession, reply)
               }
@@ -444,7 +444,7 @@ export function App(): JSX.Element {
                 disabled={models.length === 0}
                 onChange={(e) => {
                   setActiveId(e.target.value)
-                  void window.bodyclock.models.setActiveId(e.target.value)
+                  void window.yoai.models.setActiveId(e.target.value)
                 }}
               >
                 {models.length === 0 ? (

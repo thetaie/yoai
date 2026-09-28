@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.5.0)
-project(bodyclock_napi)
+project(yoai_napi)
 
-# The HarmonyOS native module: libbodyclock.so = the NAPI bridge (napi_init.cpp) +
-# bodyclock_core, pulled in by add_subdirectory on the repo root.
+# The HarmonyOS native module: libyoai.so = the NAPI bridge (napi_init.cpp) +
+# yoai_core, pulled in by add_subdirectory on the repo root.
 #
 # The core's third-party dependencies come prebuilt from harmony/prebuilt/<abi>/
 # -- run harmony/build.cmd (or .sh) once per ABI before building the app, or
@@ -42,7 +42,7 @@ list(PREPEND CMAKE_FIND_ROOT_PATH "${YOAI_PREBUILT}")
 set(YOAI_BUILD_CLI OFF CACHE BOOL "" FORCE)
 
 # On-device LLM: llama.cpp cross-compiled for this ABI, linked STATICALLY into
-# libbodyclock.so. A HAP has nowhere to put a loose companion .so, and the device will
+# libyoai.so. A HAP has nowhere to put a loose companion .so, and the device will
 # not exec a standalone binary anyway, so in-process is the only way to run a
 # model here.
 #
@@ -84,7 +84,7 @@ if(DEFINED LLAMA_CPP_DIR)
     # app side for the same reason there is none for the LLM -- the SDK's
     # presence is the switch.
     set(YOAI_ASR ON CACHE BOOL "" FORCE)
-    message(STATUS "bodyclock_napi: on-device LLM and recognition from ${LLAMA_CPP_DIR}")
+    message(STATUS "yoai_napi: on-device LLM and recognition from ${LLAMA_CPP_DIR}")
 else()
     # FORCEd OFF, not merely left alone: now that the SDK's presence is the
     # switch, deleting it must actually turn the lane off. Without this a cached
@@ -112,7 +112,7 @@ endif()
 # endif()
 # if(DEFINED MNN_DIR)
 #     set(YOAI_MNN ON CACHE BOOL "" FORCE)
-#     message(STATUS "bodyclock_napi: omni speech output from ${MNN_DIR}")
+#     message(STATUS "yoai_napi: omni speech output from ${MNN_DIR}")
 # else()
 set(YOAI_MNN OFF CACHE BOOL "" FORCE)
 # endif()
@@ -135,25 +135,25 @@ if(NOT DEFINED QTTS_DIR)
 endif()
 if(DEFINED QTTS_DIR)
     set(YOAI_QTTS ON CACHE BOOL "" FORCE)
-    message(STATUS "bodyclock_napi: speech output from ${QTTS_DIR}")
+    message(STATUS "yoai_napi: speech output from ${QTTS_DIR}")
 else()
     set(YOAI_QTTS OFF CACHE BOOL "" FORCE)
 endif()
 
-add_subdirectory("${YOAI_REPO_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/bodyclock-core")
+add_subdirectory("${YOAI_REPO_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/yoai-core")
 
-# The target is bodyclock_napi but the artifact must be libbodyclock.so: it has to match
-# nm_modname in napi_init.cpp and the `import ... from 'libbodyclock.so'` on the
+# The target is yoai_napi but the artifact must be libyoai.so: it has to match
+# nm_modname in napi_init.cpp and the `import ... from 'libyoai.so'` on the
 # ArkTS side. Keeping the CMake target name distinct also avoids colliding with
 # the core's own target names.
-add_library(bodyclock_napi SHARED napi_init.cpp)
-set_target_properties(bodyclock_napi PROPERTIES OUTPUT_NAME bodyclock)
+add_library(yoai_napi SHARED napi_init.cpp)
+set_target_properties(yoai_napi PROPERTIES OUTPUT_NAME yoai)
 
-target_include_directories(bodyclock_napi PRIVATE "${YOAI_REPO_ROOT}/src")
+target_include_directories(yoai_napi PRIVATE "${YOAI_REPO_ROOT}/src")
 
 # libace_napi: the N-API implementation. libhilog_ndk: native logging, so the
 # worker thread's output lands in DevEco's Log window beside the ArkTS logs.
-target_link_libraries(bodyclock_napi PUBLIC
+target_link_libraries(yoai_napi PUBLIC
     libace_napi.z.so
     libhilog_ndk.z.so
-    bodyclock_core)
+    yoai_core)

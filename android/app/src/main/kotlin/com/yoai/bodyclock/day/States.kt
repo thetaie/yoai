@@ -1,7 +1,7 @@
-package ai.bodyclock.app.day
+package com.yoai.bodyclock.day
 
-import ai.bodyclock.app.R
-import ai.bodyclock.app.ui.Palette
+import com.yoai.bodyclock.R
+import com.yoai.bodyclock.ui.Palette
 import androidx.annotation.StringRes
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color

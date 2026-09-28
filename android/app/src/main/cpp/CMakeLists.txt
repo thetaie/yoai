@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.19)
-project(bodyclock_jni)
+project(yoai_jni)
 
-# The Android native module: libbodyclock.so = the JNI bridge (jni_init.cpp) +
-# bodyclock_core, pulled in by add_subdirectory on the repo root.
+# The Android native module: libyoai.so = the JNI bridge (jni_init.cpp) +
+# yoai_core, pulled in by add_subdirectory on the repo root.
 #
 # This is the Android counterpart of harmony/entry/src/main/cpp/CMakeLists.txt
 # and follows its one rule: BUILDING AN SDK IS TURNING ITS LANE ON. Nothing
@@ -58,7 +58,7 @@ set(YOAI_MNN OFF CACHE BOOL "" FORCE)
 # On-device LLM and recognition: llama.cpp, cross-compiled for this ABI
 #-------------------------------------------------------------------------------
 #
-# Linked STATICALLY into libbodyclock.so. An APK can ship loose .so files, but
+# Linked STATICALLY into libyoai.so. An APK can ship loose .so files, but
 # the core links ggml archives directly for recognition, so one library is both
 # simpler and what the HarmonyOS lane already does.
 #
@@ -96,7 +96,7 @@ if(DEFINED LLAMA_CPP_DIR)
     # archives and never touches libllama, so anything that can build the
     # on-device LLM can build this for free.
     set(YOAI_ASR ON CACHE BOOL "" FORCE)
-    message(STATUS "bodyclock_jni: on-device LLM and recognition from ${LLAMA_CPP_DIR}")
+    message(STATUS "yoai_jni: on-device LLM and recognition from ${LLAMA_CPP_DIR}")
 else()
     # FORCEd OFF, not merely left alone: the SDK's presence is the switch, so
     # deleting it must actually turn the lane off. Without this a cached ON from
@@ -121,25 +121,25 @@ if(NOT DEFINED QTTS_DIR)
 endif()
 if(DEFINED QTTS_DIR)
     set(YOAI_QTTS ON CACHE BOOL "" FORCE)
-    message(STATUS "bodyclock_jni: speech output from ${QTTS_DIR}")
+    message(STATUS "yoai_jni: speech output from ${QTTS_DIR}")
 else()
     set(YOAI_QTTS OFF CACHE BOOL "" FORCE)
 endif()
 
-add_subdirectory("${YOAI_REPO_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/bodyclock-core")
+add_subdirectory("${YOAI_REPO_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/yoai-core")
 
-# The target is bodyclock_jni but the artifact must be libbodyclock.so, to match
-# the System.loadLibrary("bodyclock") on the Kotlin side. Keeping the CMake
+# The target is yoai_jni but the artifact must be libyoai.so, to match
+# the System.loadLibrary("yoai") on the Kotlin side. Keeping the CMake
 # target name distinct also avoids colliding with the core's own target names.
-add_library(bodyclock_jni SHARED jni_init.cpp)
-set_target_properties(bodyclock_jni PROPERTIES OUTPUT_NAME bodyclock)
+add_library(yoai_jni SHARED jni_init.cpp)
+set_target_properties(yoai_jni PROPERTIES OUTPUT_NAME yoai)
 
-target_include_directories(bodyclock_jni PRIVATE "${YOAI_REPO_ROOT}/src")
+target_include_directories(yoai_jni PRIVATE "${YOAI_REPO_ROOT}/src")
 
 # log: __android_log_print, which is where src/utils/log.cpp routes on this
 # platform and where the worker threads' output has to land to be readable at
 # all -- stderr reaches nobody on a phone.
-target_link_libraries(bodyclock_jni PUBLIC
+target_link_libraries(yoai_jni PUBLIC
     log
     android
-    bodyclock_core)
+    yoai_core)

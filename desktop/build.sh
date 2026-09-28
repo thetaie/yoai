@@ -12,7 +12,7 @@
 # Usage: ./build.sh [clean] [addon] [llama] [qtts] [app]
 #
 #   (no args)  addon + app
-#   addon      just the Node-API addon (build/Release/bodyclock.node)
+#   addon      just the Node-API addon (build/Release/yoai.node)
 #   llama      assemble a desktop llama.cpp SDK and build the addon WITH the
 #              on-device lane. Implies addon.
 #   qtts       assemble a desktop qwentts.cpp SDK with the platform's GPU
@@ -44,7 +44,7 @@ DESKTOP_DIR="$(pwd)"
 PROJECT_DIR="$(cd .. && pwd)"
 
 # Defines yoai_load_env, called once the arguments are parsed.
-. "$PROJECT_DIR/scripts/load-env.sh"
+. "$PROJECT_DIR/_load-env.sh"
 THIRD_SYNC="$PROJECT_DIR/third/sync.sh"
 
 # Is this checkout what third/manifest.txt records? $1 the manifest name, $2
@@ -344,10 +344,10 @@ if [ -n "$DO_ADDON" ]; then
   # multi-config one under Release/. Both are checked because the module loader
   # in src/main/core.ts searches both, and this message is the one place that
   # can say which one actually happened.
-  ADDON="$BUILD_DIR/bodyclock.node"
-  [ -f "$ADDON" ] || ADDON="$BUILD_DIR/Release/bodyclock.node"
+  ADDON="$BUILD_DIR/yoai.node"
+  [ -f "$ADDON" ] || ADDON="$BUILD_DIR/Release/yoai.node"
   if [ ! -f "$ADDON" ]; then
-    echo "[build] cmake-js reported success but there is no bodyclock.node under $BUILD_DIR" >&2
+    echo "[build] cmake-js reported success but there is no yoai.node under $BUILD_DIR" >&2
     exit 1
   fi
   echo "[build] addon at $ADDON"

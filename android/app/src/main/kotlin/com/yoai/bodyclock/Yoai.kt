@@ -1,4 +1,4 @@
-package ai.bodyclock.app
+package com.yoai.bodyclock
 
 /**
  * The whole native surface, in one object.
@@ -15,15 +15,15 @@ package ai.bodyclock.app
  * A `String?` return is the C ABI's `const char*`: null means the call failed
  * and the reason is in logcat, and for the speech lane also in [nativeTtsLastError].
  */
-object Bodyclock {
+object Yoai {
 
     /**
-     * True when libbodyclock.so loaded. False means every call below would
+     * True when libyoai.so loaded. False means every call below would
      * throw, and the UI says so rather than crashing on the first tap -- a
      * device with the wrong ABI, or an APK built before the native lane was
      * configured, should be diagnosable from the screen.
      */
-    val loaded: Boolean = runCatching { System.loadLibrary("bodyclock") }.isSuccess
+    val loaded: Boolean = runCatching { System.loadLibrary("yoai") }.isSuccess
 
     /** Streaming reply events. Return false to abort the turn. */
     fun interface ChatSink {
@@ -56,7 +56,7 @@ object Bodyclock {
     // on an IO dispatcher -- see HomeViewModel -- because StrictMode is right
     // that a file read does not belong on the thread that draws.
     //
-    // [ai.bodyclock.app.day.Timeline] wraps them; nothing else should call them
+    // [com.yoai.bodyclock.day.Timeline] wraps them; nothing else should call them
     // directly.
     //
     // A write returns 0 on success; a read returns JSON, or null on failure.

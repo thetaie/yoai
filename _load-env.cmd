@@ -1,7 +1,9 @@
 @rem Settings for the build scripts, from the environment and from .env.
 @rem
-@rem CALLED, not run: `call "%~dp0..\scripts\load-env.cmd" NAME ...`. It sets
-@rem variables in the caller's environment, so it has no setlocal of its own.
+@rem CALLED, not run: `call "<repo>\_load-env.cmd" NAME ...` -- the leading
+@rem underscore marks it as something the build scripts call, not something to
+@rem run. It sets variables in the caller's environment, so it has no setlocal
+@rem of its own.
 @rem
 @rem The NAMEs are the paths the caller READS. Each one that is set by now --
 @rem from .env or from the environment, under either name -- must exist, or
@@ -28,8 +30,9 @@
 
 @rem A goto rather than an `if exist (...)` block: a ) anywhere in the checkout's
 @rem path would close the block early.
-@if not exist "%~dp0..\.env" goto yoai_map
-@for /f "usebackq tokens=1,* delims==" %%A in (`findstr /b /r /c:"YOAI_[A-Z0-9_]*=" "%~dp0..\.env"`) do @if not defined %%A set "%%A=%%~B"
+@rem %~dp0 is the repository root, where this file and .env both live.
+@if not exist "%~dp0.env" goto yoai_map
+@for /f "usebackq tokens=1,* delims==" %%A in (`findstr /b /r /c:"YOAI_[A-Z0-9_]*=" "%~dp0.env"`) do @if not defined %%A set "%%A=%%~B"
 
 :yoai_map
 @rem One list for every script. A script that does not read a name is not

@@ -1,4 +1,4 @@
-package ai.bodyclock.app.ui
+package com.yoai.bodyclock.ui
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -11,7 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 
 @Composable
-fun BodyclockTheme(
+fun YoaiBenchTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {

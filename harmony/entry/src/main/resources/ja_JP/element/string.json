@@ -2,15 +2,15 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "Body Clock entry module"
+      "value": "YoAI entry module"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "Body Clock"
+      "value": "YoAI"
     },
     {
       "name": "EntryAbility_label",
-      "value": "BodyClock"
+      "value": "YoAI"
     },
     {
       "name": "perm_internet_reason",
@@ -26,7 +26,7 @@
     },
     {
       "name": "chat_input_hint",
-      "value": "Message Body Clock…"
+      "value": "Message YoAI…"
     },
     {
       "name": "chat_need_model",
@@ -46,7 +46,7 @@
     },
     {
       "name": "chat_disclaimer",
-      "value": "Body Clock is an AI and can be wrong. Verify what matters."
+      "value": "YoAI is an AI and can be wrong. Verify what matters."
     },
     {
       "name": "chat_pick_model",

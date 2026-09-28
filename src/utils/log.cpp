@@ -39,7 +39,7 @@ bool enabled(LogLevel level) {
 }
 
 #if defined(__ANDROID__)
-constexpr const char* kTag = "bodyclock";
+constexpr const char* kTag = "yoai";
 
 void emit(int prio, const char* fmt, va_list ap) {
     __android_log_vprint(prio, kTag, fmt, ap);
@@ -56,7 +56,7 @@ void emit(int level, const char* fmt, va_list ap) {
     char buf[4096];
     std::vsnprintf(buf, sizeof(buf), fmt, ap);
     // %{public}s so the line is not redacted to <private> in DevEco's Log window.
-    OH_LOG_Print(LOG_APP, static_cast<::LogLevel>(level), 0x3200, "bodyclock", "%{public}s", buf);
+    OH_LOG_Print(LOG_APP, static_cast<::LogLevel>(level), 0x3200, "yoai", "%{public}s", buf);
 }
 #elif defined(YOAI_USE_OSLOG)
 void emit(os_log_type_t type, const char* fmt, va_list ap) {

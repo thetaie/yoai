@@ -4,5 +4,5 @@
       Compose owns every pixel above the window, so this exists only to give the
       splash and the task switcher something that is not the platform default.
     -->
-    <style name="Theme.Bodyclock" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.Yoai" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>

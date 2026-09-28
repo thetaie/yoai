@@ -1,6 +1,6 @@
-package ai.bodyclock.app.day
+package com.yoai.bodyclock.day
 
-import ai.bodyclock.app.R
+import com.yoai.bodyclock.R
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 

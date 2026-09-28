@@ -15,7 +15,7 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Bodyclock">
+        android:theme="@style/Theme.Yoai">
 
         <!--
           The app. Its state grid, its timer and its rolling window all read the
@@ -25,7 +25,7 @@
             android:name=".HomeActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.Bodyclock">
+            android:theme="@style/Theme.Yoai">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -44,7 +44,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/bench_name"
-            android:theme="@style/Theme.Bodyclock">
+            android:theme="@style/Theme.Yoai">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

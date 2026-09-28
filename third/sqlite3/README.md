@@ -20,11 +20,11 @@ the one exception, and one exception does not buy a dependency mechanism.
 Given that a copy travels with us regardless, carrying the source means every
 platform compiles the same bytes, from a version pinned by the file itself. It
 is the argument this build already makes for llama.cpp, and it costs about 1 MB
-per ABI inside `libbodyclock.so`.
+per ABI inside `libyoai.so`.
 
 ## Compile-time configuration
 
-The flags live in the root `CMakeLists.txt`, on the `bodyclock_sqlite3` target,
+The flags live in the root `CMakeLists.txt`, on the `yoai_sqlite3` target,
 each with the reason it is set. They are `PUBLIC` deliberately: several of them
 change what `sqlite3.h` declares, so a translation unit that includes the header
 has to be built with the same set.

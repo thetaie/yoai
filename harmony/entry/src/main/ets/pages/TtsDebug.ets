@@ -31,7 +31,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { picker } from '@kit.CoreFileKit';
 import { router } from '@kit.ArkUI';
 import fileUri from '@ohos.file.fileuri';
-import bodyclock from 'libbodyclock.so';
+import yoai from 'libyoai.so';
 import { ICON_TOOLBAR, icon } from '../core/Icons';
 import { LocalModelStore, PickedFile } from '../core/LocalModelStore';
 import { DEFAULT_FAMILY, Palette, resolvePalette } from '../core/Palettes';
@@ -170,9 +170,9 @@ struct TtsDebug {
 
   aboutToAppear(): void {
     this.resolveTheme();
-    this.engine = bodyclock.nativeTtsAvailable();
-    if (bodyclock.nativeTtsLoaded()) {
-      this.modelType = bodyclock.nativeTtsModelType();
+    this.engine = yoai.nativeTtsAvailable();
+    if (yoai.nativeTtsLoaded()) {
+      this.modelType = yoai.nativeTtsModelType();
     }
     this.restore();
   }
@@ -240,7 +240,7 @@ struct TtsDebug {
 
     this.busy = 'loading 2.2 GB…';
     this.note = '';
-    bodyclock.nativeTtsLoad(talker.path, codec.path, (type: string, content: string) => {
+    yoai.nativeTtsLoad(talker.path, codec.path, (type: string, content: string) => {
       this.busy = '';
       if (type === 'ok') {
         this.modelType = content;
@@ -271,7 +271,7 @@ struct TtsDebug {
    * so a custom_voice model is runnable without a second tap.
    */
   private readSpeakers(): void {
-    const raw: string = bodyclock.nativeTtsSpeakers();
+    const raw: string = yoai.nativeTtsSpeakers();
     let names: string[] = [];
     try {
       names = JSON.parse(raw) as string[];
@@ -280,7 +280,7 @@ struct TtsDebug {
     }
     this.speakers = names;
     this.speaker = names.length > 0 ? names[0] : '';
-    bodyclock.nativeTtsSetSpeaker(this.speaker);
+    yoai.nativeTtsSetSpeaker(this.speaker);
   }
 
   /**
@@ -313,15 +313,15 @@ struct TtsDebug {
     }
 
     const parsed: fileUri.FileUri = new fileUri.FileUri(uris[0]);
-    const rc: number = bodyclock.nativeTtsSetReference(parsed.path, this.refText.trim());
+    const rc: number = yoai.nativeTtsSetReference(parsed.path, this.refText.trim());
     if (rc !== 0) {
       this.refName = '';
       this.refSeconds = 0;
-      this.note = bodyclock.nativeTtsLastError();
+      this.note = yoai.nativeTtsLastError();
       return;
     }
     this.refName = parsed.name;
-    this.refSeconds = bodyclock.nativeTtsReferenceSeconds();
+    this.refSeconds = yoai.nativeTtsReferenceSeconds();
     this.result = undefined;
     this.note = '';
   }
@@ -335,7 +335,7 @@ struct TtsDebug {
    * compared is generation, which the reload does not touch.
    */
   private setThreads(n: number): void {
-    bodyclock.nativeTtsSetThreads(n);
+    yoai.nativeTtsSetThreads(n);
     this.threads = n;
     this.result = undefined;
     if (this.modelType !== '') {
@@ -348,7 +348,7 @@ struct TtsDebug {
   //----------------------------------------------------------------------------
 
   private say(): void {
-    if (!bodyclock.nativeTtsLoaded()) {
+    if (!yoai.nativeTtsLoaded()) {
       this.note = 'no model loaded';
       return;
     }
@@ -358,29 +358,29 @@ struct TtsDebug {
       return;
     }
 
-    bodyclock.nativeTtsSetVoice(this.voice.trim());
-    bodyclock.nativeTtsSetSpeaker(this.speaker);
-    bodyclock.nativeTtsSetStreaming(this.streaming);
-    bodyclock.nativeTtsSetSeed(this.pinSeed ? PINNED_SEED : -1);
+    yoai.nativeTtsSetVoice(this.voice.trim());
+    yoai.nativeTtsSetSpeaker(this.speaker);
+    yoai.nativeTtsSetStreaming(this.streaming);
+    yoai.nativeTtsSetSeed(this.pinSeed ? PINNED_SEED : -1);
     this.busy = 'speaking…';
     this.note = '';
     this.result = undefined;
     this.speechBytes = 0;
 
-    bodyclock.nativeTtsSay(line, true, (type: string, content: string) => {
+    yoai.nativeTtsSay(line, true, (type: string, content: string) => {
       this.busy = '';
       if (type !== 'result') {
         this.note = content;
         return;
       }
       this.result = JSON.parse(content) as TtsJson;
-      this.speechBytes = bodyclock.nativeTtsLastSpeech().byteLength;
+      this.speechBytes = yoai.nativeTtsLastSpeech().byteLength;
     });
   }
 
   /** Play what it said, at ITS rate rather than the recorder's. */
   private async play(): Promise<void> {
-    const pcm: ArrayBuffer = bodyclock.nativeTtsLastSpeech();
+    const pcm: ArrayBuffer = yoai.nativeTtsLastSpeech();
     if (pcm.byteLength === 0) {
       this.note = 'no speech to play';
       return;

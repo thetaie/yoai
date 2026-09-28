@@ -3,7 +3,7 @@
  *
  * The hard rule this file exists to hold: a key the user pastes lives in the
  * platform's encrypted asset store and nowhere else. It is never written to
- * preferences, never logged, never put in a crash report, and there is no Body Clock
+ * preferences, never logged, never put in a crash report, and there is no YoAI
  * server for it to be sent to.
  *
  * Backed by ASSET Kit, one asset per vendor, ALIAS = "key.<vendorId>".

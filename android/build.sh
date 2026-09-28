@@ -145,10 +145,10 @@ fi
 if [ -z "${ANDROID_NDK_ROOT:-}" ]; then
     NDK_VER=""
     if [ -f "$SCRIPT_DIR/gradle.properties" ]; then
-        NDK_VER="$(sed -n 's/^bodyclock\.ndk=//p' "$SCRIPT_DIR/gradle.properties" | head -1)"
+        NDK_VER="$(sed -n 's/^yoai\.ndk=//p' "$SCRIPT_DIR/gradle.properties" | head -1)"
     fi
     if [ -z "$NDK_VER" ]; then
-        echo "[build] no bodyclock.ndk in $SCRIPT_DIR/gradle.properties" >&2
+        echo "[build] no yoai.ndk in $SCRIPT_DIR/gradle.properties" >&2
         exit 1
     fi
     ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/$NDK_VER"
@@ -307,7 +307,7 @@ build_llama() {
         # the Kirin's -- which is most of what this lane exists to compare.
         #
         # It also fails to link if left on: the archives reference __kmpc_*
-        # and nothing pulls the runtime into libbodyclock.so.
+        # and nothing pulls the runtime into libyoai.so.
         -DGGML_OPENMP=OFF
     )
     if [ -n "$ARCH" ]; then
@@ -440,7 +440,7 @@ build_qtts() {
 #-----------------------------------------------------------------------------
 build_apk() {
     echo "[apk] assembleDebug"
-    (cd "$SCRIPT_DIR" && ./gradlew assembleDebug -Pbodyclock.abi="$ABI")
+    (cd "$SCRIPT_DIR" && ./gradlew assembleDebug -Pyoai.abi="$ABI")
     echo "[apk] done -> $SCRIPT_DIR/app/build/outputs/apk/debug/"
 }
 

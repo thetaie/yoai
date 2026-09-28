@@ -27,7 +27,7 @@ import fileUri from '@ohos.file.fileuri';
 import fileShare from '@ohos.fileshare';
 import fs from '@ohos.file.fs';
 import hilog from '@ohos.hilog';
-import bodyclock from 'libbodyclock.so';
+import yoai from 'libyoai.so';
 import { ModelConfig, KIND_LOCAL, LOCAL_VENDOR_ID, modelId } from '../model/Provider';
 
 /** What importModel() produced, or nothing when the user cancelled. */
@@ -51,7 +51,7 @@ export interface PickedFile {
 }
 
 function log(msg: string): void {
-  hilog.info(0x0000, 'bodyclock', '%{public}s', msg);
+  hilog.info(0x0000, 'yoai', '%{public}s', msg);
 }
 
 export class LocalModelStore {
@@ -64,7 +64,7 @@ export class LocalModelStore {
 
   static available(): boolean {
     if (LocalModelStore.availability === null) {
-      LocalModelStore.availability = bodyclock.nativeLocalAvailable();
+      LocalModelStore.availability = yoai.nativeLocalAvailable();
     }
     // `=== true` rather than returning the field: ArkTS does not narrow a static
     // member from `boolean | null` across the assignment above, so the plain

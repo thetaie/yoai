@@ -8,6 +8,7 @@ from a shell.
 |---|---|---|
 | `yoai-cli` | Chats with any OpenAI-compatible provider through the C ABI, the same path a host app uses | [main.cpp](main.cpp) |
 | `yoai-asr` | Transcribes WAV files with the on-device SenseVoice model | [asr.cpp](asr.cpp) |
+| `yoai-llama` | Chats with a GGUF, or embeds text with one, on llama.cpp | [llama.cpp](llama.cpp) |
 
 ## Building
 
@@ -31,6 +32,15 @@ build.cmd asr
 ./build.sh asr
 ```
 
+`yoai-llama` is always built too, and needs the on-device engine to do
+anything. `llama` builds libllama from the same checkout, on the same ggml --
+longer than `asr`, since it is the whole engine:
+
+```
+build.cmd llama
+./build.sh llama
+```
+
 `tts` compiles speech output (Qwen3-TTS) into the core the same way, without
 the desktop app. It needs a qwentts.cpp checkout as well as llama.cpp, whose
 ggml it compiles; both default to checkouts beside this repo (`YOAI_QTTS_SRC`,
@@ -43,9 +53,10 @@ build.cmd tts
 ./build.sh tts
 ```
 
-CMake caches which of these are on, so adding `asr` or `tts` to a `build/`
-that was configured without it does nothing. The script notices, stops, and
-tells you to run `build.cmd clean asr` (or `clean tts`) instead.
+CMake caches which of these are on, so adding `asr`, `llama` or `tts` to a
+`build/` that was configured without it does nothing. The script notices,
+stops, and tells you to run `build.cmd clean asr` (or `clean llama`, `clean
+tts`) instead. They combine: `build.cmd clean asr llama tts`.
 
 ## yoai-cli
 
@@ -61,8 +72,8 @@ yoai-cli [options] ["question"]
   --debug          verbose core logging
 ```
 
-`--base-url`, `--key` and `--model` fall back to `BODYCLOCK_BASE_URL`,
-`BODYCLOCK_API_KEY` and `BODYCLOCK_MODEL`. Pass the key through the
+`--base-url`, `--key` and `--model` fall back to `YOAI_BASE_URL`,
+`YOAI_API_KEY` and `YOAI_MODEL`. Pass the key through the
 environment: a flag ends up in shell history and in the process list.
 
 With a question it runs one turn and exits. Without one it reads turns from
@@ -109,3 +120,66 @@ clip.wav
   stray-capital filter are listed and marked `dropped`.
 - **Exit code.** 0 when every file was transcribed, 1 when any file failed or
   the build has no recognition engine, 2 for a usage error.
+
+## yoai-llama
+
+```
+yoai-llama chat  <model.gguf> [options] ["question"]
+yoai-llama embed <model.gguf> [options] <text> [more text ...]
+
+common
+  -t N             threads (default 4; <= 0 means every core)
+  --gpu N          layers to offload to a GPU (default 0; 999 for all)
+  --debug          verbose core logging
+
+chat
+  --system TEXT    system prompt
+  --thinking       let the model reason before answering (off by default)
+  --grammar FILE   constrain every reply with a GBNF grammar; greedy decoding
+  --ctx N          context ceiling in tokens (default 32768)
+  --predict N      most tokens per reply (default 8192)
+  --stats          prefill and decode speed after each turn
+
+embed
+  --query TEXT     rank the texts by similarity to TEXT instead
+  --task TEXT      the instruction put in front of the query
+  --ctx N          longest text in tokens (default 2048)
+  --vectors        print every vector in full, one JSON array per line
+```
+
+It drives `llm::LocalClient` and `llm::LocalEmbedder` directly, through the
+`Chat` and `Embedder` interfaces, rather than the C ABI: embedding has no C
+entry points yet, and the numbers worth seeing here -- prefill and decode
+speed, how similar two texts are -- are what the ABI leaves out.
+
+**chat** with a question runs one turn and exits. Without one it reads turns
+from stdin and keeps the transcript, so the KV-cache reuse across turns is
+exercised too. `/new` starts a new conversation; Ctrl-D quits (Ctrl-Z, Enter on
+Windows).
+
+```
+build\yoai-llama.exe chat Qwen3.5-2B-Q4_K_M.gguf --stats "Say hello in one word."
+Hi!
+[stats] prompt 18 tokens (0 reused), prefill 349 ms (51.6 tok/s), 2 tokens decoded (29.3 tok/s), ctx 4096, threads 8
+```
+
+**embed** prints the first components of each vector and every pair's
+similarity. With `--query` it ranks the texts against the query instead,
+embedding the query as a query -- with the model's instruction in front -- and
+the texts as documents, which is how search uses it:
+
+```
+build\yoai-llama.exe embed Qwen3-Embedding-0.6B-Q8_0.gguf --query "What did I eat?" ^
+    "Had beef noodles for lunch" "Ran five kilometers"
+0.5984  Had beef noodles for lunch
+0.3620  Ran five kilometers
+```
+
+- **Model.** A GGUF. For embed it has to be one llama.cpp pools, which is what
+  an embedding model is; a chat model is refused with a message saying so.
+- **Similarity.** The dot product of two unit vectors, i.e. their cosine.
+- **Chinese on Windows.** Arguments, typed input and output all go through the
+  console's wide API when there is a console, so Chinese text reaches the model
+  and the screen intact; see [console.hpp](console.hpp).
+- **Exit code.** 0 on success, 1 when the model will not load, a turn fails or
+  the build has no llama.cpp, 2 for a usage error.

@@ -1,4 +1,4 @@
-package ai.bodyclock.app
+package com.yoai.bodyclock
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
@@ -33,7 +33,7 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
 
     data class UiState(
         val device: DeviceInfo = DeviceInfo.read(),
-        val libLoaded: Boolean = Bodyclock.loaded,
+        val libLoaded: Boolean = Yoai.loaded,
         val coreVersion: String = "",
         val asrAvailable: Boolean = false,
         val ttsAvailable: Boolean = false,
@@ -63,15 +63,15 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         modelDir.mkdirs()
-        if (Bodyclock.loaded) {
-            Bodyclock.nativeSetLogLevel("info")
+        if (Yoai.loaded) {
+            Yoai.nativeSetLogLevel("info")
         }
         _state.update {
             it.copy(
-                coreVersion = if (Bodyclock.loaded) Bodyclock.nativeVersion().orEmpty() else "",
-                asrAvailable = Bodyclock.loaded && Bodyclock.nativeVoiceAvailable(),
-                ttsAvailable = Bodyclock.loaded && Bodyclock.nativeTtsAvailable(),
-                llmAvailable = Bodyclock.loaded && Bodyclock.nativeLocalAvailable(),
+                coreVersion = if (Yoai.loaded) Yoai.nativeVersion().orEmpty() else "",
+                asrAvailable = Yoai.loaded && Yoai.nativeVoiceAvailable(),
+                ttsAvailable = Yoai.loaded && Yoai.nativeTtsAvailable(),
+                llmAvailable = Yoai.loaded && Yoai.nativeLocalAvailable(),
                 modelDir = modelDir.absolutePath,
             )
         }
@@ -109,7 +109,7 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
         val rows = mutableListOf<BandwidthRow>()
         _state.update { it.copy(bandwidth = emptyList()) }
         for (threads in 1..state.value.device.cores) {
-            val json = Bodyclock.nativeMemoryBandwidth(threads, mib, passes)
+            val json = Yoai.nativeMemoryBandwidth(threads, mib, passes)
             if (json == null) {
                 log("bandwidth: $threads threads returned nothing; see logcat")
                 continue
@@ -149,25 +149,25 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
             return@run
         }
 
-        if (!Bodyclock.nativeTtsLoaded()) {
-            Bodyclock.nativeTtsSetThreads(threads)   // takes effect on the next load
+        if (!Yoai.nativeTtsLoaded()) {
+            Yoai.nativeTtsSetThreads(threads)   // takes effect on the next load
             val began = System.nanoTime()
-            val rc = Bodyclock.nativeTtsLoad(talkerFile.absolutePath, codecFile.absolutePath)
+            val rc = Yoai.nativeTtsLoad(talkerFile.absolutePath, codecFile.absolutePath)
             if (rc != 0) {
-                log("tts: load failed -- ${Bodyclock.nativeTtsLastError().orEmpty()}")
+                log("tts: load failed -- ${Yoai.nativeTtsLastError().orEmpty()}")
                 return@run
             }
             log("tts: loaded in %.1f s, type=%s".format(
-                (System.nanoTime() - began) / 1e9, Bodyclock.nativeTtsModelType().orEmpty()))
+                (System.nanoTime() - began) / 1e9, Yoai.nativeTtsModelType().orEmpty()))
         }
 
         // Pinned, so two runs of one configuration are the same utterance and a
         // difference between them is the device rather than the draw.
-        Bodyclock.nativeTtsSetSeed(seed)
+        Yoai.nativeTtsSetSeed(seed)
 
-        val json = Bodyclock.nativeTtsSay(text, null)
+        val json = Yoai.nativeTtsSay(text, null)
         if (json == null) {
-            log("tts: ${Bodyclock.nativeTtsLastError().orEmpty()}")
+            log("tts: ${Yoai.nativeTtsLastError().orEmpty()}")
             return@run
         }
         val o = runCatching { JSONObject(json) }.getOrNull()
@@ -179,7 +179,7 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(ttsHeadline = headline, ttsJson = pretty(json)) }
     }
 
-    fun unloadTts() = run("unload") { Bodyclock.nativeTtsUnload() }
+    fun unloadTts() = run("unload") { Yoai.nativeTtsUnload() }
 
     //--------------------------------------------------------------------------
     // Recognition
@@ -194,15 +194,15 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
             return@run
         }
 
-        if (!Bodyclock.nativeVoiceLoaded()) {
+        if (!Yoai.nativeVoiceLoaded()) {
             val began = System.nanoTime()
-            if (Bodyclock.nativeVoiceLoad(modelFile.absolutePath) != 0) {
+            if (Yoai.nativeVoiceLoad(modelFile.absolutePath) != 0) {
                 log("asr: load failed; see logcat")
                 return@run
             }
             log("asr: loaded in %.1f s".format((System.nanoTime() - began) / 1e9))
         }
-        Bodyclock.nativeVoiceSetThreads(threads)
+        Yoai.nativeVoiceSetThreads(threads)
 
         val clip = runCatching { Wav.read(wavFile) }.getOrElse {
             log("asr: ${it.message}")
@@ -210,7 +210,7 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         val began = System.nanoTime()
-        val json = Bodyclock.nativeVoiceAnalyze(clip.pcm, clip.sampleRate)
+        val json = Yoai.nativeVoiceAnalyze(clip.pcm, clip.sampleRate)
         val elapsed = (System.nanoTime() - began) / 1e9
 
         if (json == null) {
@@ -225,7 +225,7 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(asrHeadline = headline, asrJson = pretty(json)) }
     }
 
-    fun unloadAsr() = run("unload") { Bodyclock.nativeVoiceUnload() }
+    fun unloadAsr() = run("unload") { Yoai.nativeVoiceUnload() }
 
     //--------------------------------------------------------------------------
     // On-device LLM
@@ -248,14 +248,14 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         val id = "measure"
-        if (Bodyclock.nativeLocalSet(id, modelFile.absolutePath, "") != 0) {
+        if (Yoai.nativeLocalSet(id, modelFile.absolutePath, "") != 0) {
             log("llm: could not register the model; see logcat")
             return@run
         }
-        Bodyclock.nativeLocalSetThreads(id, threads)
+        Yoai.nativeLocalSetThreads(id, threads)
 
         var began = System.nanoTime()
-        if (Bodyclock.nativeLocalLoad(id) != 0) {
+        if (Yoai.nativeLocalLoad(id) != 0) {
             log("llm: load failed; see logcat")
             return@run
         }
@@ -267,7 +267,7 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
         began = System.nanoTime()
 
         val messages = """[{"role":"user","content":${JSONObject.quote(prompt)}}]"""
-        val rc = Bodyclock.nativeChat(id, messages, "", "") { type, content ->
+        val rc = Yoai.nativeChat(id, messages, "", "") { type, content ->
             when (type) {
                 "reply" -> {
                     if (firstReplyNs == 0L) firstReplyNs = System.nanoTime()
@@ -322,8 +322,8 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
             log("busy with ${state.value.busy}")
             return
         }
-        if (!Bodyclock.loaded) {
-            log("libbodyclock.so did not load; nothing can run")
+        if (!Yoai.loaded) {
+            log("libyoai.so did not load; nothing can run")
             return
         }
         running = viewModelScope.launch {

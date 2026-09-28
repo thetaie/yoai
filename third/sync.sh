@@ -43,7 +43,7 @@ set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Before any default below, so a path set in .env is the one cloned into.
-. "$HERE/../scripts/load-env.sh"
+. "$HERE/../_load-env.sh"
 # No names: a clone target does not exist yet, and a missing checkout is what
 # check and verify report.
 yoai_load_env

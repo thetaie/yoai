@@ -19,11 +19,15 @@
 # checkout and configures with -DYOAI_ASR=ON. Only ggml is built --
 # recognition does not link llama -- so this is a couple of minutes, not the
 # twenty the full engine takes.
+#
+# `llama` builds that full engine into the same SDK, libllama on top of the
+# same ggml, and configures with -DYOAI_ONDEVICE_LLM=ON: chat and embedding on
+# a GGUF, which cli/yoai-llama drives.
 set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: ./build.sh [clean] [asr] [tts]
+Usage: ./build.sh [clean] [asr] [llama] [tts]
 
 Builds the core library, the desktop tools in cli/ and the tests in tests/,
 into build/: configures if needed, then builds. This is not the desktop
@@ -31,7 +35,9 @@ app -- that is desktop/build.sh.
 
   asr      also compile speech recognition in. Needs a llama.cpp checkout
            for ggml; see LLAMA_SRC
-  tts      also compile speech output (Qwen3-TTS) in. Needs qwentts.cpp
+  llama    also compile the on-device engine in: chat and embedding on a
+           GGUF, for cli/yoai-llama. The same checkout, and a longer build
+  tts     also compile speech output (Qwen3-TTS) in. Needs qwentts.cpp
            and llama.cpp checkouts; uses the GPU when there is one
   clean    delete build/ first
   help     this text; also -h or --help
@@ -42,7 +48,7 @@ Environment, each also as YOAI_<NAME> in the environment or in .env,
 which wins -- see .env.example:
   VCPKG_ROOT        vcpkg checkout (default: ../vcpkg, used only if it exists)
   OPENSSL_ROOT_DIR  where to find OpenSSL, when the default search misses it
-  LLAMA_SRC         llama.cpp checkout for asr and tts (default: ../llama.cpp)
+  LLAMA_SRC         llama.cpp checkout for asr, llama and tts (default: ../llama.cpp)
   QTTS_SRC          qwentts.cpp checkout for tts (default: ../qwentts.cpp)
   VULKAN_SDK        Vulkan SDK, for tts on the GPU; optional
 EOF
@@ -53,7 +59,7 @@ PROJECT_DIR="$(pwd)"
 BUILD_DIR="$PROJECT_DIR/build"
 
 # Defines yoai_load_env, called once the arguments are parsed.
-. "$PROJECT_DIR/scripts/load-env.sh"
+. "$PROJECT_DIR/_load-env.sh"
 THIRD_SYNC="$PROJECT_DIR/third/sync.sh"
 
 # Is this checkout what third/manifest.txt records? $1 the manifest name, $2
@@ -75,11 +81,13 @@ third_verify() {
 
 DO_CLEAN=""
 DO_ASR=""
+DO_LLAMA=""
 DO_TTS=""
 for arg in "$@"; do
   case "$arg" in
     clean) DO_CLEAN=1 ;;
     asr)   DO_ASR=1 ;;
+    llama) DO_LLAMA=1 ;;
     tts)   DO_TTS=1 ;;
     # Help exits 0: asking for it is not an error.
     help|-h|--help) usage; exit 0 ;;
@@ -133,12 +141,16 @@ else
   fi
 fi
 
-# CMake caches which lanes are on, so adding `asr` or `tts` to a tree that was
-# configured without it would change nothing. Said here, before any SDK is
-# built, rather than after minutes of building one.
+# CMake caches which lanes are on, so adding `asr`, `llama` or `tts` to a tree
+# that was configured without it would change nothing. Said here, before any
+# SDK is built, rather than after minutes of building one.
 if [ -f "$BUILD_DIR/CMakeCache.txt" ]; then
   if [ -n "$DO_ASR" ] && ! grep -q "YOAI_ASR:BOOL=ON" "$BUILD_DIR/CMakeCache.txt"; then
     echo "[build] build/ was configured without asr; re-run as: ./build.sh clean asr" >&2
+    exit 1
+  fi
+  if [ -n "$DO_LLAMA" ] && ! grep -q "YOAI_ONDEVICE_LLM:BOOL=ON" "$BUILD_DIR/CMakeCache.txt"; then
+    echo "[build] build/ was configured without llama; re-run as: ./build.sh clean llama" >&2
     exit 1
   fi
   if [ -n "$DO_TTS" ] && ! grep -q "YOAI_QTTS:BOOL=ON" "$BUILD_DIR/CMakeCache.txt"; then
@@ -148,9 +160,10 @@ if [ -f "$BUILD_DIR/CMakeCache.txt" ]; then
 fi
 
 # A desktop ggml SDK, shaped like the one harmony/build.sh assembles per ABI:
-# include/ plus lib/. Recognition links ggml and nothing else, so only the three
-# ggml targets are built -- libllama is not needed and is not asked for.
-if [ -n "$DO_ASR" ]; then
+# include/ plus lib/. Recognition links ggml and nothing else, so for `asr`
+# alone only the three ggml targets are built. `llama` adds libllama and
+# llama.h, built in the same tree on the same ggml.
+if [ -n "$DO_ASR" ] || [ -n "$DO_LLAMA" ]; then
   LLAMA_SRC="${LLAMA_SRC:-$(cd .. && pwd)/llama.cpp}"
   if [ ! -f "$LLAMA_SRC/ggml/include/ggml.h" ]; then
     echo "no llama.cpp at $LLAMA_SRC." >&2
@@ -163,7 +176,11 @@ if [ -n "$DO_ASR" ]; then
 
   GGML_BUILD="$BUILD_DIR/ggml"
   LSDK="$BUILD_DIR/llama-sdk"
-  echo "[build] ggml from $LLAMA_SRC"
+  GGML_TARGETS=(ggml ggml-cpu ggml-base)
+  if [ -n "$DO_LLAMA" ]; then
+    GGML_TARGETS=(llama "${GGML_TARGETS[@]}")
+  fi
+  echo "[build] ${GGML_TARGETS[*]} from $LLAMA_SRC"
   if [ ! -f "$GGML_BUILD/build.ninja" ] && [ ! -f "$GGML_BUILD/Makefile" ]; then
     cmake -S "$LLAMA_SRC" -B "$GGML_BUILD" \
       -DCMAKE_BUILD_TYPE=Release \
@@ -174,15 +191,28 @@ if [ -n "$DO_ASR" ]; then
       -DLLAMA_BUILD_SERVER=OFF \
       -DLLAMA_CURL=OFF
   fi
-  cmake --build "$GGML_BUILD" --parallel --target ggml ggml-cpu ggml-base
+  cmake --build "$GGML_BUILD" --parallel --target "${GGML_TARGETS[@]}"
 
   mkdir -p "$LSDK/include" "$LSDK/lib"
   cp "$LLAMA_SRC"/ggml/include/*.h "$LSDK/include/"
-  find "$GGML_BUILD" \( -name 'libggml.*' -o -name 'libggml-cpu.*' -o -name 'libggml-base.*' \) \
-    -exec cp {} "$LSDK/lib/" \;
-  echo "[build] ggml SDK at $LSDK"
+  find "$GGML_BUILD" \( -name 'libggml.*' -o -name 'libggml-cpu.*' -o -name 'libggml-base.*' \
+                        -o -name 'libllama.*' \) -exec cp {} "$LSDK/lib/" \;
+  if [ -n "$DO_LLAMA" ]; then
+    cp "$LLAMA_SRC/include/llama.h" "$LSDK/include/"
+    if ! ls "$LSDK"/lib/libllama.* >/dev/null 2>&1; then
+      echo "[build] llama built but libllama was not copied into $LSDK/lib" >&2
+      exit 1
+    fi
+  fi
+  echo "[build] llama.cpp SDK at $LSDK"
 
-  CMAKE_ARGS+=(-DYOAI_ASR=ON -DLLAMA_CPP_DIR="$LSDK")
+  CMAKE_ARGS+=(-DLLAMA_CPP_DIR="$LSDK")
+  if [ -n "$DO_ASR" ]; then
+    CMAKE_ARGS+=(-DYOAI_ASR=ON)
+  fi
+  if [ -n "$DO_LLAMA" ]; then
+    CMAKE_ARGS+=(-DYOAI_ONDEVICE_LLM=ON)
+  fi
 fi
 
 # A qwentts.cpp SDK for this build, so the core can speak without the desktop

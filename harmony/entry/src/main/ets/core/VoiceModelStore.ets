@@ -28,7 +28,7 @@ export interface VoiceModelRef {
 }
 
 function log(msg: string): void {
-  hilog.info(0x0000, 'bodyclock', '%{public}s', msg);
+  hilog.info(0x0000, 'yoai', '%{public}s', msg);
 }
 
 export class VoiceModelStore {

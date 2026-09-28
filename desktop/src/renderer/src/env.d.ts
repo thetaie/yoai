@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { BodyclockApi } from '@shared/api'
+import type { YoaiApi } from '@shared/api'
 
 declare global {
   interface Window {
@@ -9,7 +9,7 @@ declare global {
      * src/preload/index.ts. There is no second door: no require, no process,
      * no ipcRenderer.
      */
-    bodyclock: BodyclockApi
+    yoai: YoaiApi
   }
 }
 

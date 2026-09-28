@@ -24,7 +24,7 @@
 import { common } from '@kit.AbilityKit';
 import { router } from '@kit.ArkUI';
 import hilog from '@ohos.hilog';
-import bodyclock from 'libbodyclock.so';
+import yoai from 'libyoai.so';
 import { ICON_TOOLBAR, icon } from '../core/Icons';
 import { LocalModelStore, PickedFile } from '../core/LocalModelStore';
 import { DEFAULT_FAMILY, Palette, resolvePalette } from '../core/Palettes';
@@ -189,8 +189,8 @@ struct VoiceDebug {
   aboutToAppear(): void {
     this.resolveTheme();
     this.loadPrompt();
-    this.engine = bodyclock.nativeVoiceAvailable();
-    if (bodyclock.nativeVoiceLoaded()) {
+    this.engine = yoai.nativeVoiceAvailable();
+    if (yoai.nativeVoiceLoaded()) {
       // Resident from an earlier visit. The name is worth recovering -- it is
       // the only way to tell which of several checkpoints is in memory.
       this.modelName = '(already loaded)';
@@ -237,7 +237,7 @@ struct VoiceDebug {
     }
     this.modelLoading = true;
     this.note = '';
-    bodyclock.nativeVoiceLoad(ref.path, (type: string, content: string) => {
+    yoai.nativeVoiceLoad(ref.path, (type: string, content: string) => {
       this.modelLoading = false;
       if (type === 'ok') {
         this.modelName = ref.name;
@@ -270,7 +270,7 @@ struct VoiceDebug {
     }
     this.modelLoading = true;
     this.note = 'loading ' + picked.name + '…';
-    bodyclock.nativeVoiceLoad(picked.path, (type: string, content: string) => {
+    yoai.nativeVoiceLoad(picked.path, (type: string, content: string) => {
       this.modelLoading = false;
       if (type === 'ok') {
         this.modelName = picked.name;
@@ -334,10 +334,10 @@ struct VoiceDebug {
     // The thread selector drives recognition as well as the model, so one
     // setting produces one comparable pair of numbers. Ignored when no
     // recognition model is loaded, which is the case the page already supports.
-    bodyclock.nativeVoiceSetThreads(this.threads);
+    yoai.nativeVoiceSetThreads(this.threads);
 
     this.analysing = true;
-    bodyclock.nativeVoiceAnalyze(pcm, VOICE_SAMPLE_RATE, (type: string, content: string) => {
+    yoai.nativeVoiceAnalyze(pcm, VOICE_SAMPLE_RATE, (type: string, content: string) => {
       this.analysing = false;
       if (type !== 'result') {
         this.note = content;
@@ -348,7 +348,7 @@ struct VoiceDebug {
       // a sweep and a sweep is read off the log, paired with the
       // `voice threads:` line the setter writes.
       if (parsed.transcript !== undefined) {
-        hilog.info(0x0000, 'bodyclock', '%{public}s',
+        hilog.info(0x0000, 'yoai', '%{public}s',
           'asr: ' + this.fixed(parsed.audioSeconds, 2) + ' s of audio in ' +
           this.fixed(parsed.transcript.seconds, 2) + ' s at ' + this.threads +
           ' threads = ' +
@@ -424,7 +424,7 @@ struct VoiceDebug {
       this.benchNote = 'no chat model configured';
       return;
     }
-    const rc: number = bodyclock.nativeLocalSetThreads(provider, this.threads);
+    const rc: number = yoai.nativeLocalSetThreads(provider, this.threads);
     if (rc !== 0) {
       this.benchNote = 'the active model is not an on-device one — threads do not apply';
       return;
@@ -437,7 +437,7 @@ struct VoiceDebug {
       content: '请从一数到一百，只写数字，用顿号分隔，不要任何其它文字。'
     }]);
     let n: number = 0;
-    bodyclock.nativeChat(provider, wire, '', '', (type: string, content: string) => {
+    yoai.nativeChat(provider, wire, '', '', (type: string, content: string) => {
       if (type === 'reply') {
         n += content.length;
       } else if (type === 'error') {
@@ -473,7 +473,7 @@ struct VoiceDebug {
   private benchMemory(): void {
     this.benching = true;
     this.benchNote = 'reading memory at ' + this.threads + ' threads…';
-    bodyclock.nativeMemoryBandwidth(this.threads, 256, 4,
+    yoai.nativeMemoryBandwidth(this.threads, 256, 4,
       (type: string, content: string) => {
         this.benching = false;
         if (type !== 'result') {
@@ -525,10 +525,10 @@ struct VoiceDebug {
     // sitting in the list unselected, the comparison was never about engines.
     // `style` and `description` are the fields that say which is which, and a
     // count says nothing.
-    hilog.info(0x0000, 'bodyclock', '%{public}s', 'tts voices: ' + got.length);
+    hilog.info(0x0000, 'yoai', '%{public}s', 'tts voices: ' + got.length);
     for (let i: number = 0; i < got.length; i++) {
       const v: Voice = got[i];
-      hilog.info(0x0000, 'bodyclock', '%{public}s',
+      hilog.info(0x0000, 'yoai', '%{public}s',
         'tts voice[' + i + '] person=' + v.person +
         ' language=' + v.language + ' gender=' + v.gender +
         ' style=' + v.style + ' status=' + (v.status === '' ? '?' : v.status) +
@@ -536,7 +536,7 @@ struct VoiceDebug {
     }
     for (let i: number = 0; i < got.length; i++) {
       const v: Voice = got[i];
-      hilog.info(0x0000, 'bodyclock', '%{public}s',
+      hilog.info(0x0000, 'yoai', '%{public}s',
         '  person ' + v.person + ' ' + v.language + ' ' + v.gender +
         ' style=' + v.style + ' status=' + (v.status === '' ? '—' : v.status) +
         ' — ' + v.description);
@@ -665,7 +665,7 @@ struct VoiceDebug {
         ? ' · speech failed'
         : ' · spoken over ' + this.fixed(timing.totalMs / 1000, 2) + ' s');
 
-    hilog.info(0x0000, 'bodyclock', '%{public}s',
+    hilog.info(0x0000, 'yoai', '%{public}s',
       'voice chain: audio ' + this.fixed(this.audioSeconds, 2) +
       's, asr ' + this.fixed(asrSeconds, 2) +
       's, ttsInit ' + this.fixed(ttsInitMs / 1000, 2) +
@@ -719,7 +719,7 @@ struct VoiceDebug {
     // vocabulary. Guessing 'ok' here cost a round trip: the load itself worked,
     // so the model was warm and the log showed `load 0ms`, but priming never
     // ran and the first recording still paid 2.35 s of prefill.
-    bodyclock.nativeLocalLoad(provider, (type: string, content: string) => {
+    yoai.nativeLocalLoad(provider, (type: string, content: string) => {
       if (type === 'error') {
         // A remote provider, or no on-device engine in this build. Neither is
         // an error here: the chain still runs, it just pays the prefill.
@@ -748,7 +748,7 @@ struct VoiceDebug {
   private primeCache(provider: string): void {
     this.warming = 'warming the prompt…';
     const wire: string = JSON.stringify([{ role: 'user', content: '嗯' }]);
-    bodyclock.nativeChat(provider, wire, this.chainPrompt, '',
+    yoai.nativeChat(provider, wire, this.chainPrompt, '',
       (type: string, content: string) => {
         if (type === 'end' || type === 'error') {
           this.warming = '';
@@ -796,7 +796,7 @@ struct VoiceDebug {
           }
         };
 
-        bodyclock.nativeChat(provider, wire, this.chainPrompt, '',
+        yoai.nativeChat(provider, wire, this.chainPrompt, '',
           (type: string, content: string) => {
             if (type === 'reply') {
               acc += content;

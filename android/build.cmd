@@ -191,10 +191,10 @@ if not exist "!ANDROID_SDK_ROOT!\" goto no_sdk
 if not defined ANDROID_NDK_ROOT (
     set "NDK_VER="
     if exist "%SCRIPT_DIR%\gradle.properties" (
-        for /f "usebackq tokens=1,* delims==" %%A in (`findstr /b /c:"bodyclock.ndk=" "%SCRIPT_DIR%\gradle.properties"`) do set "NDK_VER=%%B"
+        for /f "usebackq tokens=1,* delims==" %%A in (`findstr /b /c:"yoai.ndk=" "%SCRIPT_DIR%\gradle.properties"`) do set "NDK_VER=%%B"
     )
     if not defined NDK_VER (
-        echo [build] no bodyclock.ndk in "%SCRIPT_DIR%\gradle.properties">&2
+        echo [build] no yoai.ndk in "%SCRIPT_DIR%\gradle.properties">&2
         exit /b 1
     )
     set "ANDROID_NDK_ROOT=!ANDROID_SDK_ROOT!\ndk\!NDK_VER!"
@@ -360,7 +360,7 @@ rem would not be comparable with the Kirin's -- which is most of what this lane
 rem exists to compare.
 rem
 rem It also fails to link if left on: the archives reference __kmpc_* and nothing
-rem pulls the runtime into libbodyclock.so.
+rem pulls the runtime into libyoai.so.
 set "LCFG=!NDK_CFG! -S "!LLAMA_SRC!" -B "!LBUILD!""
 set "LCFG=!LCFG! -DBUILD_SHARED_LIBS=OFF"
 set "LCFG=!LCFG! -DLLAMA_CURL=OFF"
@@ -483,7 +483,7 @@ rem apk
 rem ===========================================================================
 :apk
 echo [apk] assembleDebug
-call "%SCRIPT_DIR%\gradlew.bat" assembleDebug -Pbodyclock.abi=%ABI% || exit /b 1
+call "%SCRIPT_DIR%\gradlew.bat" assembleDebug -Pyoai.abi=%ABI% || exit /b 1
 echo [apk] done -^> %SCRIPT_DIR%\app\build\outputs\apk\debug\
 exit /b 0
 

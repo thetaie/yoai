@@ -74,7 +74,7 @@ cd "$(dirname "$SCRIPT")"
 SCRIPT_DIR="$(pwd)"
 
 # Defines yoai_load_env, called once the arguments are parsed.
-. "$SCRIPT_DIR/../scripts/load-env.sh"
+. "$SCRIPT_DIR/../_load-env.sh"
 THIRD_SYNC="$SCRIPT_DIR/../third/sync.sh"
 
 # Is this checkout what third/manifest.txt records? $1 the manifest name, $2

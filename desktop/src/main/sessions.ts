@@ -2,7 +2,7 @@
  * Locally persisted chat sessions -- what the history drawer lists.
  *
  * A port of harmony/entry/src/main/ets/core/SessionStore.ets. There is nothing
- * to sync with: Body Clock talks straight to the provider the user configured
+ * to sync with: YoAI talks straight to the provider the user configured
  * and has no account, so history is purely local and stays that way.
  *
  * Storage layout: <userData>/sessions/index.json holds the INDEX (ids, titles,
@@ -134,7 +134,7 @@ export function sweepOrphans(): number {
     }
   }
   if (removed > 0) {
-    console.log(`[bodyclock] removed ${removed} orphaned transcript(s)`)
+    console.log(`[yoai] removed ${removed} orphaned transcript(s)`)
   }
   return removed
 }

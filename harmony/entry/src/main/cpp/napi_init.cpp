@@ -1,4 +1,4 @@
-// NAPI bridge: ArkTS <-> the Body Clock C ABI (src/yoai.h).
+// NAPI bridge: ArkTS <-> the YoAI C ABI (src/yoai.h).
 //
 // Threading is the whole reason this file exists. yoai_chat BLOCKS until the
 // turn completes and calls its handler once per event on the calling thread, so
@@ -31,7 +31,7 @@
 #undef LOG_DOMAIN
 #undef LOG_TAG
 #define LOG_DOMAIN 0x3200
-#define LOG_TAG "bodyclock-napi"
+#define LOG_TAG "yoai-napi"
 
 namespace {
 
@@ -156,7 +156,7 @@ void ChatWorker(std::int32_t turn_id,
 
 // nativeVersion(): string -- build stamp, proves the .so is really loaded.
 napi_value NativeVersion(napi_env env, napi_callback_info /*info*/) {
-    return Utf8(env, ("bodyclock " + std::string(yoai_version())
+    return Utf8(env, ("yoai " + std::string(yoai_version())
                       + " / built " __DATE__ " " __TIME__).c_str());
 }
 
@@ -1137,16 +1137,16 @@ napi_value Init(napi_env env, napi_value exports) {
 }
 EXTERN_C_END
 
-static napi_module g_bodyclock_module = {
+static napi_module g_yoai_module = {
     .nm_version = 1,
     .nm_flags = 0,
     .nm_filename = nullptr,
     .nm_register_func = Init,
-    .nm_modname = "bodyclock",   // must match the library name: libbodyclock.so
+    .nm_modname = "yoai",   // must match the library name: libyoai.so
     .nm_priv = nullptr,
     .reserved = {0},
 };
 
-extern "C" __attribute__((constructor)) void RegisterBodyClockModule(void) {
-    napi_module_register(&g_bodyclock_module);
+extern "C" __attribute__((constructor)) void RegisterYoaiModule(void) {
+    napi_module_register(&g_yoai_module);
 }

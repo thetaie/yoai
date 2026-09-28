@@ -1,7 +1,7 @@
-package ai.bodyclock.app.day
+package com.yoai.bodyclock.day
 
-import ai.bodyclock.app.R
-import ai.bodyclock.app.ui.LocalPalette
+import com.yoai.bodyclock.R
+import com.yoai.bodyclock.ui.LocalPalette
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable

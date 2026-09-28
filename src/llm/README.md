@@ -122,7 +122,7 @@ not a degraded one. The default desktop build links with neither.
 2. Keep the contract above. For a `Chat`, a completed turn ends with one
    `CostStatistics`, even when nobody was billed. For an `Embedder`, normalize
    the output, and map `EmbedKind` to whatever the model expects.
-3. Add the `.cpp` to `bodyclock_core` in the root `CMakeLists.txt`. If it needs
+3. Add the `.cpp` to `yoai_core` in the root `CMakeLists.txt`. If it needs
    an engine, give it a stub under that engine's flag, the way `chat/local.cpp`
    does. It goes in `chat/` or `embed/` by what it does, whatever it runs on.
 4. Give it a test under `tests/` that goes through the interface rather than

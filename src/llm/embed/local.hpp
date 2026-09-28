@@ -39,6 +39,13 @@ struct LocalEmbedOptions {
     // phone wants fewer.
     int n_threads = 0;
 
+    // Layers to offload to a GPU backend; 0 for the reason in
+    // LocalOptions::n_gpu_layers, and 999 for all of them. Passed explicitly:
+    // llama.cpp's own default puts every layer on whatever GPU the build
+    // happens to link, so a desktop build with Vulkan would use the integrated
+    // GPU without anyone asking.
+    int n_gpu_layers = 0;
+
     // The instruction put in front of every Query. One sentence saying what
     // the search is for; the default fits the app's own memory search.
     std::string query_task =

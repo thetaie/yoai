@@ -1,4 +1,4 @@
-package ai.bodyclock.app
+package com.yoai.bodyclock
 
 import android.os.Build
 import java.io.File

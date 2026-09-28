@@ -1,4 +1,4 @@
-package ai.bodyclock.app.ui
+package com.yoai.bodyclock.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -13,7 +13,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
  * system's light/dark.
  *
  * **Not Material You.** `dynamicColorScheme` reads the wallpaper, which is a
- * different design than this one and cannot be one of the six. `BodyclockTheme`
+ * different design than this one and cannot be one of the six. `YoaiBenchTheme`
  * in Theme.kt still follows the device, and stays that way: it dresses the
  * measurement bench, which is a set of readings rather than a designed surface.
  *
@@ -27,11 +27,11 @@ import androidx.compose.runtime.staticCompositionLocalOf
  * a backstop, not the thing to read a color from.
  */
 val LocalPalette = staticCompositionLocalOf<Palette> {
-    error("No Palette in scope -- wrap the screen in BodyClockTheme")
+    error("No Palette in scope -- wrap the screen in YoaiTheme")
 }
 
 @Composable
-fun BodyClockTheme(
+fun YoaiTheme(
     family: String = DEFAULT_FAMILY,
     dark: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,

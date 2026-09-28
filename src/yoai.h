@@ -1,4 +1,4 @@
-// Public C ABI for embedding the Body Clock core into a host application.
+// Public C ABI for embedding the YoAI core into a host application.
 //
 // The core is a library, not a server: there is no port to bind, no account,
 // and no configuration file. A host app (the HarmonyOS entry module today, an

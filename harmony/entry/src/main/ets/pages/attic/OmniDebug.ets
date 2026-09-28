@@ -37,7 +37,7 @@ import { picker } from '@kit.CoreFileKit';
 import { router } from '@kit.ArkUI';
 import fileUri from '@ohos.file.fileuri';
 import fs from '@ohos.file.fs';
-import bodyclock from 'libbodyclock.so';
+import yoai from 'libyoai.so';
 import { ICON_TOOLBAR, icon } from '../core/Icons';
 import { DEFAULT_FAMILY, Palette, resolvePalette } from '../core/Palettes';
 import { VOICE_SAMPLE_RATE, VoiceRecorder } from '../core/VoiceRecorder';
@@ -102,8 +102,8 @@ struct OmniDebug {
 
   aboutToAppear(): void {
     this.resolveTheme();
-    this.engine = bodyclock.nativeOmniAvailable();
-    if (bodyclock.nativeOmniLoaded()) {
+    this.engine = yoai.nativeOmniAvailable();
+    if (yoai.nativeOmniLoaded()) {
       this.modelName = '(already loaded)';
     }
     // An extraction from an earlier run, still on disk. Worth finding, because
@@ -158,7 +158,7 @@ struct OmniDebug {
     const src: string = new fileUri.FileUri(uris[0]).path;
     // Read the table first. A file that is not a bundle should say so now, not
     // after several minutes of copying.
-    const listed: string = bodyclock.nativeBundleList(src);
+    const listed: string = yoai.nativeBundleList(src);
     if (listed === '') {
       this.note = 'not a bundle (or truncated) — pack it with design/pack-mnn-model.py';
       return;
@@ -170,7 +170,7 @@ struct OmniDebug {
     this.extracting = 0;
     this.busy = 'unpacking…';
     this.note = '';
-    bodyclock.nativeBundleExtract(src, dest, (type: string, content: string) => {
+    yoai.nativeBundleExtract(src, dest, (type: string, content: string) => {
       if (type === 'progress') {
         this.extracting = Number.parseFloat(content);
         return;
@@ -205,7 +205,7 @@ struct OmniDebug {
    * same reason the thread sweep on /asr does not reload either.
    */
   private setDitSteps(n: number): void {
-    const rc: number = bodyclock.nativeOmniSetDitSteps(n);
+    const rc: number = yoai.nativeOmniSetDitSteps(n);
     if (rc !== 0) {
       this.note = 'the engine would not take ' + n + ' DiT steps';
       return;
@@ -218,7 +218,7 @@ struct OmniDebug {
   private load(dir: string, okNote: string): void {
     this.busy = 'loading 3.4 GB…';
     this.note = '';
-    bodyclock.nativeOmniLoad(dir, (type: string, content: string) => {
+    yoai.nativeOmniLoad(dir, (type: string, content: string) => {
       this.busy = '';
       if (type === 'ok') {
         this.modelName = dir;
@@ -298,7 +298,7 @@ struct OmniDebug {
       this.note = 'nothing was recorded';
       return;
     }
-    if (!bodyclock.nativeOmniLoaded()) {
+    if (!yoai.nativeOmniLoaded()) {
       this.note = 'no model loaded — pick the model directory first';
       return;
     }
@@ -316,7 +316,7 @@ struct OmniDebug {
     // settles it: the 3B was measured not to hear tone, so anything it says
     // about mood comes from the words. What this page needs is speech, and
     // speech needs something worth saying to the person who spoke.
-    bodyclock.nativeOmniAsk(pcm, '请直接用中文简短回应说话的人，不要描述或评价他。', this.speak,
+    yoai.nativeOmniAsk(pcm, '请直接用中文简短回应说话的人，不要描述或评价他。', this.speak,
       (type: string, content: string) => {
         this.busy = '';
         if (type !== 'result') {
@@ -324,14 +324,14 @@ struct OmniDebug {
           return;
         }
         this.reply = JSON.parse(content) as OmniJson;
-        this.speechBytes = this.speak ? bodyclock.nativeOmniLastSpeech().byteLength : 0;
+        this.speechBytes = this.speak ? yoai.nativeOmniLastSpeech().byteLength : 0;
         this.note = '';
       });
   }
 
   /** Play back what the Talker said, at ITS rate rather than the recorder's. */
   private async playSpeech(): Promise<void> {
-    const pcm: ArrayBuffer = bodyclock.nativeOmniLastSpeech();
+    const pcm: ArrayBuffer = yoai.nativeOmniLastSpeech();
     if (pcm.byteLength === 0) {
       this.note = 'no speech to play';
       return;

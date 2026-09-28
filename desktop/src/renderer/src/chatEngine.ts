@@ -85,11 +85,11 @@ export function runTurn(
       default:
         // Reserved tool events. Logged rather than shown: an unhandled event is
         // a gap in this file, and the user cannot act on it.
-        console.info(`[bodyclock] unhandled chat event ${ev.type}`)
+        console.info(`[yoai] unhandled chat event ${ev.type}`)
     }
   }
 
-  const unsubscribe = window.bodyclock.chat.onEvent((ev) => {
+  const unsubscribe = window.yoai.chat.onEvent((ev) => {
     if (turnId < 0) {
       pending.push(ev)
       return
@@ -99,7 +99,7 @@ export function runTurn(
     }
   })
 
-  window.bodyclock.chat
+  window.yoai.chat
     .start(providerId, wire, systemPrompt)
     .then((id) => {
       turnId = id
@@ -108,7 +108,7 @@ export function runTurn(
       // request is already out, so cancelling is the only way to stop it; the
       // 'aborted' event still comes back and closes the turn normally.
       if (canceler.stopped) {
-        void window.bodyclock.chat.cancel(id)
+        void window.yoai.chat.cancel(id)
       }
 
       for (const ev of pending.splice(0)) {
@@ -128,7 +128,7 @@ export function runTurn(
   canceler.cancel = () => {
     canceler.stopped = true
     if (turnId >= 0) {
-      void window.bodyclock.chat.cancel(turnId)
+      void window.yoai.chat.cancel(turnId)
     }
   }
   return canceler

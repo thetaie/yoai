@@ -31,7 +31,7 @@ heuristic exactly as it was.
  // so one thread per physical core is optimal.
 +//
 +// QWEN_N_THREADS overrides it. The heuristic assumes SMT, which a phone does
-+// not have; see third/patches/ in the bodyclock repo for the measurement that
++// not have; see third/patches/ in the yoai repo for the measurement that
 +// asked for this.
  static int backend_cpu_n_threads(void) {
 +    if (const char * env = std::getenv("QWEN_N_THREADS")) {

@@ -7,8 +7,8 @@
   bringing across.
 -->
 <resources>
-    <string name="app_name">Body Clock</string>
-    <string name="bench_name">Body Clock 测量台</string>
+    <string name="app_name">YoAI</string>
+    <string name="bench_name">YoAI 测量台</string>
 
     <!-- Home: the current-state header -->
     <string name="home_current">当前状态</string>

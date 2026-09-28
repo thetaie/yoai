@@ -18,7 +18,7 @@
  * words in a tired voice is the case only two channels can show, and neither
  * column is wrong when they differ. They are answering different questions.
  */
-import bodyclock from 'libbodyclock.so';
+import yoai from 'libyoai.so';
 
 export interface TextAxes {
   valence: number;     // -1 unpleasant .. +1 pleasant
@@ -94,7 +94,7 @@ export class TextAxesReader {
       const wire: string = JSON.stringify([{ role: 'user', content: transcript }]);
       let acc: string = '';
 
-      bodyclock.nativeChat(providerId, wire, SYSTEM, GRAMMAR,
+      yoai.nativeChat(providerId, wire, SYSTEM, GRAMMAR,
         (type: string, content: string) => {
           if (type === 'reply') {
             acc += content;

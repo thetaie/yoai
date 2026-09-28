@@ -1,11 +1,11 @@
 {
   "name": "entry",
   "version": "0.1.0",
-  "description": "Body Clock entry module",
+  "description": "YoAI entry module",
   "main": "",
   "author": "",
   "license": "",
   "dependencies": {
-    "libbodyclock.so": "file:./src/main/cpp/types/libbodyclock"
+    "libyoai.so": "file:./src/main/cpp/types/libyoai"
   }
 }

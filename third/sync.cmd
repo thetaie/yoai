@@ -42,7 +42,7 @@ cd /d "%~dp0"
 rem Before any default below, so a path set in .env is the one cloned into.
 rem No names: a clone target does not exist yet, and a missing checkout is what
 rem check and verify report.
-call "%~dp0..\scripts\load-env.cmd"
+call "%~dp0..\_load-env.cmd"
 
 set "MANIFEST=%~dp0manifest.txt"
 set "PATCHDIR=%~dp0patches"

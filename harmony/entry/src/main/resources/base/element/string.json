@@ -2,15 +2,15 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "Body Clock 入口模块"
+      "value": "YoAI 入口模块"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "Body Clock"
+      "value": "YoAI"
     },
     {
       "name": "EntryAbility_label",
-      "value": "BodyClock"
+      "value": "YoAI"
     },
     {
       "name": "perm_internet_reason",
@@ -26,7 +26,7 @@
     },
     {
       "name": "chat_input_hint",
-      "value": "给 Body Clock 发消息…"
+      "value": "给 YoAI 发消息…"
     },
     {
       "name": "chat_need_model",
@@ -46,7 +46,7 @@
     },
     {
       "name": "chat_disclaimer",
-      "value": "Body Clock 是 AI，可能会出错，请自行核实回答内容。"
+      "value": "YoAI 是 AI，可能会出错，请自行核实回答内容。"
     },
     {
       "name": "chat_pick_model",

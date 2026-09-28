@@ -1,22 +1,26 @@
-# Body Clock
+# YoAI
 
 Your conversations live on your device, and models are called with your own API
-keys — there is no Body Clock account and no Body Clock server.
+keys — there is no YoAI account and no YoAI server.
 
 HarmonyOS first, Android next.
 
 This is the v0 skeleton: one C++ core, one HarmonyOS app, remote
 OpenAI-compatible models working end to end — and, on HarmonyOS, GGUF models
-running on the device itself through llama.cpp. Local personal-data storage is
-the next item, and the shape of the core is what makes it an addition rather
-than a rewrite: the on-device engine went in as a second `llm::Client` behind
-the same C ABI, and nothing above it had to learn about lanes.
+running on the device itself through llama.cpp. The core keeps the user's day
+in its own SQLite database, and has the pieces for searching it by meaning:
+on-device text embedding and vector search, not yet wired to the timeline.
+
+The shape of the core is what keeps each of these an addition rather than a
+rewrite. A model is a `Chat` or an `Embedder`, and where it runs — llama.cpp,
+MNN, or an HTTP API — is decided when it is built and nowhere above; see
+[src/llm/README.md](src/llm/README.md).
 
 ## What is here
 
 ```
 src/                  the core -- a static library plus a C ABI
-  yoai.h                the whole public surface (~150 lines of contract)
+  yoai.h                the whole public surface, a C ABI every host links
   yoai.cpp              its implementation
   llm/                  chat and embedding models, on device or remote
   store/                yoai.db: the one connection, the timeline, the vectors
@@ -32,16 +36,25 @@ desktop/              the desktop client (Electron) + its Node-API bridge
 ### The core is a library, not a server
 
 There is no port to bind, no config file, and no session state. The host app
-owns persistence and settings, tells the core which models the user has keys
-for, and asks it to run a turn:
+owns settings and conversation history, tells the core which models the user
+has keys for, and asks it to run a turn:
 
 ```c
 yoai_provider_set("zhipu/glm-4.7-flash",
                   "https://open.bigmodel.cn/api/paas/v4",
                   api_key, "glm-4.7-flash", NULL);
 
-yoai_chat("zhipu/glm-4.7-flash", messages_json, NULL, on_event, user_data);
+yoai_chat("zhipu/glm-4.7-flash", messages_json,
+          /*system_prompt=*/NULL, /*grammar=*/NULL, on_event, user_data);
 ```
+
+An on-device model registers with `yoai_local_set` instead — a GGUF file or an
+MNN export directory, and the path decides which engine runs it — and is then
+chatted with through the same `yoai_chat`.
+
+The one thing the core persists itself is the user's own data: the day
+timeline, in a database in a directory the host names, because its rules are
+the same on every platform and easy to get subtly wrong.
 
 Two consequences worth stating plainly, because they are the design and not an
 implementation detail:
@@ -62,8 +75,8 @@ which is why the ABI stays this small.
 
 ### Desktop (to exercise the core)
 
-Needs CMake, a C++11 compiler, and libcurl / OpenSSL; RapidJSON and SQLite are
-vendored in `third/`. `build.sh` takes the two libraries from vcpkg when a
+Needs CMake, a C++11 compiler, and libcurl / OpenSSL; RapidJSON, SQLite and
+sqlite-vec are vendored in `third/`. `build.sh` takes the two libraries from vcpkg when a
 checkout is there and from the system's own packages when it is not — `apt
 install libcurl4-openssl-dev libssl-dev`, or `brew install openssl@3`.
 `build.cmd` wants vcpkg, which is where a Windows machine gets both anyway.
@@ -73,38 +86,51 @@ build.cmd            # Windows
 ./build.sh           # macOS / Linux
 ```
 
-`--help` lists the options: `asr` for speech recognition, `clean` to start over.
+`--help` lists the options: `asr` for speech recognition, `llama` for the
+on-device engine (chat and embedding on a GGUF), `tts` for speech output, and
+`clean` to start over. They combine: `build.cmd clean asr llama tts`.
 
 Paths that differ per machine -- Visual Studio, vcpkg, the llama.cpp checkout
 -- go in `.env` at the root, which git ignores and every C/C++ build script
-reads (root, `harmony/`, `desktop/`). Copy [.env.example](.env.example); it
-lists every `YOAI_*` setting.
+reads (root, `harmony/`, `desktop/`, `third/sync`) through `_load-env.*`. Copy
+[.env.example](.env.example); it lists every `YOAI_*` setting.
 
 Then talk to a real provider without a phone in the loop:
 
 ```
 rem Windows
-set BODYCLOCK_API_KEY=...
+set YOAI_API_KEY=...
 build\yoai-cli.exe --base-url https://open.bigmodel.cn/api/paas/v4 --model glm-4.7-flash
 ```
 
 ```
 # macOS / Linux
-export BODYCLOCK_API_KEY=...
+export YOAI_API_KEY=...
 ./build/yoai-cli --base-url https://open.bigmodel.cn/api/paas/v4 --model glm-4.7-flash
 ```
 
 With no question argument it goes interactive and keeps the transcript, so
 multi-turn context is exercised too. `--usage` prints the token summary,
-`--debug` turns on core logging. [cli/README.md](cli/README.md) covers every
-desktop tool, including `yoai-asr` for speech recognition.
+`--debug` turns on core logging.
+
+A GGUF on the machine itself goes through `yoai-llama`, once the build has
+`llama` -- chat with it, or embed text and see how similar the pieces are:
+
+```
+build\yoai-llama.exe chat  Qwen3.5-2B-Q4_K_M.gguf "Say hello in one word."
+build\yoai-llama.exe embed Qwen3-Embedding-0.6B-Q8_0.gguf --query "What did I eat?" ^
+    "Had beef noodles for lunch" "Ran five kilometers"
+```
+
+[cli/README.md](cli/README.md) covers every desktop tool, including `yoai-asr`
+for speech recognition.
 
 Any OpenAI-compatible endpoint works the same way — only the URL, the key and
 the model name change. Google Gemini is worth spelling out because its
 compatibility layer sits at a path nobody guesses:
 
 ```
-export BODYCLOCK_API_KEY=...          # from https://aistudio.google.com/apikey
+export YOAI_API_KEY=...          # from https://aistudio.google.com/apikey
 ./build/yoai-cli --base-url https://generativelanguage.googleapis.com/v1beta/openai \
                  --model gemini-3.6-flash
 ```
@@ -153,7 +179,7 @@ build.cmd             # Windows       -- or `build.cmd llama` for just the engin
 ./build.sh            # macOS / Linux
 ```
 
-It costs about 4.3 MiB in `libbodyclock.so`, a ~200 MB checkout, and a few minutes of
+It costs about 4.3 MiB in `libyoai.so`, a ~200 MB checkout, and a few minutes of
 cross-compile. `build.cmd deps hap` builds the app without it.
 
 The checkout goes beside the repo (`YOAI_LLAMA_SRC` moves it) and is never updated
@@ -226,7 +252,10 @@ product rather than a second front end for this one.
 | Token / cost summary per turn | working |
 | Conversations persisted on device | working |
 | On-device inference (llama.cpp + GGUF) | working on HarmonyOS, in the default build |
-| Local personal-data storage | not yet |
+| On-device chat on MNN | working on the desktop; not yet built for a phone |
+| On-device text embedding (Qwen3-Embedding) | working on the desktop; no C ABI yet |
+| Vector search (sqlite-vec, in the core's database) | working; no table in the schema yet |
+| Local personal-data storage | the day timeline, in the core's own SQLite database |
 | Desktop client (Electron) | chat and on-device models; builds, not yet packaged |
 | Android measurement bench | scaffolded; not yet run on a device |
 | Android app | not yet |
@@ -234,20 +263,19 @@ product rather than a second front end for this one.
 
 ## The name
 
-**Body Clock** is the ordinary English term for the body's own sense of time.
+**YoAI** — capital Y, lowercase o, capital AI — is how the name is written
+wherever a person reads it: the app name, the launcher label, window titles,
+prose. One spelling everywhere; with no space in it, the launcher needs no
+exception of its own. The app was called Body Clock before, and the Claude
+Design project its visuals come from still carries that name.
 
-Always written with the space. The wordmark depends on it: the ring stands in
-for the `o` of *Body*, and the rest is set as `dy Clock`.
+The wordmark in [design/logo.md](design/logo.md) was drawn for the old name,
+with the ring standing in for the `o` of *Body*. YoAI has its `o` in the same
+place, second letter, but the mark has not been redrawn.
 
-The launcher label is the one exception — `BodyClock`, closed up. Closing the
-space buys back about half a character of width, which is 5–6% of the label
-across the usual UI sans faces, and the launcher is the only place the name has
-to survive a hard width limit. It is a separate resource from the app name
-(`EntryAbility_label`, not `app_name`), so nothing else follows it.
-
-Where a single token is needed, it is lowercase `bodyclock`: the C ABI's
-`bodyclock_` prefix, `libbodyclock.so`, the bundle id `ai.bodyclock.app`. Never
-`BodyClock` as a second display spelling.
+Where a single token is needed, it is lowercase `yoai`: `libyoai.so`, the header
+`yoai.h` and its C ABI's `yoai_` prefix, the desktop tools, and their `YOAI_*`
+environment variables. The bundle id is `com.yoai.bodyclock`.
 
 ## License
 

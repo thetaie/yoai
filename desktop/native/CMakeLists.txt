@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.19)
-project(bodyclock_addon CXX)
+project(yoai_addon CXX)
 
-# The Node-API addon: bodyclock_core, plus src/binding.cpp, linked into one
-# bodyclock.node that Electron's MAIN PROCESS requires.
+# The Node-API addon: yoai_core, plus src/binding.cpp, linked into one
+# yoai.node that Electron's MAIN PROCESS requires.
 #
 # It is the desktop equivalent of harmony/entry/src/main/cpp -- same core, same
 # C ABI, a different host's module format -- and it links the repo's root
@@ -34,27 +34,27 @@ add_definitions(-DNAPI_VERSION=8)
 # -- FORCE because they are cached options and a stale ON would survive.
 set(YOAI_BUILD_CLI OFF CACHE BOOL "" FORCE)
 
-add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../.." "${CMAKE_CURRENT_BINARY_DIR}/bodyclock-core")
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../.." "${CMAKE_CURRENT_BINARY_DIR}/yoai-core")
 
 #-------------------------------------------------------------------------------
 # The addon
 #-------------------------------------------------------------------------------
 
-add_library(bodyclock_addon SHARED src/binding.cpp ${CMAKE_JS_SRC})
+add_library(yoai_addon SHARED src/binding.cpp ${CMAKE_JS_SRC})
 
 # Node loads a file named <something>.node with no lib prefix, whatever the
 # platform's own convention for a shared library is.
-set_target_properties(bodyclock_addon PROPERTIES
+set_target_properties(yoai_addon PROPERTIES
     PREFIX ""
     SUFFIX ".node"
-    OUTPUT_NAME "bodyclock"
+    OUTPUT_NAME "yoai"
 )
 
-target_include_directories(bodyclock_addon PRIVATE ${CMAKE_JS_INC})
-target_link_libraries(bodyclock_addon PRIVATE bodyclock_core ${CMAKE_JS_LIB})
+target_include_directories(yoai_addon PRIVATE ${CMAKE_JS_INC})
+target_link_libraries(yoai_addon PRIVATE yoai_core ${CMAKE_JS_LIB})
 
 if(MSVC)
-    target_compile_options(bodyclock_addon PRIVATE /utf-8 /W3)
+    target_compile_options(yoai_addon PRIVATE /utf-8 /W3)
 
     # cmake-js links the addon with /DELAYLOAD:NODE.EXE and compiles its own
     # delay-load hook in, which is how the Node-API imports get bound to
@@ -63,7 +63,7 @@ if(MSVC)
     # to resolve: without it the only error is one unresolved
     # __delayLoadHelper2, which says nothing about delay loading to anyone who
     # has not met it before.
-    target_link_libraries(bodyclock_addon PRIVATE delayimp)
+    target_link_libraries(yoai_addon PRIVATE delayimp)
 
     # On Windows an addon imports the Node-API symbols from the host executable
     # rather than from a DLL, so the link needs an import library generated from
@@ -75,13 +75,13 @@ if(MSVC)
                                             ${CMAKE_STATIC_LINKER_FLAGS})
     endif()
 else()
-    target_compile_options(bodyclock_addon PRIVATE -Wall -Wextra)
+    target_compile_options(yoai_addon PRIVATE -Wall -Wextra)
 endif()
 
 if(APPLE)
     # The Node-API symbols are resolved by the host process at load time, not by
     # anything on the link line, so the default "undefined symbols are an error"
     # would fail this link.
-    set_target_properties(bodyclock_addon PROPERTIES
+    set_target_properties(yoai_addon PROPERTIES
         LINK_FLAGS "-undefined dynamic_lookup")
 endif()

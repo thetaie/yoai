@@ -99,7 +99,7 @@ export function Settings({
   const hasKey = keyed.includes(vendorId)
 
   const refreshKeys = async (): Promise<void> => {
-    setKeyed(await window.bodyclock.models.vendorsWithKeys(VENDORS.map((v) => v.id)))
+    setKeyed(await window.yoai.models.vendorsWithKeys(VENDORS.map((v) => v.id)))
   }
 
   useEffect(() => {
@@ -107,7 +107,7 @@ export function Settings({
   }, [])
 
   const refreshTts = async (): Promise<void> => {
-    setTtsStatus(await window.bodyclock.tts.status())
+    setTtsStatus(await window.yoai.tts.status())
   }
 
   useEffect(() => {
@@ -116,12 +116,12 @@ export function Settings({
 
   useEffect(() => {
     void (async () => {
-      setPrompt((await window.bodyclock.chat.settings()).systemPrompt)
+      setPrompt((await window.yoai.chat.settings()).systemPrompt)
     })()
   }, [])
 
   const pickTts = async (which: 'talker' | 'tokenizer'): Promise<void> => {
-    const picked = await window.bodyclock.tts.pickModel(which)
+    const picked = await window.yoai.tts.pickModel(which)
     if (picked !== null) {
       await refreshTts()
     }
@@ -130,7 +130,7 @@ export function Settings({
   const loadTts = async (): Promise<void> => {
     setTtsBusy(true)
     setNote(null)
-    const reason = await window.bodyclock.tts.load()
+    const reason = await window.yoai.tts.load()
     setTtsBusy(false)
     await refreshTts()
     setNote(
@@ -142,7 +142,7 @@ export function Settings({
 
   const unloadTts = async (): Promise<void> => {
     await tts.stop()
-    await window.bodyclock.tts.unload()
+    await window.yoai.tts.unload()
     await refreshTts()
   }
 
@@ -163,29 +163,29 @@ export function Settings({
   }
 
   const saveVoice = async (text: string): Promise<void> => {
-    await window.bodyclock.tts.setVoice(text)
+    await window.yoai.tts.setVoice(text)
     await refreshTts()
   }
 
   const savePrompt = async (text: string): Promise<void> => {
-    const next = await window.bodyclock.chat.setSettings({ systemPrompt: text })
+    const next = await window.yoai.chat.setSettings({ systemPrompt: text })
     setPrompt(next.systemPrompt)
   }
 
   const setSpeaker = async (name: string): Promise<void> => {
-    await window.bodyclock.tts.setSpeaker(name)
+    await window.yoai.tts.setSpeaker(name)
     await refreshTts()
   }
 
   const setSeed = async (raw: string): Promise<void> => {
     const n = Number.parseInt(raw, 10)
-    await window.bodyclock.tts.setSeed(Number.isFinite(n) ? n : 7)
+    await window.yoai.tts.setSeed(Number.isFinite(n) ? n : 7)
     await refreshTts()
   }
 
   const refreshOmni = async (): Promise<void> => {
-    setOmniStatus(await window.bodyclock.omni.status())
-    setReaderStatus(await window.bodyclock.reader.status())
+    setOmniStatus(await window.yoai.omni.status())
+    setReaderStatus(await window.yoai.reader.status())
   }
 
   useEffect(() => {
@@ -193,7 +193,7 @@ export function Settings({
   }, [])
 
   const pickOmniDir = async (): Promise<void> => {
-    if ((await window.bodyclock.omni.pickDir()) !== null) {
+    if ((await window.yoai.omni.pickDir()) !== null) {
       await refreshOmni()
     }
   }
@@ -201,7 +201,7 @@ export function Settings({
   const loadOmni = async (): Promise<void> => {
     setOmniBusy(true)
     setOmniNote(null)
-    const reason = await window.bodyclock.omni.load()
+    const reason = await window.yoai.omni.load()
     setOmniBusy(false)
     await refreshOmni()
     setOmniNote(
@@ -212,24 +212,24 @@ export function Settings({
   }
 
   const unloadOmni = async (): Promise<void> => {
-    await window.bodyclock.omni.unload()
+    await window.yoai.omni.unload()
     await refreshOmni()
   }
 
   const pickReaderRef = async (): Promise<void> => {
-    if ((await window.bodyclock.reader.pickReference()) !== null) {
-      setReaderStatus(await window.bodyclock.reader.status())
+    if ((await window.yoai.reader.pickReference()) !== null) {
+      setReaderStatus(await window.yoai.reader.status())
     }
   }
 
   const loadReader = async (): Promise<void> => {
     setReaderBusy(true)
     setReaderNote(null)
-    const reason = await window.bodyclock.reader.load()
+    const reason = await window.yoai.reader.load()
     setReaderBusy(false)
-    setReaderStatus(await window.bodyclock.reader.status())
+    setReaderStatus(await window.yoai.reader.status())
     // Loading this one unloads the speech lane, so that status is stale now.
-    setTtsStatus(await window.bodyclock.tts.status())
+    setTtsStatus(await window.yoai.tts.status())
     setReaderNote(
       reason.length === 0
         ? { text: S.settingsReaderLoaded, tone: 'success' }
@@ -238,21 +238,21 @@ export function Settings({
   }
 
   const unloadReader = async (): Promise<void> => {
-    await window.bodyclock.reader.unload()
-    setReaderStatus(await window.bodyclock.reader.status())
+    await window.yoai.reader.unload()
+    setReaderStatus(await window.yoai.reader.status())
     setReaderNote(null)
   }
 
   const setReader = async (patch: { enabled?: boolean; minChars?: number }): Promise<void> => {
-    setReaderStatus(await window.bodyclock.reader.set(patch))
+    setReaderStatus(await window.yoai.reader.set(patch))
   }
 
   const setOmni = async (patch: { ditSteps?: number; enabled?: boolean }): Promise<void> => {
-    setOmniStatus(await window.bodyclock.omni.set(patch))
+    setOmniStatus(await window.yoai.omni.set(patch))
   }
 
   const setAuto = async (on: boolean): Promise<void> => {
-    await window.bodyclock.tts.setAutoSpeak(on)
+    await window.yoai.tts.setAutoSpeak(on)
     await refreshTts()
   }
 
@@ -281,14 +281,14 @@ export function Settings({
     }
 
     if (key.length > 0) {
-      const result = await window.bodyclock.keys.save(vendorId, key)
+      const result = await window.yoai.keys.save(vendorId, key)
       if (!result.ok) {
         setNote({ text: result.reason ?? '这个 key 没能保存', tone: 'danger' })
         return
       }
     }
 
-    await window.bodyclock.models.add({
+    await window.yoai.models.add({
       id: modelId(vendorId, name),
       vendorId,
       baseUrl: url,
@@ -301,11 +301,11 @@ export function Settings({
   }
 
   const addLocal = async (): Promise<void> => {
-    const picked = await window.bodyclock.models.pickLocal()
+    const picked = await window.yoai.models.pickLocal()
     if (picked === null) {
       return
     }
-    await window.bodyclock.models.add({
+    await window.yoai.models.add({
       id: modelId(LOCAL_VENDOR_ID, picked.name),
       vendorId: LOCAL_VENDOR_ID,
       baseUrl: '',
@@ -319,7 +319,7 @@ export function Settings({
   const preload = async (id: string): Promise<void> => {
     setLoadingLocal(id)
     setLocalNote(null)
-    const reason = await window.bodyclock.models.preload(id)
+    const reason = await window.yoai.models.preload(id)
     setLoadingLocal('')
     setLocalNote(
       reason.length === 0
@@ -329,7 +329,7 @@ export function Settings({
   }
 
   const drop = async (cfg: ModelConfig): Promise<void> => {
-    await window.bodyclock.models.remove(cfg.id)
+    await window.yoai.models.remove(cfg.id)
     await onModelsChanged()
   }
 
@@ -424,7 +424,7 @@ export function Settings({
                 <button
                   className="link"
                   style={{ alignSelf: 'flex-start' }}
-                  onClick={() => void window.bodyclock.openExternal(vendor.registerUrl)}
+                  onClick={() => void window.yoai.openExternal(vendor.registerUrl)}
                 >
                   {S.settingsGetKey}
                 </button>

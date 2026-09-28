@@ -136,7 +136,7 @@ rem YOAI_* settings, from the environment and from .env. See .env.example.
 rem After the arguments, so the help text still prints when a configured
 rem path is wrong. The names are the paths this script reads: each one that
 rem is configured has to exist.
-call "%HARMONY_DIR%..\scripts\load-env.cmd" DEVECO_HOME VCPKG_ROOT OHOS_SDK_ROOT LLAMA_SRC MNN_SRC QTTS_SRC || exit /b 1
+call "%HARMONY_DIR%..\_load-env.cmd" DEVECO_HOME VCPKG_ROOT OHOS_SDK_ROOT LLAMA_SRC MNN_SRC QTTS_SRC || exit /b 1
 set "THIRD_SYNC=%HARMONY_DIR%..\third\sync.cmd"
 
 if not defined ABI set "ABI=arm64-v8a"

@@ -4,7 +4,7 @@
 // **Threading.** yoai_chat() and yoai_tts_say() both BLOCK and both
 // invoke their handler ON THE CALLING THREAD, so the JNIEnv of the call frame
 // is valid throughout and no AttachCurrentThread dance is needed. The Kotlin
-// side is responsible for not calling them on the main thread; see Bodyclock.kt.
+// side is responsible for not calling them on the main thread; see Yoai.kt.
 //
 // **Strings.** The core returns buffers owned by it and valid until that
 // thread's next call, so every one is copied into a jstring before returning.
@@ -102,9 +102,9 @@ int audio_handler(const float* pcm, int n_samples, int last, void* user_data) {
 
 }  // namespace
 
-// Every entry point below is named for ai.bodyclock.app.Bodyclock, which is the
-// single Kotlin object that owns the library. See Bodyclock.kt.
-#define BC(name) Java_ai_bodyclock_app_Bodyclock_##name
+// Every entry point below is named for com.yoai.bodyclock.Yoai, which is the
+// single Kotlin object that owns the library. See Yoai.kt.
+#define BC(name) Java_com_yoai_bodyclock_Yoai_##name
 
 extern "C" {
 

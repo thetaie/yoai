@@ -23,7 +23,7 @@
  */
 import { common } from '@kit.AbilityKit';
 import { promptAction, router } from '@kit.ArkUI';
-import bodyclock from 'libbodyclock.so';
+import yoai from 'libyoai.so';
 import { ModelConfig, Vendor, VENDORS, findVendor, isLocal, modelLabel } from '../model/Provider';
 import { ICON_INLINE, ICON_TOOLBAR, icon } from '../core/Icons';
 import { LocalModelStore, PickedModel } from '../core/LocalModelStore';
@@ -161,7 +161,7 @@ struct SettingsModels {
 
     this.localLoading = true;
     promptAction.showToast({ message: $r('app.string.settings_local_loading') });
-    bodyclock.nativeLocalLoad(picked.config.id, (type: string, content: string) => {
+    yoai.nativeLocalLoad(picked.config.id, (type: string, content: string) => {
       this.localLoading = false;
       if (type === 'end') {
         promptAction.showToast({ message: $r('app.string.settings_local_ready') });

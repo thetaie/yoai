@@ -67,7 +67,7 @@ projects/
 One checkout at a time is moved by the same setting its build script reads —
 `YOAI_LLAMA_SRC`, `YOAI_MNN_SRC`, `YOAI_QTTS_SRC`, `YOAI_VCPKG_ROOT`, in `.env`
 at the repository root (see `.env.example`) or in the environment. Both
-scripts load it through `scripts/load-env.*`, so there is no second place to
+scripts load it through `_load-env.*` at the root, so there is no second place to
 configure and `sync.cmd` and `build.cmd` cannot end up pointing at different
 trees.
 
@@ -140,7 +140,7 @@ header — and, if the build script reads an env var for it, use that name in
 the `env` column. Write `-` for an empty column rather than leaving it blank:
 `sync.cmd` splits on `|` with `for /f`, which collapses consecutive delimiters
 and would shift every column after the gap. A new variable also goes in the
-list in `scripts/load-env.{cmd,sh}` and in `.env.example`; without that, a
+list in `_load-env.{cmd,sh}` and in `.env.example`; without that, a
 `YOAI_` setting for it in `.env` is read and then ignored.
 
 **A vendored copy:** commit it as `third/<name>/` with its LICENSE and a README

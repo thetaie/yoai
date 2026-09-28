@@ -1,4 +1,4 @@
-package ai.bodyclock.app
+package com.yoai.bodyclock
 
 import java.io.File
 import java.nio.ByteBuffer

@@ -132,7 +132,7 @@ export function register(cfg: ModelConfig): boolean {
     // and there is no settings screen for them yet; when there is, it goes here.
     const rc = core().nativeLocalSet(cfg.id, path, '')
     if (rc !== 0) {
-      console.error(`[bodyclock] nativeLocalSet(${cfg.id}) failed rc=${rc}`)
+      console.error(`[yoai] nativeLocalSet(${cfg.id}) failed rc=${rc}`)
       return false
     }
     return true
@@ -144,7 +144,7 @@ export function register(cfg: ModelConfig): boolean {
   }
   const rc = core().nativeProviderSet(cfg.id, cfg.baseUrl, key, cfg.model, '')
   if (rc !== 0) {
-    console.error(`[bodyclock] nativeProviderSet(${cfg.id}) failed rc=${rc}`)
+    console.error(`[yoai] nativeProviderSet(${cfg.id}) failed rc=${rc}`)
     return false
   }
   return true
@@ -174,7 +174,7 @@ export function syncToCore(): number {
       .map((m) => m.id)
   )
   if (gone.size > 0) {
-    console.warn(`[bodyclock] dropping ${gone.size} unreachable on-device model(s)`)
+    console.warn(`[yoai] dropping ${gone.size} unreachable on-device model(s)`)
     s.configured = s.configured.filter((m) => !gone.has(m.id))
     if (gone.has(s.active)) {
       s.active = s.configured.length > 0 ? s.configured[s.configured.length - 1].id : ''
@@ -197,7 +197,7 @@ export function syncToCore(): number {
       ready++
     }
   }
-  console.log(`[bodyclock] registered ${ready} of ${s.configured.length} models`)
+  console.log(`[yoai] registered ${ready} of ${s.configured.length} models`)
   return ready
 }
 
@@ -241,12 +241,12 @@ export function autoPreload(): void {
   if (cfg === undefined || !isLocal(cfg)) {
     return
   }
-  console.log(`[bodyclock] preloading ${cfg.id}`)
+  console.log(`[yoai] preloading ${cfg.id}`)
   core().nativeLocalLoad(cfg.id, (type, content) => {
     if (type === 'end') {
-      console.log(`[bodyclock] ${cfg.id} is resident`)
+      console.log(`[yoai] ${cfg.id} is resident`)
     } else {
-      console.error(`[bodyclock] ${cfg.id} would not preload: ${content}`)
+      console.error(`[yoai] ${cfg.id} would not preload: ${content}`)
     }
   })
 }

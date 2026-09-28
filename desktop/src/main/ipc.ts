@@ -290,7 +290,7 @@ export function registerHandlers(): void {
     // be forgotten. Unawaited, and a no-op when only one slot is filled.
     void tts.autoLoad().then((reason) => {
       if (reason.length > 0) {
-        console.error(`[bodyclock] the voice would not load: ${reason}`)
+        console.error(`[yoai] the voice would not load: ${reason}`)
       }
     })
     return { path, name: basename(path) }

@@ -1,4 +1,4 @@
-// Node-API bridge: Electron's main process <-> the Body Clock C ABI (src/yoai.h).
+// Node-API bridge: Electron's main process <-> the YoAI C ABI (src/yoai.h).
 //
 // The same bridge harmony/entry/src/main/cpp/napi_init.cpp is, against the same
 // header and with the same threading rules, because Node-API and OHOS's NAPI are
@@ -146,7 +146,7 @@ void ChatWorker(std::int32_t turn_id,
     // the user's own doing, the other needs reporting.
     const bool cancelled = turn->cancelled.load(std::memory_order_relaxed);
     if (rc != 0 && !cancelled) {
-        std::fprintf(stderr, "[bodyclock] chat turn %d finished rc=%d\n", turn_id, rc);
+        std::fprintf(stderr, "[yoai] chat turn %d finished rc=%d\n", turn_id, rc);
     }
 
     StreamEvent* fin = new StreamEvent{cancelled ? "aborted" : "end", ""};
@@ -167,7 +167,7 @@ void ChatWorker(std::int32_t turn_id,
 
 // nativeVersion(): string -- build stamp, proves the .node is really loaded.
 napi_value NativeVersion(napi_env env, napi_callback_info /*info*/) {
-    return Utf8(env, ("bodyclock " + std::string(yoai_version())
+    return Utf8(env, ("yoai " + std::string(yoai_version())
                       + " / built " __DATE__ " " __TIME__).c_str());
 }
 

@@ -53,6 +53,9 @@ struct LocalEmbedder::Impl {
         }
         if (model == nullptr) {
             llama_model_params mp = llama_model_default_params();
+            // Always set: llama.cpp's own default is every layer on any GPU
+            // it finds, which would make a build's backends decide instead.
+            mp.n_gpu_layers = opt.n_gpu_layers;
             model = llama_model_load_from_file(opt.model_path.c_str(), mp);
             if (model == nullptr) {
                 err = "could not load model: " + opt.model_path;

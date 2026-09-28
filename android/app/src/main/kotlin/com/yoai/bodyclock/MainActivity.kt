@@ -1,6 +1,6 @@
-package ai.bodyclock.app
+package com.yoai.bodyclock
 
-import ai.bodyclock.app.ui.BodyclockTheme
+import com.yoai.bodyclock.ui.YoaiBenchTheme
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            BodyclockTheme {
+            YoaiBenchTheme {
                 Surface(Modifier.fillMaxSize()) { MeasureScreen() }
             }
         }
@@ -90,10 +90,10 @@ private fun MeasureScreen(vm: MeasureViewModel = viewModel()) {
 @Composable
 private fun Header(state: MeasureViewModel.UiState) {
     Column {
-        Text("Body Clock — bench", style = MaterialTheme.typography.headlineSmall)
+        Text("YoAI — bench", style = MaterialTheme.typography.headlineSmall)
         Text(
             if (state.libLoaded) "core ${state.coreVersion}"
-            else "libbodyclock.so did not load — wrong ABI, or the native lane was never built",
+            else "libyoai.so did not load — wrong ABI, or the native lane was never built",
             style = MaterialTheme.typography.bodySmall,
         )
         if (state.busy != null) {

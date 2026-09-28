@@ -73,7 +73,7 @@ function onEvent(ev: ReaderEvent): void {
 
 function ensureSubscribed(): void {
   if (unsubscribe === null) {
-    unsubscribe = window.bodyclock.reader.onEvent(onEvent)
+    unsubscribe = window.yoai.reader.onEvent(onEvent)
   }
 }
 
@@ -85,7 +85,7 @@ function ensureSubscribed(): void {
  * session.
  */
 export async function ready(): Promise<boolean> {
-  const st = await window.bodyclock.reader.status()
+  const st = await window.yoai.reader.status()
   return st.available && st.loaded && st.enabled
 }
 
@@ -120,7 +120,7 @@ export async function begin(): Promise<boolean> {
   lastSentence = -1
   unsent = ''
 
-  const ok = await window.bodyclock.reader.begin()
+  const ok = await window.yoai.reader.begin()
   if (!ok) {
     console.warn('[reader] could not begin')
   }
@@ -203,7 +203,7 @@ function flush(force: boolean): void {
     // mojibake. The bytes are right, the terminal is not. This is the readable
     // copy, and it is what the engine is actually given.
     console.log(`[reader] fed ${spoken.length} chars: ${JSON.stringify(spoken)}`)
-    void window.bodyclock.reader.feed(spoken)
+    void window.yoai.reader.feed(spoken)
   }
 }
 
@@ -227,6 +227,6 @@ export function finish(): Promise<Record<string, unknown>> {
   const done = new Promise<Record<string, unknown>>((resolve, reject) => {
     pending = { resolve, reject }
   })
-  void window.bodyclock.reader.finish()
+  void window.yoai.reader.finish()
   return done
 }

@@ -17,5 +17,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "bodyclock"
+rootProject.name = "yoai"
 include(":app")

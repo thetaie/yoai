@@ -111,7 +111,7 @@ function onEvent(ev: OmniEvent): void {
 
 function ensureSubscribed(): void {
   if (unsubscribe === null) {
-    unsubscribe = window.bodyclock.omni.onEvent(onEvent)
+    unsubscribe = window.yoai.omni.onEvent(onEvent)
   }
 }
 
@@ -133,7 +133,7 @@ export async function ask(prompt: string, onText?: (text: string) => void): Prom
   audioSeconds = 0
   replyText = ''
 
-  const started = await window.bodyclock.omni.ask(prompt)
+  const started = await window.yoai.omni.ask(prompt)
   if (!started) {
     throw new Error('omni is not loaded, or is already answering')
   }

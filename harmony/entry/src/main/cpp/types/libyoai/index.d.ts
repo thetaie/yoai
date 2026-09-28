@@ -1,5 +1,5 @@
 /**
- * NAPI bridge to the embedded Body Clock C++ core (the C ABI in src/yoai.h).
+ * NAPI bridge to the embedded YoAI C++ core (the C ABI in src/yoai.h).
  *
  * Call order per session: nativeProviderSet once per model the user has a key
  * for (and nativeLocalSet once per on-device model they have added), then
@@ -12,7 +12,7 @@ export const nativeVersion: () => string;
 
 /**
  * Core log level: 'debug' | 'info' | 'warn' | 'error'. Output goes to hilog, so
- * it shows up in DevEco's Log window under the tag `bodyclock`. Default is 'info'.
+ * it shows up in DevEco's Log window under the tag `yoai`. Default is 'info'.
  */
 export const nativeSetLogLevel: (level: string) => void;
 

@@ -17,7 +17,7 @@
 import { common } from '@kit.AbilityKit';
 import { promptAction, router } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
-import bodyclock from 'libbodyclock.so';
+import yoai from 'libyoai.so';
 import { Canceler, ChatMessage, MessagePart, StreamCallbacks } from '../model/Chat';
 import { ModelConfig, modelLabel } from '../model/Provider';
 import { ChatEngine } from '../core/ChatEngine';
@@ -95,7 +95,7 @@ struct Index {
 
     // Only offer what the core will actually run: an entry with no key behind
     // it is absent from yoai_providers(), and picking it could only fail.
-    const runnable: string = bodyclock.nativeProviders();
+    const runnable: string = yoai.nativeProviders();
     const ready: Set<string> = new Set<string>(runnable.length === 0 ? [] : runnable.split('\n'));
 
     let next: string = ready.has(stored) ? stored : '';

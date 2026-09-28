@@ -1,6 +1,6 @@
 # The Android lane
 
-Two activities against one `bodyclock_core`, and they are different things:
+Two activities against one `yoai_core`, and they are different things:
 
 | | Activity | What |
 | --- | --- | --- |
@@ -41,7 +41,7 @@ directories on the HarmonyOS side and not here yet; see
 
 ## The bench
 
-One screen of measurements against the same `bodyclock_core` the HarmonyOS lane
+One screen of measurements against the same `yoai_core` the HarmonyOS lane
 runs, so a figure taken here and a figure in
 [design/voice.md](../design/voice.md) are comparable.
 
@@ -114,7 +114,7 @@ questions and the same script answers both.
 Pushed by hand, to a directory that needs no permission:
 
 ```
-adb push <file> /sdcard/Android/data/ai.bodyclock.app/files/
+adb push <file> /sdcard/Android/data/com.yoai.bodyclock/files/
 ```
 
 The Models panel lists what is actually there, and the app's own path is

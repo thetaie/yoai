@@ -8,7 +8,7 @@ rem
 rem Usage: build.cmd [clean] [addon] [llama] [qtts] [mnn] [app]
 rem
 rem   (no args)  addon + app
-rem   addon      just the Node-API addon (build\Release\bodyclock.node)
+rem   addon      just the Node-API addon (build\Release\yoai.node)
 rem   llama      assemble a desktop llama.cpp SDK and build the addon WITH the
 rem              on-device lane. Implies addon. Recognition rides along: it
 rem              links ggml and never libllama, so the same SDK turns it on.
@@ -78,7 +78,7 @@ rem YOAI_* settings, from the environment and from .env. See .env.example.
 rem After the arguments, so the help text still prints when a configured
 rem path is wrong. The names are the paths this script reads: each one that
 rem is configured has to exist.
-call "%PROJECT_DIR%\scripts\load-env.cmd" VS_DIR NINJA VCPKG_ROOT LLAMA_SRC QTTS_SRC MNN_SRC VULKAN_SDK || exit /b 1
+call "%PROJECT_DIR%\_load-env.cmd" VS_DIR NINJA VCPKG_ROOT LLAMA_SRC QTTS_SRC MNN_SRC VULKAN_SDK || exit /b 1
 set "THIRD_SYNC=%PROJECT_DIR%\third\sync.cmd"
 
 rem No target named means both, which is what a first run wants.
@@ -232,10 +232,10 @@ rem Ninja writes it at the root of the output directory; a multi-config
 rem generator would put it under Release\. Both are checked because the module
 rem loader in src\main\core.ts searches both, and this message is the one place
 rem that can say which one actually happened.
-set "ADDON=%BUILD_DIR%\bodyclock.node"
-if not exist "!ADDON!" set "ADDON=%BUILD_DIR%\Release\bodyclock.node"
+set "ADDON=%BUILD_DIR%\yoai.node"
+if not exist "!ADDON!" set "ADDON=%BUILD_DIR%\Release\yoai.node"
 if not exist "!ADDON!" (
-    echo [build] cmake-js reported success but there is no bodyclock.node under %BUILD_DIR%>&2
+    echo [build] cmake-js reported success but there is no yoai.node under %BUILD_DIR%>&2
     exit /b 1
 )
 echo [build] addon at !ADDON!

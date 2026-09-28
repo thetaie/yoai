@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.19)
-project(bodyclock C CXX)
+project(yoai C CXX)
 
-# The Body Clock core: a static library plus a C ABI (src/yoai.h), built to be linked
+# The YoAI core: a static library plus a C ABI (src/yoai.h), built to be linked
 # INTO a host app -- the HarmonyOS native module today, an Android one next --
 # rather than run as a process. There is no server here and no port to bind: the
 # host owns storage and settings and reaches the core through the C ABI.
@@ -69,14 +69,14 @@ find_package(OpenSSL REQUIRED)
 #    platform compiles the same bytes from a version pinned by the file itself
 #    -- the same argument this build already makes for llama.cpp.
 #
-# Costs about 1 MB per ABI inside libbodyclock.so. See third/sqlite3/README.md
+# Costs about 1 MB per ABI inside libyoai.so. See third/sqlite3/README.md
 # for the version and how to move to a new one.
-add_library(bodyclock_sqlite3 STATIC third/sqlite3/sqlite3.c)
-target_include_directories(bodyclock_sqlite3 PUBLIC third/sqlite3)
+add_library(yoai_sqlite3 STATIC third/sqlite3/sqlite3.c)
+target_include_directories(yoai_sqlite3 PUBLIC third/sqlite3)
 
 # PUBLIC because several of these change what sqlite3.h declares: a translation
 # unit that includes the header must be built with the same set the library was.
-target_compile_definitions(bodyclock_sqlite3 PUBLIC
+target_compile_definitions(yoai_sqlite3 PUBLIC
     # The store is reached from the UI thread and from worker threads, so pay
     # for serialized mode rather than police the calls.
     SQLITE_THREADSAFE=1
@@ -95,16 +95,31 @@ target_compile_definitions(bodyclock_sqlite3 PUBLIC
     SQLITE_OMIT_LOAD_EXTENSION
 )
 
-# The amalgamation is generated code and warns freely under the core's flags.
-if(MSVC)
-    target_compile_options(bodyclock_sqlite3 PRIVATE /w)
-else()
-    target_compile_options(bodyclock_sqlite3 PRIVATE -w)
-endif()
+# Vendored C is upstream's code, never edited here, and warns freely under the
+# core's flags, so it compiles with warnings off.
+#
+# On MSVC that means taking the directory's /W3 OUT of the target rather than
+# adding /w beside it: cl reports one warning level overriding another as a
+# warning of its own (D9025), once per file, which is exactly the noise this is
+# meant to remove.
+function(yoai_no_warnings target)
+    if(MSVC)
+        get_target_property(_opts ${target} COMPILE_OPTIONS)
+        if(_opts)
+            list(REMOVE_ITEM _opts /W3)
+            set_target_properties(${target} PROPERTIES COMPILE_OPTIONS "${_opts}")
+        endif()
+        target_compile_options(${target} PRIVATE /w)
+    else()
+        target_compile_options(${target} PRIVATE -w)
+    endif()
+endfunction()
+
+yoai_no_warnings(yoai_sqlite3)
 
 # Serialized mode needs pthreads where they are not already implied.
 find_package(Threads REQUIRED)
-target_link_libraries(bodyclock_sqlite3 PUBLIC Threads::Threads)
+target_link_libraries(yoai_sqlite3 PUBLIC Threads::Threads)
 
 # sqlite-vec, vendored beside it: vector search as a vec0 virtual table, for
 # src/store/vector_index. See third/sqlite-vec/README.md for the version.
@@ -114,7 +129,7 @@ target_link_libraries(bodyclock_sqlite3 PUBLIC Threads::Threads)
 # directly.
 add_library(yoai_sqlite_vec STATIC third/sqlite-vec/sqlite-vec.c)
 target_include_directories(yoai_sqlite_vec PUBLIC third/sqlite-vec)
-target_link_libraries(yoai_sqlite_vec PUBLIC bodyclock_sqlite3)
+target_link_libraries(yoai_sqlite_vec PUBLIC yoai_sqlite3)
 
 target_compile_definitions(yoai_sqlite_vec
     PUBLIC
@@ -131,13 +146,12 @@ target_compile_definitions(yoai_sqlite_vec
         SQLITE_VEC_OMIT_FS
 )
 
-if(MSVC)
-    target_compile_options(yoai_sqlite_vec PRIVATE /w)
-else()
+yoai_no_warnings(yoai_sqlite_vec)
+if(NOT MSVC)
     # sqlite-vec.c typedefs uint8_t from u_int8_t on every non-Windows target
     # without including the header that declares it. glibc and bionic declare
     # it anyway; musl -- HarmonyOS -- does not, and the file does not compile.
-    target_compile_options(yoai_sqlite_vec PRIVATE -w -include sys/types.h)
+    target_compile_options(yoai_sqlite_vec PRIVATE -include sys/types.h)
 endif()
 
 #-------------------------------------------------------------------------------
@@ -163,7 +177,7 @@ if(NOT YOAI_SQL_FILES)
     message(FATAL_ERROR "No migrations found in sql/sqlite/")
 endif()
 
-set(_bodyclock_migrations "")
+set(_yoai_migrations "")
 foreach(_sql_file ${YOAI_SQL_FILES})
     get_filename_component(_sql_name "${_sql_file}" NAME)
     if(NOT _sql_name MATCHES "^([0-9]+)_.+\\.sql$")
@@ -176,14 +190,14 @@ foreach(_sql_file ${YOAI_SQL_FILES})
         message(FATAL_ERROR "Migration ${_sql_name} is numbered 0; versions start at 1")
     endif()
     file(READ "${_sql_file}" _sql_text)
-    string(APPEND _bodyclock_migrations
+    string(APPEND _yoai_migrations
         "    { ${_sql_version}, \"${_sql_name}\", R\"YOAI_SQL(\n${_sql_text})YOAI_SQL\" },\n")
     # Re-run CMake when the statements change, not only when a file is added.
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_sql_file}")
 endforeach()
 
-set(_bodyclock_gen_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
-file(WRITE "${_bodyclock_gen_dir}/store/migrations.hpp.in"
+set(_yoai_gen_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(WRITE "${_yoai_gen_dir}/store/migrations.hpp.in"
 "// Generated by the root CMakeLists.txt from sql/sqlite/*.sql -- do not edit.\n"
 "#pragma once\n"
 "\n"
@@ -197,7 +211,7 @@ file(WRITE "${_bodyclock_gen_dir}/store/migrations.hpp.in"
 "};\n"
 "\n"
 "const Migration kMigrations[] = {\n"
-"${_bodyclock_migrations}"
+"${_yoai_migrations}"
 "};\n"
 "\n"
 "const int kMigrationCount = sizeof(kMigrations) / sizeof(kMigrations[0]);\n"
@@ -205,14 +219,14 @@ file(WRITE "${_bodyclock_gen_dir}/store/migrations.hpp.in"
 "}  // namespace store\n"
 "}  // namespace yoai\n")
 # COPYONLY so an unchanged schema does not touch the header and rebuild the world.
-configure_file("${_bodyclock_gen_dir}/store/migrations.hpp.in"
-               "${_bodyclock_gen_dir}/store/migrations.hpp" COPYONLY)
+configure_file("${_yoai_gen_dir}/store/migrations.hpp.in"
+               "${_yoai_gen_dir}/store/migrations.hpp" COPYONLY)
 
 #-------------------------------------------------------------------------------
-# bodyclock_core
+# yoai_core
 #-------------------------------------------------------------------------------
 
-add_library(bodyclock_core STATIC
+add_library(yoai_core STATIC
     # The C ABI, src/yoai.h. Everything below is reached through it.
     src/yoai.cpp
     # Backend's constructor, which starts each local model's engine. A no-op
@@ -270,10 +284,10 @@ add_library(bodyclock_core STATIC
     src/voice/text/sentence_stream.cpp
 )
 
-target_include_directories(bodyclock_core PUBLIC src)
+target_include_directories(yoai_core PUBLIC src)
 # PRIVATE: the generated migration table is an implementation detail of the
 # store, not part of what a host sees.
-target_include_directories(bodyclock_core PRIVATE "${_bodyclock_gen_dir}")
+target_include_directories(yoai_core PRIVATE "${_yoai_gen_dir}")
 
 # RapidJSON, vendored: header-only, so a package manager has nothing to build
 # for it. See third/rapidjson/README.md for the version.
@@ -283,22 +297,22 @@ target_include_directories(bodyclock_core PRIVATE "${_bodyclock_gen_dir}")
 # RapidJSON of its own -- a vcpkg tree, or a mobile prebuilt/ from before this
 # was vendored -- and two versions in one .so is the crash described under the
 # MNN lane below. MNN is the one exception, and goes BEFORE this on purpose.
-target_include_directories(bodyclock_core PUBLIC third/rapidjson/include)
+target_include_directories(yoai_core PUBLIC third/rapidjson/include)
 
-target_link_libraries(bodyclock_core PUBLIC
+target_link_libraries(yoai_core PUBLIC
     CURL::libcurl
     OpenSSL::SSL
     OpenSSL::Crypto
     yoai_sqlite_vec
-    bodyclock_sqlite3
+    yoai_sqlite3
 )
 
 # utils/log.cpp routes to the platform's own log sink where there is one --
 # stderr reaches nobody on a phone.
 if(CMAKE_SYSTEM_NAME STREQUAL "Android")
-    target_link_libraries(bodyclock_core PUBLIC log)
+    target_link_libraries(yoai_core PUBLIC log)
 elseif(OHOS OR CMAKE_SYSTEM_NAME STREQUAL "OHOS")
-    target_link_libraries(bodyclock_core PUBLIC libhilog_ndk.z.so)
+    target_link_libraries(yoai_core PUBLIC libhilog_ndk.z.so)
 endif()
 
 #-------------------------------------------------------------------------------
@@ -361,7 +375,7 @@ endif()
 # Resolves the ggml archives into YOAI_GGML_LIBS, and fails with the reason
 # rather than with a link error two minutes later. `_why` names the option that
 # asked, so the message says which switch to look at.
-macro(bodyclock_require_ggml _why)
+macro(yoai_require_ggml _why)
     # Which SDK's copy, per the paragraph above. The qtts one wins when that
     # lane is on, and it can stand alone: src/voice/tts/qwen3_tts.cpp includes
     # qwen.h and no ggml header, so a build with only that lane needs no llama
@@ -438,7 +452,7 @@ macro(bodyclock_require_ggml _why)
         # So src/voice/tts/qwen3_tts.cpp can set the backend's environment before
         # the engine initialises it. There is no runtime way to ask ggml whether
         # the Vulkan backend was compiled in early enough to matter.
-        target_compile_definitions(bodyclock_core PRIVATE YOAI_QTTS_VULKAN)
+        target_compile_definitions(yoai_core PRIVATE YOAI_QTTS_VULKAN)
         # And the C header, so that same file can ask Vulkan what KIND of GPU
         # this is before ggml creates one -- the tuning it sets is for a GPU
         # that shares system memory and costs a discrete card dearly. Only the C
@@ -449,16 +463,16 @@ macro(bodyclock_require_ggml _why)
         find_path(VULKAN_HEADER_DIR vulkan/vulkan.h
                   HINTS "$ENV{VULKAN_SDK}/Include" "$ENV{VULKAN_SDK}/include")
         if(VULKAN_HEADER_DIR)
-            target_include_directories(bodyclock_core PRIVATE "${VULKAN_HEADER_DIR}")
-            target_compile_definitions(bodyclock_core PRIVATE YOAI_QTTS_VULKAN_PROBE)
-            message(STATUS "bodyclock_core: Vulkan device probe ON -> ${VULKAN_HEADER_DIR}")
+            target_include_directories(yoai_core PRIVATE "${VULKAN_HEADER_DIR}")
+            target_compile_definitions(yoai_core PRIVATE YOAI_QTTS_VULKAN_PROBE)
+            message(STATUS "yoai_core: Vulkan device probe ON -> ${VULKAN_HEADER_DIR}")
         else()
             message(WARNING
-                "bodyclock_core: no vulkan/vulkan.h found, so the discrete-GPU probe is off "
+                "yoai_core: no vulkan/vulkan.h found, so the discrete-GPU probe is off "
                 "and the integrated-GPU tuning in src/voice/tts/qwen3_tts.cpp applies "
                 "everywhere.")
         endif()
-        message(STATUS "bodyclock_core: ggml Vulkan backend ON -> ${GGML_VULKAN_LIB}")
+        message(STATUS "yoai_core: ggml Vulkan backend ON -> ${GGML_VULKAN_LIB}")
     endif()
 endmacro()
 
@@ -503,7 +517,7 @@ if(YOAI_QTTS)
     # The ggml that goes with it -- resolved here rather than left to whichever
     # lane happens to ask first, because this lane is the one that decides which
     # copy wins and the decision has to be made before anything links.
-    bodyclock_require_ggml(YOAI_QTTS)
+    yoai_require_ggml(YOAI_QTTS)
 
     # QWEN_STATIC matters only on Windows, and only because qwen.h defaults the
     # other way. Its QT_API expands to __declspec(dllimport) unless told
@@ -511,11 +525,11 @@ if(YOAI_QTTS)
     # that a static qwen-core.lib cannot satisfy -- fifteen unresolved externals
     # naming functions that are plainly present in the archive. The SDK is built
     # with QWEN_SHARED=OFF, so static is what it always is here.
-    target_compile_definitions(bodyclock_core PRIVATE YOAI_QTTS QWEN_STATIC)
-    target_include_directories(bodyclock_core PRIVATE "${QTTS_DIR}/include")
-    target_link_libraries(bodyclock_core PUBLIC "${QWEN_CORE_LIB}")
+    target_compile_definitions(yoai_core PRIVATE YOAI_QTTS QWEN_STATIC)
+    target_include_directories(yoai_core PRIVATE "${QTTS_DIR}/include")
+    target_link_libraries(yoai_core PUBLIC "${QWEN_CORE_LIB}")
 
-    message(STATUS "bodyclock_core: speech output ON -> ${QWEN_CORE_LIB}")
+    message(STATUS "yoai_core: speech output ON -> ${QWEN_CORE_LIB}")
 endif()
 
 #-------------------------------------------------------------------------------
@@ -528,7 +542,7 @@ endif()
 option(YOAI_ONDEVICE_LLM "Build the on-device LLM engine (llama.cpp + GGUF)" OFF)
 
 if(YOAI_ONDEVICE_LLM)
-    bodyclock_require_ggml(YOAI_ONDEVICE_LLM)
+    yoai_require_ggml(YOAI_ONDEVICE_LLM)
 
     unset(LLAMA_LIB CACHE)
     find_library(LLAMA_LIB NAMES llama
@@ -563,15 +577,15 @@ if(YOAI_ONDEVICE_LLM)
     unset(_llama_h)
     unset(_llama_h_flat)
 
-    target_compile_definitions(bodyclock_core PUBLIC YOAI_ONDEVICE_LLM)
-    target_include_directories(bodyclock_core PRIVATE "${LLAMA_CPP_DIR}/include")
+    target_compile_definitions(yoai_core PUBLIC YOAI_ONDEVICE_LLM)
+    target_include_directories(yoai_core PRIVATE "${LLAMA_CPP_DIR}/include")
 
     # llama only. ggml goes on the end of the link line for every lane at once,
     # below -- with static archives the linker resolves left to right, and llama
     # references ggml, not the other way round.
-    target_link_libraries(bodyclock_core PUBLIC "${LLAMA_LIB}")
+    target_link_libraries(yoai_core PUBLIC "${LLAMA_LIB}")
 
-    message(STATUS "bodyclock_core: on-device LLM ON -> ${LLAMA_LIB}")
+    message(STATUS "yoai_core: on-device LLM ON -> ${LLAMA_LIB}")
 endif()
 
 #-------------------------------------------------------------------------------
@@ -585,7 +599,7 @@ endif()
 option(YOAI_ASR "Build on-device speech recognition (SenseVoice + ggml)" OFF)
 
 if(YOAI_ASR)
-    bodyclock_require_ggml(YOAI_ASR)
+    yoai_require_ggml(YOAI_ASR)
     if(NOT YOAI_GGML_LIBS AND NOT YOAI_ONDEVICE_LLM)
         message(FATAL_ERROR
             "No ggml archives under ${LLAMA_CPP_DIR}/lib, and the LLM lane that would "
@@ -596,10 +610,10 @@ if(YOAI_ASR)
     # PRIVATE: only src/voice/asr/sensevoice.cpp changes shape with this. The
     # public header does not branch on it -- a host asks SenseVoice::available()
     # at runtime, so the same declarations link either way.
-    target_compile_definitions(bodyclock_core PRIVATE YOAI_ASR)
-    target_include_directories(bodyclock_core PRIVATE "${LLAMA_CPP_DIR}/include")
+    target_compile_definitions(yoai_core PRIVATE YOAI_ASR)
+    target_include_directories(yoai_core PRIVATE "${LLAMA_CPP_DIR}/include")
 
-    message(STATUS "bodyclock_core: speech recognition ON -> ${LLAMA_CPP_DIR}")
+    message(STATUS "yoai_core: speech recognition ON -> ${LLAMA_CPP_DIR}")
 endif()
 
 # ggml LAST, and once for all three lanes.
@@ -611,7 +625,7 @@ endif()
 # pulled ggml up in front of llama and left llama's every ggml symbol undefined.
 # One line here cannot get that wrong.
 if(YOAI_GGML_LIBS)
-    target_link_libraries(bodyclock_core PUBLIC ${YOAI_GGML_LIBS})
+    target_link_libraries(yoai_core PUBLIC ${YOAI_GGML_LIBS})
 endif()
 
 #-------------------------------------------------------------------------------
@@ -665,7 +679,7 @@ if(YOAI_MNN)
     # ONE archive by design: built with MNN_SEP_BUILD=OFF, the llm engine is an
     # OBJECT library folded into libMNN, so there is no libllm to find. Looking
     # for one reports a good build as a failure.
-    target_compile_definitions(bodyclock_core PRIVATE YOAI_MNN)
+    target_compile_definitions(yoai_core PRIVATE YOAI_MNN)
 
     # Whether that libMNN was built with -DMNN_VULKAN=ON, which the archive
     # itself cannot be asked.
@@ -690,13 +704,13 @@ if(YOAI_MNN)
     # file MNN might ever add.
     option(YOAI_MNN_VULKAN "The MNN at MNN_DIR has the Vulkan backend" OFF)
     if(YOAI_MNN_VULKAN)
-        target_compile_definitions(bodyclock_core PRIVATE YOAI_MNN_VULKAN)
+        target_compile_definitions(yoai_core PRIVATE YOAI_MNN_VULKAN)
         if(MSVC)
             # INTERFACE: this is a static library, so the option has to reach
             # whoever produces the binary -- the addon, or the CLI.
-            target_link_options(bodyclock_core INTERFACE "/WHOLEARCHIVE:${MNN_LIB}")
+            target_link_options(yoai_core INTERFACE "/WHOLEARCHIVE:${MNN_LIB}")
         else()
-            target_link_options(bodyclock_core INTERFACE
+            target_link_options(yoai_core INTERFACE
                 "-Wl,--whole-archive" "${MNN_LIB}" "-Wl,--no-whole-archive")
         endif()
     endif()
@@ -721,10 +735,10 @@ if(YOAI_MNN)
     # compile against MNN's copy as well. They are the only rapidjson users in
     # the library; if that changes, the new one has to be in this target too,
     # or the same crash comes back somewhere else.
-    target_include_directories(bodyclock_core BEFORE PRIVATE "${MNN_DIR}/include")
-    target_link_libraries(bodyclock_core PUBLIC "${MNN_LIB}")
+    target_include_directories(yoai_core BEFORE PRIVATE "${MNN_DIR}/include")
+    target_link_libraries(yoai_core PUBLIC "${MNN_LIB}")
 
-    message(STATUS "bodyclock_core: MNN (omni, chat) ON -> ${MNN_LIB}")
+    message(STATUS "yoai_core: MNN (omni, chat) ON -> ${MNN_LIB}")
 endif()
 
 #-------------------------------------------------------------------------------
@@ -734,68 +748,77 @@ endif()
 # Off when cross-compiling: a HAP has nowhere to put a companion executable, and
 # the device refuses to exec a standalone binary anyway.
 if(CMAKE_CROSSCOMPILING)
-    set(_bodyclock_cli_default OFF)
+    set(_yoai_cli_default OFF)
 else()
-    set(_bodyclock_cli_default ON)
+    set(_yoai_cli_default ON)
 endif()
-option(YOAI_BUILD_CLI "Build the desktop CLI harness (cli/)" ${_bodyclock_cli_default})
+option(YOAI_BUILD_CLI "Build the desktop CLI harness (cli/)" ${_yoai_cli_default})
 
 if(YOAI_BUILD_CLI)
     add_executable(yoai-cli cli/main.cpp)
-    target_link_libraries(yoai-cli PRIVATE bodyclock_core)
+    target_link_libraries(yoai-cli PRIVATE yoai_core)
 
     # Recognition from the command line: a model, then WAV files. Builds
     # whether or not YOAI_ASR is on and says which it is, the same way the
     # engine does. tests/ for wav.hpp, the one WAV reader the harnesses share.
     add_executable(yoai-asr cli/asr.cpp)
-    target_link_libraries(yoai-asr PRIVATE bodyclock_core)
+    target_link_libraries(yoai-asr PRIVATE yoai_core)
     target_include_directories(yoai-asr PRIVATE tests)
+
+    # A GGUF from the command line: chat or embed. Builds whether or not
+    # YOAI_ONDEVICE_LLM is on and says which. shell32 for CommandLineToArgvW,
+    # which cli/console.hpp uses to read the arguments as UTF-8.
+    add_executable(yoai-llama cli/llama.cpp)
+    target_link_libraries(yoai-llama PRIVATE yoai_core)
+    if(WIN32)
+        target_link_libraries(yoai-llama PRIVATE shell32)
+    endif()
 
     # Rides on the same switch as the CLI, and for the same reason: both are
     # desktop harnesses for the core, and a HAP has nowhere to put an
     # executable. The timeline's rules are the one part of the core that fails
     # silently in the data rather than loudly at runtime, so they get a test.
     add_executable(yoai-timeline-test tests/timeline_test.cpp)
-    target_link_libraries(yoai-timeline-test PRIVATE bodyclock_core)
+    target_link_libraries(yoai-timeline-test PRIVATE yoai_core)
 
     # The same store through the door a HOST uses, which is a separate thing to
     # get wrong: the rules can be perfect while a JSON key is spelled
     # differently than yoai.h says, and a host only ever reads the header.
     add_executable(yoai-timeline-abi-test tests/timeline_abi_test.cpp)
-    target_link_libraries(yoai-timeline-abi-test PRIVATE bodyclock_core)
+    target_link_libraries(yoai-timeline-abi-test PRIVATE yoai_core)
 
     # Vector search over an in-memory database. Checks that sqlite-vec is
     # compiled in and registers, and that a nearest-neighbor query returns
     # what was stored, in distance order.
     add_executable(yoai-vector-index-test tests/vector_index_test.cpp)
-    target_link_libraries(yoai-vector-index-test PRIVATE bodyclock_core)
+    target_link_libraries(yoai-vector-index-test PRIVATE yoai_core)
 
     # The embedder and the index together: text in, the related text out.
     # Builds whether or not YOAI_ONDEVICE_LLM is on, and says which.
     add_executable(yoai-embed-test tests/embed_test.cpp)
-    target_link_libraries(yoai-embed-test PRIVATE bodyclock_core)
+    target_link_libraries(yoai-embed-test PRIVATE yoai_core)
 
     # Builds whether or not YOAI_ASR is on. Without it the front-end checks
     # still run and still mean something -- the filterbank is the half that has
     # one right answer -- and the transcription half says it is not compiled in.
     add_executable(yoai-sensevoice-test tests/sensevoice_test.cpp)
-    target_link_libraries(yoai-sensevoice-test PRIVATE bodyclock_core)
+    target_link_libraries(yoai-sensevoice-test PRIVATE yoai_core)
 
     # Needs neither a model nor ggml, so it builds in the plain desktop
     # configuration and its table can be checked against the tool that produced
     # the result design/voice.md records.
     add_executable(yoai-prosody-test tests/prosody_test.cpp)
-    target_link_libraries(yoai-prosody-test PRIVATE bodyclock_core)
+    target_link_libraries(yoai-prosody-test PRIVATE yoai_core)
 
     # One file in, a directory out. Checked against design/pack-mnn-model.py:
     # a truncated weight file is the one failure MNN would answer through
     # rather than report.
     add_executable(yoai-bundle-test tests/bundle_test.cpp)
-    target_link_libraries(yoai-bundle-test PRIVATE bodyclock_core)
+    target_link_libraries(yoai-bundle-test PRIVATE yoai_core)
 
     # The sentence splitter, which needs no engine. It has a test because its
     # predecessor failed in the one way nothing reports: the reply was read
     # aloud and simply did not say everything.
     add_executable(yoai-reader-test tests/reader_test.cpp)
-    target_link_libraries(yoai-reader-test PRIVATE bodyclock_core)
+    target_link_libraries(yoai-reader-test PRIVATE yoai_core)
 endif()

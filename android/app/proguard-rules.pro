@@ -7,6 +7,6 @@
 # The two callback interfaces are instantiated from Kotlin but INVOKED from C
 # through GetMethodID, by literal name and signature. R8 has no way to see that
 # use, so it would happily rename onEvent/onAudio.
--keep class ai.bodyclock.app.Bodyclock { *; }
--keep interface ai.bodyclock.app.Bodyclock$ChatSink { *; }
--keep interface ai.bodyclock.app.Bodyclock$AudioSink { *; }
+-keep class com.yoai.bodyclock.Yoai { *; }
+-keep interface com.yoai.bodyclock.Yoai$ChatSink { *; }
+-keep interface com.yoai.bodyclock.Yoai$AudioSink { *; }

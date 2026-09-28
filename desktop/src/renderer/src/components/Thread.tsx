@@ -123,7 +123,7 @@ export function Thread({
   const [ttsReady, setTtsReady] = useState(false)
   useEffect(() => {
     void (async () => {
-      const st = await window.bodyclock.tts.status()
+      const st = await window.yoai.tts.status()
       setTtsReady(st.available && st.loaded)
     })()
   }, [messages.length])

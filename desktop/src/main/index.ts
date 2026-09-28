@@ -12,6 +12,7 @@
  * named calls in ipc.ts.
  */
 import { app, BrowserWindow, nativeTheme, session, shell } from 'electron'
+import { existsSync, mkdirSync, readdirSync, renameSync, rmdirSync } from 'node:fs'
 import { join } from 'node:path'
 import palettes from '../../../design/palettes.json'
 import { describeCore } from './core'
@@ -20,6 +21,36 @@ import * as tts from './tts'
 import * as models from './models'
 import * as prefs from './prefs'
 import * as sessions from './sessions'
+
+/**
+ * The data directory of the name this app had before, carried over once.
+ *
+ * Electron names the directory after package.json's "name", which was
+ * bodyclock-desktop before it became yoai-desktop. Without this, an existing
+ * install's keys, sessions and settings would still be on disk and simply not
+ * be found. Entry by entry rather than one rename, because Electron may have
+ * created the new directory already; nothing that exists there is replaced.
+ *
+ * Before anything reads userData -- nothing does while the modules above load.
+ */
+function adoptOldUserData(): void {
+  const current = app.getPath('userData')
+  const old = join(app.getPath('appData'), 'bodyclock-desktop')
+  if (!existsSync(old)) return
+  try {
+    mkdirSync(current, { recursive: true })
+    for (const entry of readdirSync(old)) {
+      if (!existsSync(join(current, entry))) {
+        renameSync(join(old, entry), join(current, entry))
+      }
+    }
+    if (readdirSync(old).length === 0) rmdirSync(old)
+    console.log(`[yoai] carried ${old} over to ${current}`)
+  } catch (e) {
+    console.error(`[yoai] could not carry ${old} over to ${current}: ${e}`)
+  }
+}
+adoptOldUserData()
 
 /**
  * The window's own background, before a single stylesheet has loaded.
@@ -50,7 +81,7 @@ function windowBackground(): string {
  *
  * `default-src 'none'` is the line that matters, and it is worth stating what
  * it buys: the page cannot fetch anything, from anywhere. That is what makes
- * "there is no Body Clock server" checkable instead of promised -- a dependency
+ * "there is no YoAI server" checkable instead of promised -- a dependency
  * that decided to phone home would be stopped by the browser engine rather than
  * by anyone reading the dependency. The model calls are unaffected; they are
  * made by libcurl inside the core, in the main process, where no CSP applies.
@@ -134,11 +165,11 @@ function createWindow(): BrowserWindow {
 app.whenReady().then(() => {
   // Named so the OS shows the app rather than "Electron" in notifications and
   // the Windows taskbar's grouping.
-  app.setAppUserModelId('ai.bodyclock.desktop')
+  app.setAppUserModelId('ai.yoai.desktop')
 
   const described = describeCore()
   if (described.ok) {
-    console.log(`[bodyclock] ${described.version}`)
+    console.log(`[yoai] ${described.version}`)
     // The registry is process memory and empty after every start; this is what
     // refills it, and it has to happen before the first turn can name a model.
     models.syncToCore()
@@ -146,7 +177,7 @@ app.whenReady().then(() => {
     // Not fatal, and not a dialog. The window opens, asks for coreStatus and
     // shows the reason in place of the composer -- which is where someone
     // would look for it, and is one screenshot instead of two.
-    console.error(`[bodyclock] the addon did not load: ${described.error}`)
+    console.error(`[yoai] the addon did not load: ${described.error}`)
   }
 
   sessions.sweepOrphans()
@@ -165,7 +196,7 @@ app.whenReady().then(() => {
     models.autoPreload()
     void tts.autoLoad().then((reason) => {
       if (reason.length > 0) {
-        console.error(`[bodyclock] the voice would not load: ${reason}`)
+        console.error(`[yoai] the voice would not load: ${reason}`)
       }
     })
   }
@@ -189,7 +220,7 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   const stopped = cancelAllTurns()
   if (stopped > 0) {
-    console.log(`[bodyclock] asked ${stopped} in-flight turn(s) to stop`)
+    console.log(`[yoai] asked ${stopped} in-flight turn(s) to stop`)
   }
 })
 

@@ -1,4 +1,4 @@
-package ai.bodyclock.app.day
+package com.yoai.bodyclock.day
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel

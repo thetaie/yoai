@@ -18,7 +18,7 @@ import { audio } from '@kit.AudioKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
-const TAG: string = 'bodyclock-voice';
+const TAG: string = 'yoai-voice';
 
 function log(msg: string): void {
   hilog.info(0x3200, TAG, '%{public}s', msg);

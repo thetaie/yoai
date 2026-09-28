@@ -8,8 +8,8 @@
 //
 //   yoai-cli --base-url URL --key KEY --model NAME ["one question"]
 //
-// Each flag falls back to an environment variable (BODYCLOCK_BASE_URL, BODYCLOCK_API_KEY,
-// BODYCLOCK_MODEL), which is the sane way to pass a key: a flag lands in the shell
+// Each flag falls back to an environment variable (YOAI_BASE_URL, YOAI_API_KEY,
+// YOAI_MODEL), which is the sane way to pass a key: a flag lands in the shell
 // history and in `ps`.
 //
 // With a question argument it runs that one turn and exits. Without one it goes
@@ -47,9 +47,9 @@ void usage() {
         "usage: yoai-cli [options] [\"question\"]\n"
         "\n"
         "  --base-url URL   OpenAI-compatible API root, no /chat/completions\n"
-        "                   (env BODYCLOCK_BASE_URL)\n"
-        "  --key KEY        bearer token (env BODYCLOCK_API_KEY)\n"
-        "  --model NAME     model to send in the request (env BODYCLOCK_MODEL)\n"
+        "                   (env YOAI_BASE_URL)\n"
+        "  --key KEY        bearer token (env YOAI_API_KEY)\n"
+        "  --model NAME     model to send in the request (env YOAI_MODEL)\n"
         "  --system TEXT    system prompt\n"
         "  --no-thinking    drop reasoning output instead of dimming it\n"
         "  --usage          print the token/cost summary after each turn\n"
@@ -60,9 +60,9 @@ void usage() {
 
 // Returns false when the arguments are unusable, having already explained why.
 bool parse_args(int argc, char** argv, Options* opt) {
-    opt->base_url = from_env("BODYCLOCK_BASE_URL");
-    opt->api_key  = from_env("BODYCLOCK_API_KEY");
-    opt->model    = from_env("BODYCLOCK_MODEL");
+    opt->base_url = from_env("YOAI_BASE_URL");
+    opt->api_key  = from_env("YOAI_API_KEY");
+    opt->model    = from_env("YOAI_MODEL");
 
     bool debug = false;
     for (int i = 1; i < argc; ++i) {
@@ -110,7 +110,7 @@ bool parse_args(int argc, char** argv, Options* opt) {
 
     if (opt->base_url.empty() || opt->api_key.empty() || opt->model.empty()) {
         std::cerr << "yoai-cli: --base-url, --key and --model are all required "
-                     "(or their BODYCLOCK_* environment variables)\n\n";
+                     "(or their YOAI_* environment variables)\n\n";
         usage();
         return false;
     }
@@ -244,7 +244,7 @@ int main(int argc, char** argv) {
         return run_turn(opt, &history) ? 0 : 1;
     }
 
-    std::cerr << "bodyclock " << yoai_version() << " -- " << opt.model
+    std::cerr << "yoai " << yoai_version() << " -- " << opt.model
               << " @ " << opt.base_url << "\n"
                  "Type a message, or Ctrl-D to quit.\n";
     std::string line;

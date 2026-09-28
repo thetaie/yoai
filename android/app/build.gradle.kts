@@ -7,15 +7,15 @@ plugins {
 }
 
 // Read once, used by both the ABI filter and the CMake arguments below.
-val bodyclockAbi: String = providers.gradleProperty("bodyclock.abi").get()
+val yoaiAbi: String = providers.gradleProperty("yoai.abi").get()
 
 android {
-    namespace = "ai.bodyclock.app"
+    namespace = "com.yoai.bodyclock"
     compileSdk = 36
-    ndkVersion = providers.gradleProperty("bodyclock.ndk").get()
+    ndkVersion = providers.gradleProperty("yoai.ndk").get()
 
     defaultConfig {
-        applicationId = "ai.bodyclock.app"
+        applicationId = "com.yoai.bodyclock"
         // 26 is what the core needs, not what the lane targets. Nothing here
         // uses an API past it except through the NDK, and the device this
         // exists to measure is running something far newer.
@@ -25,7 +25,7 @@ android {
         versionName = "0.1.0"
 
         ndk {
-            abiFilters += bodyclockAbi
+            abiFilters += yoaiAbi
         }
 
         externalNativeBuild {
@@ -35,7 +35,7 @@ android {
                 // shim. See src/main/cpp/CMakeLists.txt.
                 arguments += listOf(
                     "-DANDROID_STL=c++_shared",
-                    "-DYOAI_ANDROID_ABI=$bodyclockAbi",
+                    "-DYOAI_ANDROID_ABI=$yoaiAbi",
                 )
                 cppFlags += "-std=c++11"
             }

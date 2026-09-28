@@ -99,7 +99,7 @@ function onEvent(ev: TtsEvent): void {
 
 function ensureSubscribed(): void {
   if (unsubscribe === null) {
-    unsubscribe = window.bodyclock.tts.onEvent(onEvent)
+    unsubscribe = window.yoai.tts.onEvent(onEvent)
   }
 }
 
@@ -131,7 +131,7 @@ export function errorOf(): string {
 async function speakOne(text: string): Promise<void> {
   saidAt = Date.now()
   firstChunkAt = 0
-  const started = await window.bodyclock.tts.say(text)
+  const started = await window.yoai.tts.say(text)
   if (!started) {
     return
   }
@@ -265,7 +265,7 @@ export async function stop(): Promise<void> {
   player.stop()
   speakingId = ''
   announce()
-  await window.bodyclock.tts.cancel()
+  await window.yoai.tts.cancel()
   // Release a pump waiting on an utterance the engine has just been told to
   // drop; without this it would sit there until the cancel produced an event.
   const done = endOfUtterance

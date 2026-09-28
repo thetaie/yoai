@@ -16,7 +16,7 @@ import type { ModelConfig } from './provider'
 import type { CoreStatus, InterfacePrefs, KeySaveResult, SessionMeta } from './store'
 
 /** The name the preload script binds the API to on `window`. */
-export const API_KEY = 'bodyclock'
+export const API_KEY = 'yoai'
 
 /** IPC channel names, in one place so the two sides cannot drift apart. */
 export const CHANNELS = {
@@ -230,7 +230,7 @@ export interface ReaderEvent {
   error?: string
 }
 
-export interface BodyclockApi {
+export interface YoaiApi {
   /** Whether the addon loaded, and what it can do. Read once at startup. */
   coreStatus(): Promise<CoreStatus>
 

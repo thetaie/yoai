@@ -5,7 +5,7 @@
  * harmony/entry/src/main/ets/core/SecureKeyStore.ets holds: a key the user
  * pastes is encrypted by the operating system and nowhere else. It is never
  * written in the clear, never logged, never put in a crash report, and there is
- * no Body Clock server for it to be sent to.
+ * no YoAI server for it to be sent to.
  *
  * Backed by Electron's safeStorage -- DPAPI on Windows, the Keychain on macOS,
  * the desktop's own secret service on Linux -- with the ciphertext kept in
@@ -97,7 +97,7 @@ export function getKey(vendorId: string): string {
     // The usual cause is a profile copied to another machine or user account,
     // where the OS will not undo its own encryption. Treat it as absent -- the
     // settings screen then offers to paste it again, which is the fix.
-    console.error(`[bodyclock] the stored key for ${vendorId} could not be decrypted`)
+    console.error(`[yoai] the stored key for ${vendorId} could not be decrypted`)
     return ''
   }
 }

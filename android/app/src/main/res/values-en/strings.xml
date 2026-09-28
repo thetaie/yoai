@@ -3,7 +3,7 @@
   English. The default locale is Chinese (values/), matching harmony's `base`.
 -->
 <resources>
-    <string name="bench_name">Body Clock bench</string>
+    <string name="bench_name">YoAI bench</string>
 
     <string name="home_current">Current state</string>
     <string name="home_end">End</string>

@@ -33,7 +33,7 @@ export function readJson<T>(path: string, fallback: T): T {
   } catch {
     // Corrupt JSON is not worth crashing over, but it IS worth saying out loud:
     // silently returning the default would look identical to a fresh install.
-    console.error(`[bodyclock] ${path} is unreadable; starting from the default`)
+    console.error(`[yoai] ${path} is unreadable; starting from the default`)
     return fallback
   }
 }

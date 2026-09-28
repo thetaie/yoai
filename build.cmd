@@ -16,6 +16,10 @@ rem `asr` assembles a desktop ggml SDK into build\llama-sdk\ from a llama.cpp
 rem checkout and configures with -DYOAI_ASR=ON. Only ggml is built --
 rem recognition does not link llama -- so this is a couple of minutes, not the
 rem twenty the full engine takes.
+rem
+rem `llama` builds that full engine into the same SDK, libllama on top of the
+rem same ggml, and configures with -DYOAI_ONDEVICE_LLM=ON: chat and embedding
+rem on a GGUF, which cli\yoai-llama drives.
 setlocal EnableExtensions EnableDelayedExpansion
 
 rem %~dp0 is NOT used below this point: `shift` moves %0 as well, so after
@@ -25,11 +29,13 @@ set "BUILD_DIR=%PROJECT_DIR%build"
 
 set "DO_CLEAN="
 set "DO_ASR="
+set "DO_LLAMA="
 set "DO_TTS="
 :args
 if "%~1"=="" goto args_done
 if /I "%~1"=="clean" ( set "DO_CLEAN=1" & shift & goto args )
 if /I "%~1"=="asr"   ( set "DO_ASR=1"   & shift & goto args )
+if /I "%~1"=="llama" ( set "DO_LLAMA=1" & shift & goto args )
 if /I "%~1"=="tts"   ( set "DO_TTS=1"   & shift & goto args )
 if /I "%~1"=="help"   goto usage
 if /I "%~1"=="-h"     goto usage
@@ -42,7 +48,7 @@ rem YOAI_* settings, from the environment and from .env. See .env.example.
 rem After the arguments, so the help text still prints when a configured
 rem path is wrong. The names are the paths this script reads: each one that
 rem is configured has to exist.
-call "%PROJECT_DIR%scripts\load-env.cmd" VS_DIR NINJA VCPKG_ROOT LLAMA_SRC QTTS_SRC VULKAN_SDK || exit /b 1
+call "%PROJECT_DIR%_load-env.cmd" VS_DIR NINJA VCPKG_ROOT LLAMA_SRC QTTS_SRC VULKAN_SDK || exit /b 1
 set "THIRD_SYNC=%PROJECT_DIR%third\sync.cmd"
 
 if defined DO_CLEAN if exist "%BUILD_DIR%" rd /s /q "%BUILD_DIR%"
@@ -60,13 +66,19 @@ if errorlevel 1 (
 )
 if defined _USER_VCPKG_ROOT set "VCPKG_ROOT=%_USER_VCPKG_ROOT%"
 
-rem CMake caches which lanes are on, so adding `asr` or `tts` to a tree that
-rem was configured without it would change nothing. Said here, before any SDK
-rem is built, rather than after minutes of building one.
+rem CMake caches which lanes are on, so adding `asr`, `llama` or `tts` to a tree
+rem that was configured without it would change nothing. Said here, before any
+rem SDK is built, rather than after minutes of building one.
 if exist "%BUILD_DIR%\build.ninja" (
     if defined DO_ASR (
         findstr /C:"YOAI_ASR:BOOL=ON" "%BUILD_DIR%\CMakeCache.txt" >nul 2>&1 || (
             echo [build] build\ was configured without asr; re-run as: build.cmd clean asr>&2
+            exit /b 1
+        )
+    )
+    if defined DO_LLAMA (
+        findstr /C:"YOAI_ONDEVICE_LLM:BOOL=ON" "%BUILD_DIR%\CMakeCache.txt" >nul 2>&1 || (
+            echo [build] build\ was configured without llama; re-run as: build.cmd clean llama>&2
             exit /b 1
         )
     )
@@ -81,13 +93,19 @@ if exist "%BUILD_DIR%\build.ninja" (
 rem Two variables rather than one: the quotes have to wrap the whole -D argument
 rem so a path with a space survives, and `set "NAME=..."` would put them inside
 rem the value instead, leaving CMake with a directory whose name has quotes in it.
+rem asr and llama share one SDK, so it is built once for either and named once.
+set "NEED_LSDK="
+if defined DO_ASR set "NEED_LSDK=1"
+if defined DO_LLAMA set "NEED_LSDK=1"
 set "ASR_ON="
-set "ASR_DIR="
-if defined DO_ASR (
+set "LLAMA_ON="
+set "LSDK_DIR="
+if defined NEED_LSDK (
     call :ggml_sdk || exit /b 1
-    set "ASR_ON=-DYOAI_ASR=ON"
-    set ASR_DIR="-DLLAMA_CPP_DIR=%BUILD_DIR%\llama-sdk"
+    set LSDK_DIR="-DLLAMA_CPP_DIR=%BUILD_DIR%\llama-sdk"
 )
+if defined DO_ASR set "ASR_ON=-DYOAI_ASR=ON"
+if defined DO_LLAMA set "LLAMA_ON=-DYOAI_ONDEVICE_LLM=ON"
 set "TTS_ON="
 set "TTS_DIR="
 if defined DO_TTS (
@@ -104,7 +122,7 @@ if not exist "%BUILD_DIR%\build.ninja" (
         -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" ^
         -DVCPKG_TARGET_TRIPLET=x64-windows ^
         -DVCPKG_INSTALLED_DIR="%PROJECT_DIR%vcpkg_installed" ^
-        !ASR_ON! !ASR_DIR! !TTS_ON! !TTS_DIR!
+        !ASR_ON! !LLAMA_ON! !LSDK_DIR! !TTS_ON! !TTS_DIR!
     if errorlevel 1 exit /b 1
 )
 
@@ -118,7 +136,7 @@ rem Help. Exit 0: asking for it is not an error. No `!` in any line below --
 rem delayed expansion is on and would eat it.
 rem -----------------------------------------------------------------------------
 :usage
-echo Usage: build.cmd [clean] [asr] [tts]
+echo Usage: build.cmd [clean] [asr] [llama] [tts]
 echo.
 echo Builds the core library, the desktop tools in cli\ and the tests in tests\,
 echo into build\: configures if needed, then builds. This is not the desktop
@@ -126,6 +144,8 @@ echo app -- that is desktop\build.cmd.
 echo.
 echo   asr      also compile speech recognition in. Needs a llama.cpp checkout
 echo            for ggml; see LLAMA_SRC
+echo   llama    also compile the on-device engine in: chat and embedding on a
+echo            GGUF, for cli\yoai-llama. The same checkout, and a longer build
 echo   tts      also compile speech output ^(Qwen3-TTS^) in. Needs qwentts.cpp
 echo            and llama.cpp checkouts; runs on the GPU when VULKAN_SDK is set
 echo   clean    delete build\ first
@@ -138,15 +158,16 @@ echo which wins -- see .env.example:
 echo   VS_DIR       Visual Studio install root
 echo   VCPKG_ROOT   vcpkg checkout (default: the VS-bundled one)
 echo   NINJA        ninja.exe path
-echo   LLAMA_SRC    llama.cpp checkout for asr and tts (default: ..\llama.cpp)
+echo   LLAMA_SRC    llama.cpp checkout for asr, llama and tts (default: ..\llama.cpp)
 echo   QTTS_SRC     qwentts.cpp checkout for tts (default: ..\qwentts.cpp)
 echo   VULKAN_SDK   Vulkan SDK, for tts on the GPU; optional
 exit /b 0
 
 rem -----------------------------------------------------------------------------
 rem A desktop ggml SDK, shaped like the one harmony\build.cmd assembles per ABI:
-rem include\ plus lib\. Recognition links ggml and nothing else, so only the three
-rem ggml targets are built -- libllama is not needed and is not asked for.
+rem include\ plus lib\. Recognition links ggml and nothing else, so for `asr`
+rem alone only the three ggml targets are built. `llama` adds libllama and
+rem llama.h, built in the same tree on the same ggml.
 rem -----------------------------------------------------------------------------
 :ggml_sdk
 if not defined LLAMA_SRC for %%I in ("%PROJECT_DIR%..") do set "LLAMA_SRC=%%~fI\llama.cpp"
@@ -161,7 +182,9 @@ call :third_verify llama.cpp LLAMA_SRC "!LLAMA_SRC!"
 
 set "GBUILD=%BUILD_DIR%\ggml"
 set "LSDK=%BUILD_DIR%\llama-sdk"
-echo [build] ggml from !LLAMA_SRC!
+set "GTARGETS=ggml ggml-cpu ggml-base"
+if defined DO_LLAMA set "GTARGETS=llama !GTARGETS!"
+echo [build] !GTARGETS! from !LLAMA_SRC!
 
 if not exist "!GBUILD!\build.ninja" (
     cmake -S "!LLAMA_SRC!" -B "!GBUILD!" -G Ninja ^
@@ -175,12 +198,13 @@ if not exist "!GBUILD!\build.ninja" (
         -DLLAMA_CURL=OFF
     if errorlevel 1 exit /b 1
 )
-cmake --build "!GBUILD!" --target ggml ggml-cpu ggml-base
+cmake --build "!GBUILD!" --target !GTARGETS!
 if errorlevel 1 exit /b 1
 
 if not exist "!LSDK!\include" mkdir "!LSDK!\include"
 if not exist "!LSDK!\lib" mkdir "!LSDK!\lib"
 copy /y "!LLAMA_SRC!\ggml\include\*.h" "!LSDK!\include\" >nul
+if defined DO_LLAMA copy /y "!LLAMA_SRC!\include\llama.h" "!LSDK!\include\" >nul
 
 rem %GBUILD% and not !GBUILD!: `for /R` takes its root at parse time and does not
 rem honour delayed expansion, so the exclamation form searches a directory
@@ -188,12 +212,16 @@ rem literally named "!GBUILD!", finds nothing, and copies nothing. The per-file
 rem copy is allowed to fail -- `for /R` yields a candidate path in every
 rem directory whether or not the file is there -- so the check afterwards is what
 rem turns a silent miss into an error.
-for /r "%GBUILD%" %%F in (ggml.lib ggml-cpu.lib ggml-base.lib) do copy /y "%%F" "!LSDK!\lib\" >nul 2>&1
+for /r "%GBUILD%" %%F in (llama.lib ggml.lib ggml-cpu.lib ggml-base.lib) do copy /y "%%F" "!LSDK!\lib\" >nul 2>&1
 if not exist "!LSDK!\lib\ggml.lib" (
     echo [build] ggml built but nothing was copied into !LSDK!\lib>&2
     exit /b 1
 )
-echo [build] ggml SDK at !LSDK!
+if defined DO_LLAMA if not exist "!LSDK!\lib\llama.lib" (
+    echo [build] llama built but llama.lib was not copied into !LSDK!\lib>&2
+    exit /b 1
+)
+echo [build] llama.cpp SDK at !LSDK!
 exit /b 0
 
 rem -----------------------------------------------------------------------------

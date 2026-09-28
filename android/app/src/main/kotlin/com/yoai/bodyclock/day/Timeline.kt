@@ -1,6 +1,6 @@
-package ai.bodyclock.app.day
+package com.yoai.bodyclock.day
 
-import ai.bodyclock.app.Bodyclock
+import com.yoai.bodyclock.Yoai
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
@@ -36,17 +36,17 @@ object Timeline {
      * Safe to call more than once; the second call is a no-op.
      */
     fun open(context: Context): Result<Unit> {
-        if (!Bodyclock.loaded) {
-            return Result.failure(Refused("libbodyclock.so did not load"))
+        if (!Yoai.loaded) {
+            return Result.failure(Refused("libyoai.so did not load"))
         }
         val dir = context.filesDir
         if (!dir.exists() && !dir.mkdirs()) {
             return Result.failure(Refused("cannot create ${dir.path}"))
         }
-        return wrote(Bodyclock.nativeTimelineOpen(dir.path))
+        return wrote(Yoai.nativeTimelineOpen(dir.path))
     }
 
-    val isOpen: Boolean get() = Bodyclock.loaded && Bodyclock.nativeTimelineOpened()
+    val isOpen: Boolean get() = Yoai.loaded && Yoai.nativeTimelineOpened()
 
     // --- Writes -------------------------------------------------------------
 
@@ -55,28 +55,28 @@ object Timeline {
      * switch, not an event. The previous state ends at the same instant and its
      * duration falls out of that, so the day needs no back-filling.
      */
-    fun switchTo(stateId: String): Result<Unit> = wrote(Bodyclock.nativeTimelineSwitchTo(stateId))
+    fun switchTo(stateId: String): Result<Unit> = wrote(Yoai.nativeTimelineSwitchTo(stateId))
 
     /** Close the current state and open nothing. What follows is a gap, and stays one. */
-    fun end(): Result<Unit> = wrote(Bodyclock.nativeTimelineEnd())
+    fun end(): Result<Unit> = wrote(Yoai.nativeTimelineEnd())
 
     /**
      * End as of an instant that has already passed -- the way out of a state
      * nobody switched away from. Refused if [at] precedes the start or is in
      * the future, and the refusal is worth showing rather than swallowing.
      */
-    fun endAt(at: Long): Result<Unit> = wrote(Bodyclock.nativeTimelineEndAt(at))
+    fun endAt(at: Long): Result<Unit> = wrote(Yoai.nativeTimelineEndAt(at))
 
     /** Reopen what was closed most recently, absorbing the gap since. Idle only. */
-    fun undo(): Result<Unit> = wrote(Bodyclock.nativeTimelineUndo())
+    fun undo(): Result<Unit> = wrote(Yoai.nativeTimelineUndo())
 
     /** Attach a note to the current state. Refused while idle. */
-    fun addNote(text: String): Result<Unit> = wrote(Bodyclock.nativeTimelineNoteAdd(text))
+    fun addNote(text: String): Result<Unit> = wrote(Yoai.nativeTimelineNoteAdd(text))
 
     // --- Reads --------------------------------------------------------------
 
     /** What is running and what stopped last. Both null on a fresh install. */
-    fun now(): Result<Now> = read(Bodyclock.nativeTimelineNow()).map { json ->
+    fun now(): Result<Now> = read(Yoai.nativeTimelineNow()).map { json ->
         val o = JSONObject(json)
         Now(current = o.entryOrNull("current"), lastEnded = o.entryOrNull("lastEnded"))
     }
@@ -90,24 +90,24 @@ object Timeline {
      * cannot be compared to each other and a calendar of them means nothing.
      */
     fun recent(hours: Int = 24): Result<List<Entry>> =
-        read(Bodyclock.nativeTimelineRecent(hours)).map { it.toEntries() }
+        read(Yoai.nativeTimelineRecent(hours)).map { it.toEntries() }
 
     /** Every entry that touches [localDay], oldest first. */
     fun day(localDay: Int): Result<List<Entry>> =
-        read(Bodyclock.nativeTimelineDay(localDay)).map { it.toEntries() }
+        read(Yoai.nativeTimelineDay(localDay)).map { it.toEntries() }
 
     /** Today by the device's clock. The one call that reads the current timezone. */
-    fun today(): Int = Bodyclock.nativeTimelineToday()
+    fun today(): Int = Yoai.nativeTimelineToday()
 
-    fun dayToIso(localDay: Int): String = Bodyclock.nativeTimelineDayToIso(localDay).orEmpty()
+    fun dayToIso(localDay: Int): String = Yoai.nativeTimelineDayToIso(localDay).orEmpty()
 
     /** -1 when [iso] does not parse. */
-    fun isoToDay(iso: String): Int = Bodyclock.nativeTimelineIsoToDay(iso)
+    fun isoToDay(iso: String): Int = Yoai.nativeTimelineIsoToDay(iso)
 
     // --- Marshalling --------------------------------------------------------
 
     private fun lastError(): String =
-        Bodyclock.nativeTimelineLastError()?.takeIf { it.isNotEmpty() } ?: "the day log refused, without saying why"
+        Yoai.nativeTimelineLastError()?.takeIf { it.isNotEmpty() } ?: "the day log refused, without saying why"
 
     private fun wrote(rc: Int): Result<Unit> =
         if (rc == 0) Result.success(Unit) else Result.failure(Refused(lastError()))

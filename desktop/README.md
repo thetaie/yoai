@@ -1,7 +1,7 @@
 # The desktop client
 
 The fourth host on the same core, after `harmony/`, `android/` and `cli/`. It
-links `bodyclock_core` through a Node-API addon and reaches it with the same C
+links `yoai_core` through a Node-API addon and reaches it with the same C
 ABI everything else uses — `src/yoai.h` is the contract here too, and
 nothing in this directory reimplements a line of it.
 
@@ -26,7 +26,7 @@ more than it would today — with the advantage of knowing what it has to do.
 ## Layout
 
 ```
-native/               the Node-API addon -- bodyclock_core + one binding.cpp
+native/               the Node-API addon -- yoai_core + one binding.cpp
 src/main/             the privileged half: the addon, keys, files, the window
 src/preload/          contextBridge -- the whole surface the page can reach
 src/renderer/         the UI (React), with no Node and no addon
@@ -55,7 +55,7 @@ build.cmd            # Windows
 ./build.sh           # macOS / Linux
 ```
 
-That builds the addon into `build/Release/bodyclock.node` and the Electron
+That builds the addon into `build/Release/yoai.node` and the Electron
 bundles into `out/`. The two are separate arguments (`addon`, `app`) because the
 C++ half is minutes and rarely changes while the UI half is seconds.
 
@@ -99,9 +99,9 @@ worse than one that is gone.
 
 ## Where the data lives
 
-Under Electron's `userData` directory — `%APPDATA%\bodyclock-desktop` on
-Windows, `~/Library/Application Support/bodyclock-desktop` on macOS,
-`~/.config/bodyclock-desktop` on Linux.
+Under Electron's `userData` directory — `%APPDATA%\yoai-desktop` on
+Windows, `~/Library/Application Support/yoai-desktop` on macOS,
+`~/.config/yoai-desktop` on Linux.
 
 | File | What |
 |---|---|

@@ -1,8 +1,9 @@
 # Settings for the build scripts, from the environment and from .env.
 #
-# SOURCED, then called: `. .../scripts/load-env.sh && yoai_load_env NAME ...`.
-# It exports variables into the caller's shell. Bash, like the scripts that use
-# it.
+# SOURCED, then called: `. <repo>/_load-env.sh && yoai_load_env NAME ...` --
+# the leading underscore marks it as something the build scripts call, not
+# something to run. It exports variables into the caller's shell. Bash, like
+# the scripts that use it.
 #
 # The NAMEs are the paths the caller READS. Each one that is set by now -- from
 # .env or from the environment, under either name -- must exist, or this names
@@ -27,7 +28,8 @@
 
 yoai_load_env() {
   local root env_file line key val name var
-  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  # The repository root, where this file and .env both live.
+  root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   env_file="$root/.env"
 
   if [ -f "$env_file" ]; then

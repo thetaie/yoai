@@ -17,7 +17,7 @@ export const S = {
   chatEmptyReply: '模型没有返回内容，换个模型或稍后再试。',
   chatThinkingLabel: '思考过程',
   chatStopped: '已停止',
-  chatDisclaimer: 'Body Clock 是 AI，可能会出错，请自行核实回答内容。',
+  chatDisclaimer: 'YoAI 是 AI，可能会出错，请自行核实回答内容。',
   chatPickModel: '选择模型',
   chatEmptyTitle: '你的 AI，运行在你自己的设备上',
   chatEmptyBody: '对话记录只保存在本机',
@@ -88,7 +88,7 @@ export const S = {
   settingsTtsAutoNote:
     '开启后，模型写完回复就整段朗读一次。不按句切分——切开就是多次独立合成，前后接缝听得出来。文字回复照常显示，不受影响。',
   settingsTtsTest: '试听',
-  settingsTtsTestText: '你好，我是 Body Clock。这是本机合成的语音。',
+  settingsTtsTestText: '你好，我是 YoAI。这是本机合成的语音。',
   ttsSpeak: '朗读',
   ttsStop: '停止',
   ttsNotReady: '语音还没就绪。先到设置里选好两个模型。',

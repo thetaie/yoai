@@ -1,7 +1,7 @@
 /**
  * The native addon, loaded and typed.
  *
- * The only file that knows where bodyclock.node is and what its exports look
+ * The only file that knows where yoai.node is and what its exports look
  * like. Everything else in the main process goes through `core`, so the day the
  * addon grows the voice lane there is one declaration to extend and one loader
  * to leave alone.
@@ -20,7 +20,7 @@ import { app } from 'electron'
 /** (type, content), the C ABI's own event shape. See yoai_chat_handler. */
 export type NativeHandler = (type: string, content: string) => void
 
-export interface BodyclockNative {
+export interface YoaiNative {
   nativeVersion(): string
   nativeSetLogLevel(level: string): void
 
@@ -159,27 +159,27 @@ export type NativeReaderHandler = (
 function candidates(): string[] {
   const out: string[] = []
 
-  const override = process.env.BODYCLOCK_ADDON
+  const override = process.env.YOAI_ADDON
   if (override !== undefined && override.length > 0) {
     out.push(resolve(override))
   }
 
   if (app.isPackaged) {
-    out.push(join(process.resourcesPath, 'bodyclock.node'))
+    out.push(join(process.resourcesPath, 'yoai.node'))
   }
 
   // app.getAppPath() is desktop/ in development and the asar in a packaged app;
   // the build tree only exists in the first case, and the packaged path above
   // has already been tried by then.
   const root = app.getAppPath()
-  out.push(join(root, 'build', 'Release', 'bodyclock.node'))
-  out.push(join(root, 'build', 'bodyclock.node'))
-  out.push(join(root, 'build', 'Debug', 'bodyclock.node'))
+  out.push(join(root, 'build', 'Release', 'yoai.node'))
+  out.push(join(root, 'build', 'yoai.node'))
+  out.push(join(root, 'build', 'Debug', 'yoai.node'))
 
   return out
 }
 
-let cached: BodyclockNative | null = null
+let cached: YoaiNative | null = null
 
 /**
  * The addon, loaded on first use.
@@ -188,7 +188,7 @@ let cached: BodyclockNative | null = null
  * missing are "not built yet" and "built somewhere else", and the paths tell
  * those apart without a second run.
  */
-export function core(): BodyclockNative {
+export function core(): YoaiNative {
   if (cached !== null) {
     return cached
   }
@@ -197,14 +197,14 @@ export function core(): BodyclockNative {
   const found = tried.find((p) => existsSync(p))
   if (found === undefined) {
     throw new Error(
-      'bodyclock.node was not found. Build it with `npm run build:native` ' +
-        '(or set BODYCLOCK_ADDON). Looked in:\n  ' +
+      'yoai.node was not found. Build it with `npm run build:native` ' +
+        '(or set YOAI_ADDON). Looked in:\n  ' +
         tried.join('\n  ')
     )
   }
 
   const requireNative = createRequire(__filename)
-  cached = requireNative(found) as BodyclockNative
+  cached = requireNative(found) as YoaiNative
   return cached
 }
 
