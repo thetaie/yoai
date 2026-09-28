@@ -28,6 +28,7 @@ export const S = {
   settingsModels: '已配置的模型',
   settingsModelsEmpty: '还没有配置模型',
   settingsAdd: '添加远程模型',
+  settingsAddOpen: '添加',
   settingsIntro: '每个服务一个 key，只存在本机的加密存储里，绝不上传。',
   settingsVendor: '服务',
   settingsBaseUrl: '接口地址',
@@ -46,13 +47,12 @@ export const S = {
   settingsSaved: '已保存',
 
   // On-device models
-  settingsLocal: '本机模型',
+  settingsLocal: '添加本机模型',
   settingsLocalIntro:
     '选一个 GGUF 文件，直接在这台设备上跑，不联网。文件留在原处，不会复制进应用，删除模型也不会删文件。',
   settingsLocalAdd: '选择 GGUF 文件',
-  settingsLocalLoading: '正在加载模型…',
-  settingsLocalReady: '模型已就绪',
-  settingsLocalPreload: '预加载',
+  settingsLocalLoading: '载入中…',
+  settingsLocalReady: '已载入',
 
   // System prompt
   settingsPrompt: '系统提示词',
@@ -63,30 +63,18 @@ export const S = {
   // Speech output
   settingsTts: '语音输出',
   settingsTtsIntro:
-    'Qwen3-TTS 在本机朗读回答，不联网。要两个 GGUF：talker 写出音频码，12 Hz tokenizer 解成采样。两个都选好才能载入。',
+    'Qwen3-TTS 在本机朗读回答，不联网。要两个 GGUF：base talker 写出音频码，12 Hz tokenizer 解成采样。两个都选好后自动载入。',
   settingsTtsUnavailable: '这个版本没有编译语音输出。用 `build.cmd qtts` 重新构建。',
-  settingsTtsTalker: 'Talker 模型',
+  settingsTtsTalker: 'Talker 模型（base）',
   settingsTtsTokenizer: 'Tokenizer 模型',
   settingsTtsPick: '选择 GGUF 文件',
   settingsTtsNotPicked: '未选择',
-  settingsTtsLoad: '载入',
+  settingsTtsPickBoth: '选好两个模型文件后自动载入。',
   settingsTtsLoading: '正在载入…',
-  settingsTtsUnload: '卸载',
-  settingsTtsReady: '语音已就绪',
-  settingsTtsVoice: '音色描述',
-  settingsTtsVoiceHint: 'warm and clear, natural pace',
-  settingsTtsVoiceNote:
-    '用英文描述。VoiceDesign 必须有这段描述才能出声——同一段描述在不同文本上给出同一个音色，语速、气息、话筒远近都可以写。留空则恢复默认。',
-  settingsTtsSpeaker: '发音人',
-  settingsTtsSpeakerDefault: '模型默认',
-  settingsTtsSpeakerNote:
-    '只有 CustomVoice 检查点有发音人。逐句朗读时应当选一个：发音人是模型插入的一个 token，能在一句句独立合成之间锁住音色；而仅靠上面的文字描述只能大致拉住，前后句之间会听出差别。',
+  settingsTtsLoaded: '已载入',
   settingsTtsSeed: '采样种子',
   settingsTtsSeedNote:
-    '固定种子，同样的文字每次合成结果完全一致。填 -1 则每次重新抽，音色和语气会逐次变化——发音人和描述都拉不住这个，试听和朗读听起来像两个人就是这个原因。',
-  settingsTtsAuto: '自动朗读回复',
-  settingsTtsAutoNote:
-    '开启后，模型写完回复就整段朗读一次。不按句切分——切开就是多次独立合成，前后接缝听得出来。文字回复照常显示，不受影响。',
+    '固定种子，同样的文字每次合成结果完全一致。填 -1 则每段重新抽，前后段的语气会不一样。',
   settingsTtsTest: '试听',
   settingsTtsTestText: '你好，我是 YoAI。这是本机合成的语音。',
   ttsSpeak: '朗读',
@@ -134,25 +122,21 @@ export const S = {
   settingsClearHistory: '清空所有对话记录',
   settingsClearHistoryMsg: '所有本机对话记录都会被删除，无法恢复。',
 
-  // Reading a reply while it is still being written
-  settingsReader: '边写边读',
-  settingsReaderIntro:
-    '大模型每吐出一句完整的话就送去合成，不必等整段写完。用的是上面那对模型文件，但另开一份引擎——载入它会卸掉上面那条。',
-  settingsReaderUnavailable: '这个构建没有语音引擎。',
-  settingsReaderLoad: '载入',
-  settingsReaderLoading: '载入中…',
-  settingsReaderUnload: '卸载',
-  settingsReaderLoaded: '已载入',
-  settingsReaderRef: '参考录音',
-  settingsReaderRefPick: '选择',
-  settingsReaderRefNone: '未选择',
+  // Speech output, reading a reply while it is still being written
+  settingsReaderRef: '参考音色',
+  settingsReaderRefNone: '未使用',
+  settingsReaderRefDefault: '默认',
+  settingsReaderRefPick: '选择文件',
+  settingsReaderRefBusy: '处理中…',
+  settingsReaderRefReset: '恢复默认',
   settingsReaderRefNote:
-    '单声道 16 位 24 kHz 的 .wav，只用 base 模型。每一句都锚到同一段录音上，否则句与句之间会换音区——实测十六句里有一句低了五个半音。',
+    '可选 .wav 录音（单声道、16 位、24 kHz；实测用过 17 秒和 22 秒的录音）或 .spk 向量。录音首次使用时提取一次，约需数秒，之后直接读缓存；.spk 须与模型尺寸一致（1.7B 为 2048 维，0.6B 为 1024 维）。默认读取 speaker/01_female。回复分段合成，每一段都锚到同一个音色上，否则段与段之间会换音区——实测十六段里有一段低了五个半音。',
   settingsReaderMin: '攒够多少字再开口',
   settingsReaderMinNote:
-    '0 表示用默认的 16。这个数决定的不是引擎快慢（出声都在 0.2 秒左右），而是大模型要先写多少字——本机模型实测 3.7 到 9.1 tok/s，36 个字就要等 6.4 秒。调大更自然（实测 30 比 12 好听），调小出声更早。',
-  settingsReaderEnabled: '用这条链读回复',
-  settingsReaderEnabledNote: '开启后，回复不再等写完才朗读，而是边写边读。'
+    '0 表示用默认的 12。这个数决定的不是引擎快慢（出声都在 0.2 秒左右），而是大模型要先写多少字——本机模型实测 3.7 到 9.1 tok/s，36 个字就要等 6.4 秒。调大更自然（实测 30 比 12 好听），调小出声更早。',
+  settingsReaderEnabled: '自动朗读回复',
+  settingsReaderEnabledNote:
+    '默认开启。回复边写边读，每写出一段就开始朗读。关闭后仍可点消息旁的朗读按钮。'
 } as const
 
 /** Picker labels for the three palette families, keyed the way prefs stores them. */

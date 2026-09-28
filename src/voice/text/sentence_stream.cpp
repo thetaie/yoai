@@ -317,6 +317,21 @@ SentenceStream::SentenceStream(const SplitOptions& opt) : opt_(opt) {}
 void SentenceStream::reset(const SplitOptions& opt) {
     opt_ = opt;
     pending_.clear();
+    pieces_out_ = 0;
+    urgent_     = false;
+}
+
+// The rules for the piece being cut now: the first piece's for the first one
+// and for an urgent one, the later pieces' otherwise.
+SplitOptions SentenceStream::current() const {
+    SplitOptions o = opt_;
+    if (opt_.later_min_chars == 0 || pieces_out_ == 0 || urgent_) {
+        return o;
+    }
+    o.min_chars   = opt_.later_min_chars;
+    o.max_chars   = opt_.later_max_chars > o.min_chars ? opt_.later_max_chars : o.min_chars;
+    o.clause_cuts = false;
+    return o;
 }
 
 std::vector<std::string> SentenceStream::feed(const std::string& delta) {
@@ -340,65 +355,99 @@ std::vector<std::string> SentenceStream::finish() {
 //
 // The one that genuinely cannot be settled is a piece still mid-sentence: more
 // text extends it, or a full stop three characters later moves its end.
-bool SentenceStream::settled_at_end(const std::string& text) const {
+bool SentenceStream::settled_at_end(const std::string& text, const SplitOptions& opt) const {
     const std::string body = trimmed(text);
-    if (body.empty() || count_chars(body) < opt_.min_chars) {
+    if (body.empty() || count_chars(body) < opt.min_chars) {
         return false;
     }
-    // The last character, which needs the start of its own sequence found.
-    std::size_t start = body.size() - 1;
-    while (start > 0 && (static_cast<unsigned char>(body[start]) & 0xC0) == 0x80) {
-        --start;
+    // The last character that is not a closing quote or bracket. A closer ends
+    // a sentence only when a terminator comes before it -- "他说：“去。”" -- and
+    // mid-sentence it closes a title or a quotation and the sentence goes on:
+    // "也是《白蛇传》中“白娘子和许仙相遇”的地方". Counted as an ending, that one
+    // was handed over at the ”, and "的地方（断桥）。" became a piece of its own.
+    std::size_t end = body.size();
+    unsigned cp = 0;
+    while (end > 0) {
+        std::size_t start = end - 1;
+        while (start > 0 && (static_cast<unsigned char>(body[start]) & 0xC0) == 0x80) {
+            --start;
+        }
+        std::size_t len;
+        cp = decode(body, start, &len);
+        if (!is_closer(cp)) {
+            break;
+        }
+        end = start;
+        cp  = 0;
     }
-    std::size_t len;
-    const unsigned cp = decode(body, start, &len);
-    if (is_hard_stop(cp) || is_closer(cp)) {
+    if (is_hard_stop(cp)) {
         return true;
     }
     // With clause cuts on, a comma ends a piece as firmly as a full stop does,
     // so a fragment ending at one is not going to move either.
-    return opt_.clause_cuts && is_secondary(cp);
+    return opt.clause_cuts && is_secondary(cp);
 }
 
 std::vector<std::string> SentenceStream::drain(bool closing) {
     std::vector<std::string> out;
-    if (pending_.empty()) {
-        return out;
-    }
-    // **The tail rule is off until the text is finished**, and leaving it on was
-    // the second thing that kept a stream silent. It exists to stop the LAST
-    // piece of a reply being short, because a short final utterance is the one
-    // the engine ends without a release -- but mid-stream the trailing fragment
-    // is not the last piece of anything, it is the sentence still being
-    // written. Applied to it, the rule merged it backwards on every drain, so
-    // the piece in front of it was never separated out and never dispatched
-    // until the fragment happened to grow past tail_chars.
-    //
-    // Measured on the same passage through both doors: handed over whole it cut
-    // 39 + 47 characters, streamed it cut 62 + 16.
-    SplitOptions opt = opt_;
-    if (!closing) {
-        opt.tail_chars = 0;
-    }
-    const std::vector<Sentence> cut = split_sentences(pending_, opt);
-    std::size_t settled = closing ? cut.size() : (cut.size() > 1 ? cut.size() - 1 : 0);
-    if (!closing && !cut.empty() && settled + 1 == cut.size() &&
-        settled_at_end(cut.back().text)) {
-        ++settled;
-    }
-    if (settled == 0) {
-        return out;
-    }
+    // Round by round, because the rules can change after ONE piece: the first
+    // piece, or an urgent one, is cut by min_chars and the ones after it by
+    // later_min_chars. Cutting all the pending text in one go would cut the
+    // whole of it by whichever rules held at the start. When the rules cannot
+    // change this is a single round, exactly as it was.
+    while (!pending_.empty()) {
+        const SplitOptions rules = current();
+        const bool one_piece =
+            opt_.later_min_chars != 0 && (pieces_out_ == 0 || urgent_);
 
-    std::size_t consumed = 0;
-    for (std::size_t k = 0; k < settled; ++k) {
-        consumed = cut[k].end;
-        std::string spoken = trimmed(cut[k].text);
-        if (!spoken.empty()) {   // whitespace between sentences is dropped
-            out.push_back(spoken);
+        // **The tail rule is off until the text is finished**, and leaving it
+        // on was the second thing that kept a stream silent. It exists to stop
+        // the LAST piece of a reply being short, because a short final
+        // utterance is the one the engine ends without a release -- but
+        // mid-stream the trailing fragment is not the last piece of anything,
+        // it is the sentence still being written. Applied to it, the rule
+        // merged it backwards on every drain, so the piece in front of it was
+        // never separated out and never dispatched until the fragment happened
+        // to grow past tail_chars.
+        //
+        // Measured on the same passage through both doors: handed over whole
+        // it cut 39 + 47 characters, streamed it cut 62 + 16.
+        //
+        // Off as well for a round that takes one piece: the rest of the text is
+        // cut in the next round, and that is where the tail is.
+        SplitOptions opt = rules;
+        const bool final_round = closing && !one_piece;
+        if (!final_round) {
+            opt.tail_chars = 0;
+        }
+        const std::vector<Sentence> cut = split_sentences(pending_, opt);
+        std::size_t settled = final_round ? cut.size() : (cut.size() > 1 ? cut.size() - 1 : 0);
+        if (!final_round && !cut.empty() && settled + 1 == cut.size() &&
+            (closing || settled_at_end(cut.back().text, rules))) {
+            ++settled;
+        }
+        if (settled == 0) {
+            break;
+        }
+        if (one_piece) {
+            settled = 1;
+        }
+
+        std::size_t consumed = 0;
+        for (std::size_t k = 0; k < settled; ++k) {
+            consumed = cut[k].end;
+            std::string spoken = trimmed(cut[k].text);
+            if (!spoken.empty()) {   // whitespace between sentences is dropped
+                out.push_back(spoken);
+                ++pieces_out_;
+                urgent_ = false;   // one piece's worth; see set_urgent()
+            }
+        }
+        pending_.erase(0, consumed);
+        if (!one_piece) {
+            break;
         }
     }
-    pending_.erase(0, consumed);
     return out;
 }
 

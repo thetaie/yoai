@@ -863,6 +863,11 @@ typedef int (*yoai_tts_audio_handler)(const float* pcm,
 
 // Speak `text`. BLOCKS until the whole utterance is generated.
 //
+// `text` is the reply as written: markdown and emoji are turned into what should
+// be spoken here, in the core, so every host passes it unchanged. See
+// src/voice/text/speakable.hpp. Text that is nothing but markup fails with
+// "nothing to say".
+//
 // `on_audio` NULL generates and discards, which is a measurement mode rather
 // than an oversight -- the difference between the two is the cost of the
 // handover, not of the engine, and nothing here keeps a copy of the audio.
@@ -951,6 +956,25 @@ void yoai_reader_set_voice(const char* instruct);
 void yoai_reader_set_speaker(const char* name);
 int yoai_reader_set_reference_voice(const char* wav_path);
 
+// The same anchor from a .spk file instead of a recording: the raw f32 speaker
+// embedding, as qwentts.cpp's qwen-codec writes it. No extraction runs, so it
+// takes no measurable time. After load, like the call above.
+//
+// Its length must equal yoai_reader_talker_hidden_size(), and it must come from
+// the same checkpoint. A wrong length is refused here; a vector from another
+// model of the same width cannot be detected at all.
+int yoai_reader_load_reference_embedding(const char* spk_path);
+
+// The loaded talker's hidden size: 2048 for the 1.7B, 1024 for the 0.6B, 0
+// before a load. This is the number of f32 values a .spk for it holds, so a
+// host with one .spk per model size picks the file of 4 x this many bytes.
+int yoai_reader_talker_hidden_size(void);
+
+// The embedding held now, written as a .spk. After
+// yoai_reader_set_reference_voice it is the extracted vector, so a recording is
+// reduced once and loaded from the file from then on. 1 when none is held.
+int yoai_reader_save_reference_embedding(const char* spk_path);
+
 // Sampling. The seed defaults to a FIXED one rather than the engine's -1,
 // because -1 is redrawn per piece and a passage cut into four then draws four
 // times -- which is what made sentence-by-sentence synthesis sound stitched the
@@ -980,6 +1004,24 @@ void yoai_reader_set_split(int min_chars, int max_chars, int tail_chars);
 // than the one that sounded best. See src/voice/tts/reader.hpp.
 void yoai_reader_set_clause_cuts(int on);
 
+// The pieces AFTER the first, in characters: their minimum and maximum. 0 and
+// 0, the default, cut every piece by the settings above.
+//
+// The first piece is what the listener waits for, so the settings above keep
+// it short. Every later one can wait for more text while the piece before it
+// plays, and a longer piece sounds more natural -- so these pieces end only at
+// a full stop, from `min_chars` on. The wait is bounded by the listener: once
+// every piece handed to the engine is finished and less than a second of audio
+// is left to play, the next piece is cut at once by the settings above.
+//
+// What this buys depends on the writer. One that is faster than the speech --
+// a remote model -- has written the whole reply before the first piece ends,
+// and every later piece gets its full length. One that is about as fast -- the
+// on-device model writes about 5 characters a second, and the speech runs at
+// about 4.5 -- keeps the listener near the margin, and pieces stay close to
+// what they were.
+void yoai_reader_set_later_split(int min_chars, int max_chars);
+
 // Worker threads per engine for the NEXT load. <= 0 leaves the engine's choice.
 void yoai_reader_set_threads(int threads);
 
@@ -1002,6 +1044,12 @@ int yoai_reader_begin(yoai_reader_audio_handler on_audio, void* user_data);
 // Add text. Returns at once. Whatever has become a complete sentence is
 // dispatched; the last fragment is held back, because another token could
 // extend it and a piece handed to an engine cannot be taken back.
+//
+// Pass the model's deltas UNCHANGED, markdown and all. The core turns them into
+// what should be spoken -- a line break becomes a full stop, bullets and
+// emphasis marks go -- and it can only do that right on the whole stream: a
+// host cleaning fragments sees a line break at a fragment's edge and loses it.
+// See src/voice/text/speakable.hpp.
 int yoai_reader_feed(const char* delta);
 
 // No more text. BLOCKS until the last sample has been handed over.
@@ -1027,6 +1075,12 @@ int yoai_reader_feed(const char* delta);
 //   heldSeconds         the most audio ever held back waiting for an earlier
 //                       piece, which is also the memory.
 const char* yoai_reader_finish(void);
+
+// Stop the open stream: generation is abandoned at the next block, and no more
+// audio is handed over. Returns at once. yoai_reader_finish() must still be
+// called to close the stream -- it then returns quickly -- and a new
+// yoai_reader_begin() only succeeds once it has. Safe with nothing open.
+void yoai_reader_cancel(void);
 
 // Why the last call returned 0 or NULL. Empty after a success.
 const char* yoai_reader_last_error(void);

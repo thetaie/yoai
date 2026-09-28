@@ -25,6 +25,7 @@
 #include "store/timeline.hpp"
 #include "voice/omni/qwen25_omni.hpp"
 #include "voice/prosody/prosody.hpp"
+#include "voice/text/speakable.hpp"
 #include "voice/tts/qwen3_tts.hpp"
 #include "voice/tts/reader.hpp"
 #include "voice/asr/sensevoice.hpp"
@@ -36,6 +37,7 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -1498,15 +1500,21 @@ extern "C" const char* yoai_tts_say(const char* text,
         yoai::utils::log_warn("yoai_tts_say: text is required");
         return nullptr;
     }
+    // The text as written -- markdown, emoji -- becomes the text as spoken.
+    const std::string spoken = yoai::voice::speakable(text);
 
     std::lock_guard<std::mutex> guard(tts_mutex());
+    if (spoken.empty()) {
+        tts_error() = "nothing to say: the text is markup or emoji only";
+        return nullptr;
+    }
 
     TtsSinkBridge bridge;
     bridge.handler   = on_audio;
     bridge.user_data = user_data;
 
     yoai::voice::QttsResult result;
-    const bool ok = tts().say(text, on_audio ? tts_sink : 0,
+    const bool ok = tts().say(spoken, on_audio ? tts_sink : 0,
                               on_audio ? &bridge : 0, &result);
     tts_error() = tts().last_error();
     if (!ok) {
@@ -1673,7 +1681,19 @@ ReaderSinkBridge& reader_bridge() {
     return bridge;
 }
 
+// Set by yoai_reader_cancel(), cleared by the next begin(). Read on the
+// Reader's own threads, hence atomic.
+std::atomic<bool>& reader_cancelled() {
+    static std::atomic<bool> flag(false);
+    return flag;
+}
+
 bool reader_sink(const float* pcm, size_t n_samples, int sentence, bool last, void* user_data) {
+    // Returning false is how a Reader is stopped: generation is abandoned at
+    // the next block. See ReaderAudioSink in voice/tts/reader.hpp.
+    if (reader_cancelled().load()) {
+        return false;
+    }
     ReaderSinkBridge* bridge = static_cast<ReaderSinkBridge*>(user_data);
     if (!bridge || !bridge->handler) {
         return true;
@@ -1746,6 +1766,39 @@ extern "C" int yoai_reader_set_reference_voice(const char* wav_path) {
     return 0;
 }
 
+extern "C" int yoai_reader_load_reference_embedding(const char* spk_path) {
+    if (blank(spk_path)) {
+        reader_error() = "a reference embedding needs a .spk file";
+        return 1;
+    }
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    if (!reader().load_reference_embedding(spk_path)) {
+        reader_error() = reader().last_error();
+        return 1;
+    }
+    reader_error().clear();
+    return 0;
+}
+
+extern "C" int yoai_reader_talker_hidden_size(void) {
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    return reader().talker_hidden_size();
+}
+
+extern "C" int yoai_reader_save_reference_embedding(const char* spk_path) {
+    if (blank(spk_path)) {
+        reader_error() = "saving a reference embedding needs a path";
+        return 1;
+    }
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    if (!reader().save_reference_embedding(spk_path)) {
+        reader_error() = reader().last_error();
+        return 1;
+    }
+    reader_error().clear();
+    return 0;
+}
+
 extern "C" void yoai_reader_set_seed(long long seed) {
     std::lock_guard<std::mutex> guard(reader_mutex());
     reader().set_seed(seed);
@@ -1768,6 +1821,16 @@ extern "C" void yoai_reader_set_split(int min_chars, int max_chars, int tail_cha
     reader().set_split(opt);
 }
 
+extern "C" void yoai_reader_set_later_split(int min_chars, int max_chars) {
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    // Both at once, and 0 means off: unlike set_split, there is no measured
+    // default to leave in place.
+    yoai::voice::SplitOptions opt = reader().split();
+    opt.later_min_chars = min_chars > 0 ? static_cast<size_t>(min_chars) : 0;
+    opt.later_max_chars = max_chars > 0 ? static_cast<size_t>(max_chars) : 0;
+    reader().set_split(opt);
+}
+
 extern "C" void yoai_reader_set_clause_cuts(int on) {
     std::lock_guard<std::mutex> guard(reader_mutex());
     yoai::voice::SplitOptions opt = reader().split();
@@ -1783,6 +1846,7 @@ extern "C" void yoai_reader_set_threads(int threads) {
 extern "C" int yoai_reader_begin(yoai_reader_audio_handler on_audio,
                                  void* user_data) {
     std::lock_guard<std::mutex> guard(reader_mutex());
+    reader_cancelled().store(false);
     reader_bridge().handler   = on_audio;
     reader_bridge().user_data = user_data;
     if (!reader().begin(on_audio ? reader_sink : 0, on_audio ? &reader_bridge() : 0)) {
@@ -1803,6 +1867,11 @@ extern "C" int yoai_reader_feed(const char* delta) {
     // Reader guards its own state; what this mutex protects is the singleton's
     // configuration, and feed() changes none of it.
     return reader().feed(delta) ? 1 : 0;
+}
+
+extern "C" void yoai_reader_cancel(void) {
+    // No lock, like feed(): it is called while the stream runs.
+    reader_cancelled().store(true);
 }
 
 extern "C" const char* yoai_reader_finish(void) {

@@ -8,37 +8,50 @@
  * reply a token at a time and starts speaking the first sentence while the
  * model is still on the third.
  *
- * **It is a SECOND engine over the same two GGUFs**, so the two lanes hold the
- * weights twice if both are loaded. Loading either one here unloads the other.
- * That is a deliberate, reversible arrangement: the speech lane works and this
- * one is being judged, so the day it wins the other goes rather than the two
- * being merged.
+ * **It won, and it is now the only lane the desktop speaks through**: replies,
+ * a message's 🔊, the settings screen's test. The speech lane in tts.ts is kept
+ * for its settings -- the model paths and the seed live in tts.json -- and is no
+ * longer loaded. The two are separate engines over the same GGUFs, so loading
+ * this one still unloads that one, in case something else loaded it.
  *
- * The model paths are tts.json's -- the same talker and tokenizer -- because
- * they ARE the same files and a second pair of pickers would be two places to
- * keep right. What this lane adds is its own: a reference recording, which is
- * what holds the voice steady across pieces, and how coarsely to cut.
+ * What this lane adds is its own: the voice every piece is anchored to, which is
+ * what holds it steady across pieces, and how coarsely to cut.
  */
-import { existsSync } from 'node:fs'
+import { app } from 'electron'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import type { ReaderStatus } from '../shared/api'
 import { core } from './core'
 import { dataFile, readJson, writeJson } from './jsonfile'
 import { paths as ttsPaths, voiceSettings } from './tts'
 
+/**
+ * The voice a Base checkpoint is anchored to when the user has not picked one:
+ * a directory under speaker/ at the repository root, holding one .spk per model
+ * size.
+ *
+ * A speaker embedding WITHOUT a recording -- qwen.h's clone mode A. Base
+ * checkpoints only, and the reason it is not optional: every piece is a separate
+ * generation, and with nothing acoustic in common they drift. One sentence in
+ * sixteen came out five semitones low, which is heard as the voice changing
+ * mid-reply. Anchoring every piece to one embedding removed it on four seeds
+ * out of four and cost nothing measurable in speed.
+ *
+ * A .spk rather than the recording itself, so no extraction runs at load: that
+ * took about 4.5 s for a 17-second reference.
+ */
+const SPEAKER = '01_female'
+
 interface Stored {
-  /** Route replies through this lane instead of speaking them at the end. */
+  /** Read every reply aloud as it is written, without being asked. */
   enabled: boolean
 
   /**
-   * A recording to sound like, WITHOUT its transcript -- qwen.h's clone mode A.
-   *
-   * Base checkpoints only, and the reason it is here rather than optional: every
-   * piece is a separate generation, and with nothing acoustic in common they
-   * drift. One sentence in sixteen came out five semitones low, which is heard
-   * as the voice changing mid-reply. Anchoring every piece to one embedding
-   * removed it on four seeds out of four and cost nothing measurable in speed.
+   * The reference voice the user picked: a recording (.wav) or an embedding
+   * already extracted (.spk). '' for SPEAKER, the bundled one.
    */
-  referenceWav: string
+  reference: string
 
   /**
    * How much text must have settled before a piece is sent.
@@ -64,7 +77,7 @@ interface Stored {
  * had audio 0.2 s after being asked. So the number that decides the latency
  * here is not the engine's and the naturalness measurement cannot settle it.
  *
- * 16 is a compromise against a slow writer, not a better answer than 30. A
+ * 12 is a compromise against a slow writer, not a better answer than 30. A
  * faster model should raise it back.
  */
 const DEFAULT_MIN_CHARS = 12
@@ -81,16 +94,164 @@ const DEFAULT_MIN_CHARS = 12
  */
 const DEFAULT_MAX_CHARS = 40
 
+/**
+ * The pieces after the first, which can wait for more text while the one before
+ * them plays: 30 is the length that sounded better than 12 (see the core's
+ * SplitOptions::min_chars), and 80 keeps a run-on sentence from becoming one
+ * enormous utterance. The core cuts early anyway when the listener is about to
+ * run out of audio, so a slow writer is not made to wait for these.
+ */
+const LATER_MIN_CHARS = 30
+const LATER_MAX_CHARS = 80
+
 const FILE = 'reader.json'
-const EMPTY: Stored = { enabled: false, referenceWav: '', minChars: 0 }
+const EMPTY: Stored = { enabled: true, reference: '', minChars: 0 }
 
 function read(): Stored {
   const s = readJson<Stored>(dataFile(FILE), EMPTY)
   return {
-    enabled: s.enabled === true,
-    referenceWav: typeof s.referenceWav === 'string' ? s.referenceWav : '',
+    // On unless turned off.
+    enabled: s.enabled !== false,
+    reference: typeof s.reference === 'string' ? s.reference : '',
     minChars: typeof s.minChars === 'number' ? s.minChars : 0
   }
+}
+
+/**
+ * Where SPEAKER is. Beside the addon in a packaged app; in development
+ * app.getAppPath() is desktop/, so the repository root is one level up.
+ */
+function speakerDir(): string {
+  if (app.isPackaged) {
+    return join(process.resourcesPath, 'speaker', SPEAKER)
+  }
+  return join(app.getAppPath(), '..', 'speaker', SPEAKER)
+}
+
+/**
+ * The .spk in `dir` for a talker `hidden` wide, or '' when there is none.
+ *
+ * Chosen by byte size, not by name: a .spk is `hidden` f32 values and nothing
+ * else, so 4 x hidden bytes is the file that fits, and a renamed file still
+ * works.
+ */
+function speakerFile(dir: string, hidden: number): string {
+  if (hidden <= 0 || !existsSync(dir)) {
+    return ''
+  }
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name)
+    if (name.endsWith('.spk') && statSync(path).size === hidden * 4) {
+      return path
+    }
+  }
+  return ''
+}
+
+/**
+ * Where a recording's embedding is kept once extracted, for a talker `hidden`
+ * wide.
+ *
+ * Extracting runs the model's speaker encoder, about 4.5 s for a 22-second
+ * recording, and the vector is all that is used afterwards -- so it is paid
+ * once per recording and model size rather than at every start. Keyed by the
+ * file's path, size and modification time, so an edited recording is extracted
+ * again.
+ */
+function cacheFile(wav: string, hidden: number): string {
+  const st = statSync(wav)
+  const key = createHash('sha1')
+    .update(`${wav}\n${st.size}\n${st.mtimeMs}`)
+    .digest('hex')
+    .slice(0, 16)
+  const dir = join(app.getPath('userData'), 'speaker-cache')
+  mkdirSync(dir, { recursive: true })
+  return join(dir, `${key}-${hidden}.spk`)
+}
+
+/** The reference voice the loaded engine is anchored to, as chosen; '' when none. */
+let anchoredTo = ''
+
+/** Load a .spk into the engine; '' on success, else why not. */
+function anchor(spk: string, shown: string): string {
+  const why = core().nativeReaderLoadReferenceEmbedding(spk)
+  if (why.length > 0) {
+    return why
+  }
+  anchoredTo = shown
+  return ''
+}
+
+/**
+ * Anchor the loaded engine to the chosen reference voice. Resolves to '' when
+ * it is anchored, or when there is nothing loaded to anchor yet -- load() calls
+ * this again -- and to the reason otherwise.
+ */
+function applyReference(): Promise<string> {
+  anchoredTo = ''
+  if (!available() || core().nativeReaderLoaded() !== 1 ||
+      core().nativeReaderModelType() !== 'base') {
+    return Promise.resolve('')
+  }
+  const hidden = core().nativeReaderTalkerHiddenSize()
+  const chosen = read().reference
+
+  if (chosen.length === 0) {
+    const dir = speakerDir()
+    const spk = speakerFile(dir, hidden)
+    if (spk.length === 0) {
+      return Promise.resolve(`${dir} has no .spk for a talker ${hidden} wide`)
+    }
+    return Promise.resolve(anchor(spk, spk))
+  }
+  if (!existsSync(chosen)) {
+    return Promise.resolve(`no file at ${chosen}`)
+  }
+  // An embedding is loaded as it is; the core checks its length.
+  if (!chosen.toLowerCase().endsWith('.wav')) {
+    return Promise.resolve(anchor(chosen, chosen))
+  }
+
+  // A recording: its embedding from the cache when it has been extracted for
+  // this model size before, and extracted now otherwise.
+  const cached = cacheFile(chosen, hidden)
+  if (existsSync(cached) && anchor(cached, chosen).length === 0) {
+    return Promise.resolve('')
+  }
+  status()
+  busy = true
+  return new Promise<string>((resolve) => {
+    core().nativeReaderSetReferenceVoice(chosen, (type, content) => {
+      busy = false
+      lastStatus = null
+      if (type !== 'end') {
+        resolve(content || 'the recording could not be used')
+        return
+      }
+      anchoredTo = chosen
+      const why = core().nativeReaderSaveReferenceEmbedding(cached)
+      if (why.length > 0) {
+        // The voice is anchored either way; only the next start pays again.
+        console.warn(`[yoai] the reference voice was not cached: ${why}`)
+      }
+      resolve('')
+    })
+  })
+}
+
+/**
+ * Use `path` -- a .wav or a .spk, or '' for the bundled voice -- from now on,
+ * and at once if the engine is loaded. Resolves to '' or the reason it failed.
+ */
+export async function setReference(path: string): Promise<string> {
+  const s = read()
+  s.reference = path
+  write(s)
+  lastStatus = null
+  const why = await applyReference()
+  loadNote = why.length > 0 ? `the reference voice failed: ${why}` : ''
+  lastStatus = null
+  return why
 }
 
 function write(s: Stored): void {
@@ -119,7 +280,9 @@ export function status(): ReaderStatus {
     available: ok,
     loaded: ok ? core().nativeReaderLoaded() === 1 : false,
     modelType: ok ? core().nativeReaderModelType() : '',
-    referenceWav: s.referenceWav,
+    speaker: anchoredTo,
+    reference: s.reference,
+    note: loadNote,
     minChars: s.minChars,
     enabled: s.enabled
   }
@@ -129,13 +292,6 @@ export function status(): ReaderStatus {
 export function setEnabled(on: boolean): void {
   const s = read()
   s.enabled = on
-  write(s)
-  lastStatus = null
-}
-
-export function setReferenceWav(path: string): void {
-  const s = read()
-  s.referenceWav = path
   write(s)
   lastStatus = null
 }
@@ -192,33 +348,28 @@ export function load(): Promise<string> {
         return
       }
 
-      // Everything the voice depends on, after the load because the reference
-      // extraction runs the model's own speaker encoder.
+      // Everything the voice depends on, after the load because the .spk is
+      // chosen by the talker's width, which only a loaded engine knows. No
+      // instruct and no named speaker: a Base checkpoint takes neither.
       const s = read()
-      const v = voiceSettings()
-      core().nativeReaderSetVoice(v.voice)
-      core().nativeReaderSetSpeaker(v.speaker)
-      core().nativeReaderSetSeed(v.seed)
+      core().nativeReaderSetSeed(voiceSettings().seed)
       // Always, so 0 means this lane's default rather than the core's.
       core().nativeReaderSetSplit(
         s.minChars > 0 ? s.minChars : DEFAULT_MIN_CHARS,
         DEFAULT_MAX_CHARS,
         0
       )
+      core().nativeReaderSetLaterSplit(LATER_MIN_CHARS, LATER_MAX_CHARS)
       // The setting that decides whether this lane speaks while the model is
       // still writing. Without it a comma is only a fallback at max_chars, and
       // a reply whose one full stop is at the end cannot be started at all.
       core().nativeReaderSetClauseCuts(true)
-      if (s.referenceWav.length > 0) {
-        const why = core().nativeReaderSetReferenceVoice(s.referenceWav)
-        if (why.length > 0) {
-          // Not fatal: the lane reads perfectly well without an anchor, it just
-          // drifts more. Reported so a wrong path does not look like nothing.
-          resolve(`loaded, but the reference voice failed: ${why}`)
-          return
-        }
-      }
-      resolve('')
+      // The reference voice, on a Base checkpoint only; autoLoadVoice()
+      // refuses the other two. Not fatal: the lane reads without an anchor, it
+      // just drifts more. Reported so a missing file does not look like nothing.
+      void applyReference().then((why) => {
+        resolve(why.length > 0 ? `loaded, but the reference voice failed: ${why}` : '')
+      })
     })
   })
 }
@@ -227,7 +378,64 @@ export function unload(): void {
   if (available() && core().nativeReaderLoaded() === 1) {
     core().nativeReaderUnload()
   }
+  anchoredTo = ''
   lastStatus = null
+}
+
+/**
+ * What went wrong with the last automatic load, for the settings screen; ''
+ * when nothing did.
+ */
+let loadNote = ''
+
+/**
+ * Load the voice without being asked, whenever both model files are picked.
+ *
+ * **This is the only lane the desktop speaks through**: replies as they are
+ * written, a message's 🔊 and the settings screen's test all come here. Having
+ * to press 载入 every run was a step that existed only to be forgotten.
+ *
+ * **Base checkpoints only.** Every piece is its own generation, and only a Base
+ * checkpoint takes the reference voice that keeps them in one register; the
+ * other two drift -- one piece in sixteen came out five semitones low on
+ * custom_voice. VoiceDesign is a way to MAKE a reference voice, not to talk.
+ * Anything else is unloaded again and said so, rather than read in a voice
+ * that wanders.
+ *
+ * Loaded whether or not replies are read automatically, since 🔊 needs it
+ * either way. For the log -- nothing waits on this.
+ */
+export async function autoLoadVoice(): Promise<string> {
+  const { talkerPath, tokenizerPath } = ttsPaths()
+  if (!available() || talkerPath.length === 0 || tokenizerPath.length === 0) {
+    return ''
+  }
+  if (core().nativeReaderLoaded() === 1) {
+    return ''
+  }
+  loadNote = ''
+  let reason = await load()
+  if (core().nativeReaderLoaded() === 1 && core().nativeReaderModelType() !== 'base') {
+    reason = `needs a base model; this talker is ${core().nativeReaderModelType()}`
+    unload()
+  }
+  loadNote = reason
+  lastStatus = null
+  return reason
+}
+
+/** Hand the loaded engine the seed just saved; load() does it otherwise. */
+export function applySeed(): void {
+  if (available() && core().nativeReaderLoaded() === 1) {
+    core().nativeReaderSetSeed(voiceSettings().seed)
+  }
+}
+
+/** Abandon the open stream at its next block. It must still be finished. */
+export function cancel(): void {
+  if (available()) {
+    core().nativeReaderCancel()
+  }
 }
 
 /**

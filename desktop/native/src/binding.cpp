@@ -792,16 +792,69 @@ napi_value NativeReaderSetSpeaker(napi_env env, napi_callback_info info) {
     return nullptr;
 }
 
-// Returns the empty string on success, or the reason. Synchronous: extracting
-// the embedding runs the model's speaker encoder once, about 4.5 s for a
-// 22-second reference, which is a load-time cost rather than a per-reply one.
+void ReaderReferenceWorker(std::string wav, napi_threadsafe_function tsfn) {
+    const int rc = yoai_reader_set_reference_voice(wav.c_str());
+    AudioEvent* ev = new AudioEvent{rc == 0 ? "end" : "error",
+                                    rc == 0 ? "" : yoai_reader_last_error(),
+                                    {}, -1};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+}
+
+// nativeReaderSetReferenceVoice(wavPath, onDone: (type, content) => void): void
+//
+// On a worker, because extracting the embedding runs the model's speaker
+// encoder -- about 4.5 s for a 22-second reference -- and on the JS thread
+// that froze the window for as long.
 napi_value NativeReaderSetReferenceVoice(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 2) {
+        napi_throw_error(env, nullptr, "nativeReaderSetReferenceVoice(wavPath, onDone) needs two arguments");
+        return nullptr;
+    }
+    const std::string path = ArgUtf8(env, argc, argv, 0);
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "yoai_reader_reference", NAPI_AUTO_LENGTH, &work_name);
+    napi_threadsafe_function tsfn = nullptr;
+    if (napi_create_threadsafe_function(env, argv[1], nullptr, work_name, 0, 1,
+                                        nullptr, nullptr, nullptr, CallJsAudio,
+                                        &tsfn) != napi_ok) {
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+    std::thread(ReaderReferenceWorker, path, tsfn).detach();
+    return nullptr;
+}
+
+// Returns the empty string on success, or the reason. A file write, so it is
+// done here rather than on a worker.
+napi_value NativeReaderSaveReferenceEmbedding(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value argv[1] = {nullptr};
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
     const std::string path = ArgUtf8(env, argc, argv, 0);
-    const int rc = yoai_reader_set_reference_voice(path.c_str());
+    const int rc = yoai_reader_save_reference_embedding(path.c_str());
     return Utf8(env, rc == 0 ? "" : yoai_reader_last_error());
+}
+
+// Returns the empty string on success, or the reason. A .spk holds the
+// embedding already extracted, so nothing runs and this returns at once.
+napi_value NativeReaderLoadReferenceEmbedding(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    const std::string path = ArgUtf8(env, argc, argv, 0);
+    const int rc = yoai_reader_load_reference_embedding(path.c_str());
+    return Utf8(env, rc == 0 ? "" : yoai_reader_last_error());
+}
+
+napi_value NativeReaderTalkerHiddenSize(napi_env env, napi_callback_info) {
+    napi_value out;
+    napi_create_int32(env, yoai_reader_talker_hidden_size(), &out);
+    return out;
 }
 
 napi_value NativeReaderSetSeed(napi_env env, napi_callback_info info) {
@@ -827,6 +880,18 @@ napi_value NativeReaderSetSplit(napi_env env, napi_callback_info info) {
     if (argc >= 2) napi_get_value_int32(env, argv[1], &b);
     if (argc >= 3) napi_get_value_int32(env, argv[2], &c);
     yoai_reader_set_split(a, b, c);
+    return nullptr;
+}
+
+// nativeReaderSetLaterSplit(minChars, maxChars): void. 0 and 0 turn it off.
+napi_value NativeReaderSetLaterSplit(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    std::int32_t a = 0, b = 0;
+    if (argc >= 1) napi_get_value_int32(env, argv[0], &a);
+    if (argc >= 2) napi_get_value_int32(env, argv[1], &b);
+    yoai_reader_set_later_split(a, b);
     return nullptr;
 }
 
@@ -911,6 +976,12 @@ napi_value NativeReaderFinish(napi_env env, napi_callback_info info) {
     napi_threadsafe_function audio = g_reader_audio;
     g_reader_audio = nullptr;
     std::thread(ReaderFinishWorker, audio, done).detach();
+    return nullptr;
+}
+
+// nativeReaderCancel(): void. The stream still has to be finished afterwards.
+napi_value NativeReaderCancel(napi_env /*env*/, napi_callback_info /*info*/) {
+    yoai_reader_cancel();
     return nullptr;
 }
 
@@ -1134,13 +1205,18 @@ NAPI_MODULE_INIT() {
         {"nativeReaderSetVoice", nullptr, NativeReaderSetVoice, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderSetSpeaker", nullptr, NativeReaderSetSpeaker, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderSetReferenceVoice", nullptr, NativeReaderSetReferenceVoice, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderLoadReferenceEmbedding", nullptr, NativeReaderLoadReferenceEmbedding, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSaveReferenceEmbedding", nullptr, NativeReaderSaveReferenceEmbedding, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderTalkerHiddenSize", nullptr, NativeReaderTalkerHiddenSize, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderSetSeed", nullptr, NativeReaderSetSeed, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderSetSplit", nullptr, NativeReaderSetSplit, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetLaterSplit", nullptr, NativeReaderSetLaterSplit, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderSetClauseCuts", nullptr, NativeReaderSetClauseCuts, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderSetThreads", nullptr, NativeReaderSetThreads, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderBegin", nullptr, NativeReaderBegin, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderFeed", nullptr, NativeReaderFeed, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderFinish", nullptr, NativeReaderFinish, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderCancel", nullptr, NativeReaderCancel, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderLastError", nullptr, NativeReaderLastError, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsLoad",         nullptr, NativeTtsLoad,         nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsLoaded",       nullptr, NativeTtsLoaded,       nullptr, nullptr, nullptr, napi_default, nullptr},

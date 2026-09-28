@@ -1,6 +1,7 @@
 #include "voice/tts/reader.hpp"
 
 #include "utils/log.hpp"
+#include "voice/text/speakable.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -73,6 +74,19 @@ const double kJoinPause = 0.30;
 
 // Speech held back, so a piece that ends hot has something to fade.
 const double kEdgeSeconds = 0.020;
+
+// How little queued audio counts as about to run out, for the pacer.
+//
+// When every piece handed to the engines is finished and the listener has less
+// than this left to hear, the next piece is cut at once instead of waiting to
+// grow -- see SplitOptions::later_min_chars. It has to cover a piece's own
+// start: the engine's first audio arrives 0.15-0.23 s after it is asked
+// (measured per piece on the desktop GPU), plus the pacer's own polling and the
+// shaper's hold. A second covers that about four times over.
+const double kQueueMargin = 1.0;
+
+// How often the pacer looks. Small against the margin above.
+const int kPacerMillis = 50;
 
 bool above_floor(const float* f, std::size_t n) {
     if (n == 0) {
@@ -279,12 +293,27 @@ struct Reader::Impl {
     std::size_t             held_peak;
     std::size_t             emitted;     // samples handed to the sink
 
+    // The listener's clock, kept by the emitter: the instant, in seconds from
+    // begin(), at which everything handed over so far will have finished
+    // playing. Guarded by `mu`; `playing` is false until the first audio.
+    double                  playhead;
+    bool                    playing;
+
     // The threads, and what the stream needs to outlive a call.
     std::vector<std::thread> pool;
     std::thread              emitter;
+    std::thread              pacer;
     ReaderAudioSink          sink;
     void*                    sink_user;
     bool                     running;
+    // The text side: `speakable` and `stream`, touched by feed() on the
+    // writer's thread and by the pacer on its own. Always taken BEFORE `mu`,
+    // never while holding it, and held across the dispatch so the pieces are
+    // queued in the order they were cut.
+    std::mutex               text_mu;
+    // The reply as written, turned into what is spoken. Ahead of the cutter,
+    // so the cuts fall on the text the engine will actually be given.
+    SpeakableStream          speakable;
     SentenceStream           stream;     // text not yet settled into a piece
     clk::time_point          started;
     double                   first_audio;
@@ -293,6 +322,7 @@ struct Reader::Impl {
     Impl() : seed(23), threads(0), next_job(0), next_emit(0),
              aborted(false), failed(false), closed(false),
              held(0), held_peak(0), emitted(0),
+             playhead(0.0), playing(false),
              sink(0), sink_user(0), running(false),
              first_audio(0.0), starved(0.0) {}
 
@@ -441,6 +471,52 @@ struct Reader::Impl {
         starved = run_emitter(sink, sink_user, &first_audio, started);
     }
 
+    // Whether the listener is about to run out: every piece handed to the
+    // engines is finished, and what is queued -- played out by the playhead,
+    // or generated and not yet emitted -- is under kQueueMargin. With a piece
+    // still being generated it is not: that piece streams faster than it
+    // plays. Called with `mu` held.
+    bool running_dry() const {
+        if (!playing || next_job < pieces.size() ||
+            (!pieces.empty() && !pieces.back().done)) {
+            return false;
+        }
+        double queued = playhead - seconds_since(started);
+        if (queued < 0.0) {
+            queued = 0.0;
+        }
+        queued += static_cast<double>(held) / Qtts::sample_rate();
+        return queued < kQueueMargin;
+    }
+
+    // Lets a piece after the first wait for more text, and stops it waiting
+    // once the listener is about to run out. See SplitOptions::later_min_chars.
+    //
+    // A thread of its own because the moment to cut is a TIME, not an event:
+    // a slow writer can leave a finished sentence sitting in the stream while
+    // the audio before it drains, and nothing else would look at it again
+    // until the next token.
+    void run_pacer() {
+        for (;;) {
+            bool dry;
+            {
+                std::unique_lock<std::mutex> lock(mu);
+                cv.wait_for(lock, std::chrono::milliseconds(kPacerMillis));
+                if (aborted || failed || closed) {
+                    return;
+                }
+                dry = running_dry();
+            }
+            std::lock_guard<std::mutex> text(text_mu);
+            if (dry != stream.urgent()) {
+                stream.set_urgent(dry);
+                if (dry) {
+                    dispatch(stream.poll(), false);
+                }
+            }
+        }
+    }
+
     // Drains the pieces in order on the emitter thread. Returns the silence a
     // player would have heard.
     //
@@ -520,6 +596,13 @@ struct Reader::Impl {
                     playhead = now;
                 }
                 playhead += static_cast<double>(shaped.size()) / Qtts::sample_rate();
+                {
+                    // For the pacer, which decides from it when to stop waiting
+                    // for a longer piece.
+                    std::lock_guard<std::mutex> lock(mu);
+                    this->playhead = playhead;
+                    this->playing  = true;
+                }
                 emitted += shaped.size();
                 if (sink && !sink(&shaped[0], shaped.size(), static_cast<int>(idx), false,
                                   user_data)) {
@@ -595,6 +678,10 @@ std::string Reader::model_type() const {
     return impl_->engines.empty() ? std::string() : impl_->engines[0]->model_type();
 }
 
+int Reader::talker_hidden_size() const {
+    return impl_->engines.empty() ? 0 : impl_->engines[0]->talker_hidden_size();
+}
+
 std::vector<std::string> Reader::speakers() const {
     return impl_->engines.empty() ? std::vector<std::string>() : impl_->engines[0]->speakers();
 }
@@ -629,6 +716,62 @@ bool Reader::set_reference_voice(const std::string& wav_path) {
             m->error = m->engines[k]->last_error();
             return false;
         }
+    }
+    return true;
+}
+
+bool Reader::set_reference_embedding(const std::vector<float>& embedding) {
+    Impl* m = impl_;
+    m->error.clear();
+    if (m->engines.empty()) {
+        m->error = "set_reference_embedding needs a loaded model";
+        return false;
+    }
+    for (std::size_t k = 0; k < m->engines.size(); ++k) {
+        if (!m->engines[k]->set_reference_embedding(embedding)) {
+            m->error = m->engines[k]->last_error();
+            return false;
+        }
+    }
+    return true;
+}
+
+bool Reader::load_reference_embedding(const std::string& spk_path) {
+    Impl* m = impl_;
+    m->error.clear();
+    if (m->engines.empty()) {
+        m->error = "load_reference_embedding needs a loaded model";
+        return false;
+    }
+    // Read once, by the first engine, and handed to the rest as a vector.
+    if (!m->engines[0]->load_reference_embedding(spk_path)) {
+        m->error = m->engines[0]->last_error();
+        return false;
+    }
+    for (std::size_t k = 1; k < m->engines.size(); ++k) {
+        if (!m->engines[k]->set_reference_embedding(m->engines[0]->reference_embedding())) {
+            m->error = m->engines[k]->last_error();
+            return false;
+        }
+    }
+    return true;
+}
+
+const std::vector<float>& Reader::reference_embedding() const {
+    static const std::vector<float> kNone;
+    return impl_->engines.empty() ? kNone : impl_->engines[0]->reference_embedding();
+}
+
+bool Reader::save_reference_embedding(const std::string& spk_path) {
+    Impl* m = impl_;
+    m->error.clear();
+    if (m->engines.empty()) {
+        m->error = "no reference embedding to save -- nothing is loaded";
+        return false;
+    }
+    if (!m->engines[0]->save_reference_embedding(spk_path)) {
+        m->error = m->engines[0]->last_error();
+        return false;
     }
     return true;
 }
@@ -727,7 +870,10 @@ bool Reader::begin(ReaderAudioSink sink, void* user_data) {
     }
 
     m->pieces.clear();
+    m->speakable.reset();
     m->stream.reset(m->split);
+    m->playhead    = 0.0;
+    m->playing     = false;
     m->next_job    = 0;
     m->next_emit   = 0;
     m->aborted     = false;
@@ -754,6 +900,11 @@ bool Reader::begin(ReaderAudioSink sink, void* user_data) {
         // On its own thread, because begin() returns and there is no caller
         // left to run it on.
         m->emitter = std::thread(&Impl::stream_emitter, m);
+        // Only with audio, and only when later pieces are allowed to wait:
+        // without a listener there is no playhead to pace against.
+        if (m->split.later_min_chars > 0) {
+            m->pacer = std::thread(&Impl::run_pacer, m);
+        }
     }
     return true;
 }
@@ -770,7 +921,8 @@ bool Reader::feed(const std::string& delta) {
             return false;
         }
     }
-    m->dispatch(m->stream.feed(delta), false);
+    std::lock_guard<std::mutex> text(m->text_mu);
+    m->dispatch(m->stream.feed(m->speakable.feed(delta)), false);
     return true;
 }
 
@@ -784,11 +936,23 @@ bool Reader::finish(ReaderResult* out) {
         return false;
     }
 
-    m->dispatch(m->stream.finish(), true);
+    {
+        // Whatever the cleaner still held, then the cutter's remainder, as one
+        // closing batch so the tail rule sees the true last piece.
+        std::lock_guard<std::mutex> text(m->text_mu);
+        std::vector<std::string> ready = m->stream.feed(m->speakable.finish());
+        const std::vector<std::string> rest = m->stream.finish();
+        ready.insert(ready.end(), rest.begin(), rest.end());
+        m->dispatch(ready, true);
+    }
     {
         std::lock_guard<std::mutex> lock(m->mu);
         m->closed = true;
         m->cv.notify_all();
+    }
+    // Nothing is left for it to cut.
+    if (m->pacer.joinable()) {
+        m->pacer.join();
     }
 
     for (std::size_t k = 0; k < m->pool.size(); ++k) {

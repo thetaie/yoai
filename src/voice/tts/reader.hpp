@@ -292,6 +292,10 @@ public:
     // engines are all the same checkpoint, so this is the first one's answer.
     std::string model_type() const;
 
+    // The talker's hidden size, the length a reference embedding must have.
+    // 0 before a load. See Qtts::talker_hidden_size.
+    int talker_hidden_size() const;
+
     // The named speakers a custom_voice checkpoint carries. Empty otherwise.
     std::vector<std::string> speakers() const;
 
@@ -315,6 +319,19 @@ public:
     // mode B, with the reference's codes in context for every frame. Mode A
     // holds no context. See Qtts::set_reference_voice.
     bool set_reference_voice(const std::string& wav_path);
+
+    // The same anchor from a vector already extracted, or from a .spk file,
+    // with no recording and no extraction. See Qtts::set_reference_embedding
+    // for what the vector must be. Copied to every engine: they all load the
+    // same checkpoint, so one vector is right for all of them. After load(),
+    // like set_reference_voice, because the engines are what hold it.
+    bool set_reference_embedding(const std::vector<float>& embedding);
+    bool load_reference_embedding(const std::string& spk_path);
+
+    // The first engine's embedding -- after set_reference_voice(), the one it
+    // extracted -- and that vector written as a .spk. Empty before a load.
+    const std::vector<float>& reference_embedding() const;
+    bool save_reference_embedding(const std::string& spk_path);
 
     // The seed, and **the setting this whole class depends on**.
     //

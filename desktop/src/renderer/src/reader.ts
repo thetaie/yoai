@@ -1,24 +1,32 @@
 /**
- * Reading a reply aloud while the model is still writing it, from the page's
- * side.
+ * Reading aloud, from the page's side: a reply while the model is still
+ * writing it, and any text that already exists.
  *
- * The speech lane in tts.ts waits for the whole reply and then speaks it. This
- * one is handed the same deltas the transcript is, so the voice starts on the
- * first sentence while the model is still on the third -- which is seconds a
- * streamed utterance cannot recover, because the text is what the engine would
- * otherwise be waiting for.
+ * Handed the same deltas the transcript is, so the voice starts on the first
+ * sentence while the model is still on the third -- which is seconds a streamed
+ * utterance cannot recover, because the text is what the engine would
+ * otherwise be waiting for. Text that already exists -- a message's 🔊, the
+ * settings test -- is one stream fed in one go; see tts.ts.
  *
- * It shares the player with the other two lanes, because the speaker is one.
+ * One stream at a time, which the core enforces: opening a new one cancels the
+ * one that is open. It shares the player with the omni lane, because the
+ * speaker is one.
  */
 import type { ReaderEvent } from '@shared/api'
 import { player } from './audio'
-import { forSpeech } from './tts'
 
 let unsubscribe: (() => void) | null = null
 let pending: {
   resolve: (stats: Record<string, unknown>) => void
   reject: (e: Error) => void
 } | null = null
+
+/** From a successful begin() until the stream's 'end' or 'error' arrives. */
+let open = false
+/** The finish() in flight, so a second call waits on the same end. */
+let closing: Promise<Record<string, unknown>> | null = null
+/** Set by cancel(): audio still in flight for the old stream is not played. */
+let dropping = false
 
 /** When the turn opened, so the log can say how long the first sound took. */
 let openedAt = 0
@@ -29,7 +37,7 @@ let lastSentence = -1
 
 function onEvent(ev: ReaderEvent): void {
   if (ev.type === 'audio') {
-    if (ev.pcm !== undefined && ev.pcm.length > 0) {
+    if (!dropping && ev.pcm !== undefined && ev.pcm.length > 0) {
       const now = Date.now()
       chunks++
       seconds += ev.pcm.length / 24000
@@ -54,6 +62,8 @@ function onEvent(ev: ReaderEvent): void {
   player.flush()
   const p = pending
   pending = null
+  open = false
+  closing = null
 
   if (ev.type === 'error') {
     console.error('[reader]', ev.error ?? 'failed')
@@ -89,6 +99,12 @@ export async function ready(): Promise<boolean> {
   return st.available && st.loaded && st.enabled
 }
 
+/** Whether anything can be read at all -- 🔊 does not care about `enabled`. */
+export async function loaded(): Promise<boolean> {
+  const st = await window.yoai.reader.status()
+  return st.available && st.loaded
+}
+
 /**
  * Seconds of audio to have in hand before the first word, for THIS lane.
  *
@@ -108,9 +124,16 @@ export async function ready(): Promise<boolean> {
  */
 const PRIME_SECONDS = 1.2
 
-/** Open a stream. False when the engine is not ready or one is already open. */
+/**
+ * Open a stream, cancelling the one that is open. False when the engine is not
+ * loaded.
+ */
 export async function begin(): Promise<boolean> {
   ensureSubscribed()
+  if (open) {
+    await cancel()
+  }
+  dropping = false
   player.stop()
   player.prime(PRIME_SECONDS)
   openedAt = Date.now()
@@ -118,97 +141,22 @@ export async function begin(): Promise<boolean> {
   chunks = 0
   seconds = 0
   lastSentence = -1
-  unsent = ''
 
   const ok = await window.yoai.reader.begin()
   if (!ok) {
     console.warn('[reader] could not begin')
   }
+  open = ok
   return ok
 }
 
 /**
- * Text the engine has not been given yet, because it is not a whole sentence.
+ * Add a delta, exactly as the model wrote it. Fire and forget.
  *
- * The core does the real cutting -- min_chars, max_chars, the tail rule -- and
- * this is not a second copy of that. It exists because of what has to happen
- * BEFORE the cutting: the reply is markdown, and the engine must be given the
- * words without it, or it reads the asterisks out loud. Stripping cannot be
- * done a token at a time -- `**bold**` arrives in pieces and its closing marker
- * may be three deltas away -- so the text is held until a sentence has ended
- * and cleaned in one go.
- */
-let unsent = ''
-
-/**
- * A point the buffer can safely be cut and cleaned at.
- *
- * **Comma-level, not sentence-level**, and that is a correction. Cutting only
- * at full stops looked right and was not: a reply whose middle is all commas --
- * which is ordinary Chinese -- has no terminator between its first sentence and
- * its last, so the whole of it was held here and handed over in one go when the
- * model finished. Measured, the only piece of a 65-character reply was
- * dispatched two milliseconds after the turn ended, and the first word came
- * 5.28 s in.
- *
- * The cut this buffer makes is NOT the cut that matters: the core decides where
- * pieces begin and end, with min_chars and max_chars, and it cannot decide
- * about text it has not been given. All this has to do is hand text over often
- * enough for the core to have the choice.
- *
- * What it trades is markdown spanning one of these. `**说了，又说**` gets
- * stripped in two halves and loses its markers unevenly, which at worst reads
- * an asterisk aloud. Holding a whole sentence to avoid that cost seconds.
- */
-const ENDS = /[。！？；…!?;\n，、,：:]/
-
-/**
- * Past this many characters with nothing to cut at, hand it over anyway.
- *
- * Low, for the same reason: the core cannot place a cut in text it does not
- * have. A run this long with no punctuation at all is not a sentence anybody is
- * waiting to hear the end of.
- */
-const FLUSH_AT = 24
-
-function flush(force: boolean): void {
-  if (unsent.length === 0) {
-    return
-  }
-  if (!force && !ENDS.test(unsent) && unsent.length < FLUSH_AT) {
-    return
-  }
-  const raw = unsent
-  unsent = ''
-
-  // forSpeech is the speech lane's cleaner and it assumes it is being handed a
-  // WHOLE reply. One of its rules -- drop a comma at the start or end of a line
-  // -- exists for markdown table rows, and on a fragment that was cut AT a
-  // comma it silently eats the comma instead. Measured, that stripped every
-  // comma out of a reply: 45 characters of Chinese arrived at the engine with
-  // no punctuation between the first word and the full stop, which also left
-  // the core's max_chars rule with nothing to fall back on.
-  //
-  // Restoring it here rather than changing that rule, because the rule is right
-  // for the lane it was written for and this is the only caller handing it
-  // fragments.
-  const tail = /[，、,：:]$/.exec(raw)
-  let spoken = forSpeech(raw)
-  if (tail !== null && spoken.length > 0 && !/[，、,：:]$/.test(spoken)) {
-    spoken += tail[0]
-  }
-  if (spoken.length > 0) {
-    // Logged here and not only in the core: that log goes through printf to a
-    // Windows console whose code page is not UTF-8, so Chinese comes out as
-    // mojibake. The bytes are right, the terminal is not. This is the readable
-    // copy, and it is what the engine is actually given.
-    console.log(`[reader] fed ${spoken.length} chars: ${JSON.stringify(spoken)}`)
-    void window.yoai.reader.feed(spoken)
-  }
-}
-
-/**
- * Add a delta. Fire and forget.
+ * Markdown and all: the core turns the reply into what should be spoken
+ * (src/voice/text/speakable.hpp), and it can only do that on the whole stream.
+ * This page used to clean fragments itself and lost every line break that fell
+ * at a fragment's edge -- a list's "上海" and "南接" were read as one word.
  *
  * Not awaited by the caller: this runs once per token, and an IPC round trip
  * per token would put the page's own rendering behind the main process.
@@ -217,16 +165,38 @@ export function feed(delta: string): void {
   if (delta.length === 0) {
     return
   }
-  unsent += delta
-  flush(false)
+  void window.yoai.reader.feed(delta)
 }
 
-/** No more text. Resolves with the timings once the last sample has played. */
+/**
+ * No more text. Resolves with the timings once the last sample has been
+ * generated -- not played: the player still has what it was given.
+ */
 export function finish(): Promise<Record<string, unknown>> {
-  flush(true)
-  const done = new Promise<Record<string, unknown>>((resolve, reject) => {
+  if (!open) {
+    return Promise.resolve({})
+  }
+  if (closing !== null) {
+    return closing
+  }
+  closing = new Promise<Record<string, unknown>>((resolve, reject) => {
     pending = { resolve, reject }
   })
   void window.yoai.reader.finish()
-  return done
+  return closing
+}
+
+/**
+ * Stop reading: the engine abandons the stream and what it already sent is not
+ * played. Resolves once the stream is closed, so a begin() can follow. Safe
+ * with nothing open.
+ */
+export async function cancel(): Promise<void> {
+  if (!open) {
+    return
+  }
+  dropping = true
+  player.stop()
+  await window.yoai.reader.cancel()
+  await finish().catch(() => undefined)
 }

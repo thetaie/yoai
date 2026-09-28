@@ -22,12 +22,32 @@ import { dataFile, readJson, writeJson } from './jsonfile'
 
 const FILE = 'chat.json'
 
-/** Empty, which is what every turn sent before this setting existed. */
-const EMPTY: ChatSettings = { systemPrompt: '' }
+/**
+ * The prompt until the user writes their own -- a fresh install included,
+ * which would otherwise send nothing at all.
+ *
+ * The second paragraph is there because the on-device model makes things up:
+ * asked for a lake's sights, a 4B model listed a wetland park that is at the
+ * other end of the city, as confidently as the real ones. It does not know what
+ * it does not know, so this reduces that rather than ending it.
+ *
+ * A prompt the user CLEARS is sent as empty, as the settings screen says; only
+ * one never set falls back to this.
+ */
+export const DEFAULT_SYSTEM_PROMPT =
+  '你是一个简洁、直接的助手，回答用简体中文。\n' +
+  '只说你确定的事实。' +
+  '涉及具体的地名、景点、机构、人名、日期、数字时，没有把握就不要列出，直接说明这一点你不确定；' +
+  '不要编造，也不要用名字相近的东西凑数。' +
+  '宁可少说，不要说错。'
+
+const DEFAULTS: ChatSettings = { systemPrompt: DEFAULT_SYSTEM_PROMPT }
 
 export function get(): ChatSettings {
-  const s = readJson<ChatSettings>(dataFile(FILE), EMPTY)
-  return { systemPrompt: typeof s.systemPrompt === 'string' ? s.systemPrompt : '' }
+  const s = readJson<Partial<ChatSettings>>(dataFile(FILE), DEFAULTS)
+  return {
+    systemPrompt: typeof s.systemPrompt === 'string' ? s.systemPrompt : DEFAULT_SYSTEM_PROMPT
+  }
 }
 
 export function set(patch: Partial<ChatSettings>): ChatSettings {

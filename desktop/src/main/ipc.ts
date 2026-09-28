@@ -139,20 +139,7 @@ export function registerHandlers(): void {
     return { path, name: basename(path) }
   })
 
-  handle<[string], string>(
-    CHANNELS.modelsPreload,
-    (id) =>
-      new Promise<string>((resolve) => {
-        // The addon runs this on a worker thread and calls back exactly once.
-        // Resolved with a string rather than rejected on failure: a model that
-        // will not load is something to show beside the picker, not an
-        // exception the renderer has to catch around a preload it fired and
-        // forgot.
-        core().nativeLocalLoad(String(id), (type, content) => {
-          resolve(type === 'end' ? '' : content.length > 0 ? content : 'the model would not load')
-        })
-      })
-  )
+  handle(CHANNELS.modelsLoadStates, () => models.loadStates())
 
   //----------------------------------------------------------------------------
   // Keys
@@ -287,8 +274,10 @@ export function registerHandlers(): void {
     tts.setPath(slot, path)
     // Picking the second of the two is the whole configuration, so it is also
     // the moment to load -- pressing 载入 afterwards was a step that could only
-    // be forgotten. Unawaited, and a no-op when only one slot is filled.
-    void tts.autoLoad().then((reason) => {
+    // be forgotten. Unawaited, and a no-op when only one slot is filled. What
+    // was loaded is let go first: it was the file just replaced.
+    reader.unload()
+    void reader.autoLoadVoice().then((reason) => {
       if (reason.length > 0) {
         console.error(`[yoai] the voice would not load: ${reason}`)
       }
@@ -302,7 +291,10 @@ export function registerHandlers(): void {
   handle<[string], void>(CHANNELS.ttsSetVoice, (text) => tts.setVoice(String(text ?? '')))
   handle<[boolean], void>(CHANNELS.ttsSetAutoSpeak, (on) => tts.setAutoSpeak(on === true))
   handle<[string], void>(CHANNELS.ttsSetSpeaker, (name) => tts.setSpeaker(String(name ?? '')))
-  handle<[number], void>(CHANNELS.ttsSetSeed, (seed) => tts.setSeed(Number(seed)))
+  handle<[number], void>(CHANNELS.ttsSetSeed, (seed) => {
+    tts.setSeed(Number(seed))
+    reader.applySeed()
+  })
 
   // Audio goes to the window that asked, as it arrives. Nothing is buffered
   // here: the renderer owns the AudioContext, and holding samples in the main
@@ -420,17 +412,20 @@ export function registerHandlers(): void {
   handle<[], string | null>(CHANNELS.readerPickReference, async () => {
     const win = BrowserWindow.getFocusedWindow()
     const opts = {
-      title: 'Pick the reference recording',
+      title: 'Pick a reference voice',
       properties: ['openFile' as const],
-      filters: [{ name: 'WAV', extensions: ['wav'] }]
+      // A recording, mono 16-bit at 24 kHz, or an embedding already extracted
+      // from one -- qwentts.cpp's qwen-codec writes the same .spk.
+      filters: [{ name: 'Recording or embedding', extensions: ['wav', 'spk'] }]
     }
-    const result = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+    const result =
+      win === null ? await dialog.showOpenDialog(opts) : await dialog.showOpenDialog(win, opts)
     if (result.canceled || result.filePaths.length === 0) {
       return null
     }
-    reader.setReferenceWav(result.filePaths[0])
-    return result.filePaths[0]
+    return reader.setReference(result.filePaths[0])
   })
+  handle<[], string>(CHANNELS.readerResetReference, () => reader.setReference(''))
 
   // The stream itself. begin() installs a sink that forwards to the window that
   // asked; feed() and finish() are fire-and-forget from the renderer's side,
@@ -467,6 +462,7 @@ export function registerHandlers(): void {
 
   handle<[string], boolean>(CHANNELS.readerFeed, (delta) => reader.feed(String(delta ?? '')))
   handle<[], void>(CHANNELS.readerFinish, () => reader.finish())
+  handle<[], void>(CHANNELS.readerCancel, () => reader.cancel())
 
   //----------------------------------------------------------------------------
   // Shell

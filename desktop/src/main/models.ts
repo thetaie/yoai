@@ -12,6 +12,7 @@
  * the addon at all.
  */
 import { existsSync } from 'node:fs'
+import type { ModelLoadState } from '../shared/api'
 import { ModelConfig, isLocal } from '../shared/provider'
 import { core } from './core'
 import { dataFile, readJson, writeJson } from './jsonfile'
@@ -83,6 +84,7 @@ export function remove(id: string): void {
   }
   write(s)
   core().nativeProviderRemove(id)
+  loadState.delete(id)
 }
 
 /**
@@ -235,6 +237,22 @@ export function forgetAll(): number {
   return cleared
 }
 
+/**
+ * How each automatic preload went, for the settings screen to show beside the
+ * model. It used to have a 预加载 button instead; the preload below already
+ * covers the one model worth loading, and what the button still added was a
+ * place for a failure to be seen -- which this is, without the button.
+ */
+const loadState = new Map<string, ModelLoadState>()
+
+export function loadStates(): Record<string, ModelLoadState> {
+  const out: Record<string, ModelLoadState> = {}
+  for (const [id, st] of loadState) {
+    out[id] = st
+  }
+  return out
+}
+
 export function autoPreload(): void {
   const s = read()
   const cfg = s.configured.find((m) => m.id === s.active)
@@ -242,11 +260,17 @@ export function autoPreload(): void {
     return
   }
   console.log(`[yoai] preloading ${cfg.id}`)
+  loadState.set(cfg.id, { state: 'loading', reason: '' })
   core().nativeLocalLoad(cfg.id, (type, content) => {
     if (type === 'end') {
       console.log(`[yoai] ${cfg.id} is resident`)
+      loadState.set(cfg.id, { state: 'ready', reason: '' })
     } else {
       console.error(`[yoai] ${cfg.id} would not preload: ${content}`)
+      loadState.set(cfg.id, {
+        state: 'failed',
+        reason: content.length > 0 ? content : 'the model would not load'
+      })
     }
   })
 }

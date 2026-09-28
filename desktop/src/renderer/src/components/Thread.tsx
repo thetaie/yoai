@@ -10,6 +10,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type JSX } from 'rea
 import type { ChatMessage, Usage } from '@shared/chat'
 import { S } from '../strings'
 import * as tts from '../tts'
+import { Markdown } from './Markdown'
 
 interface Props {
   messages: ChatMessage[]
@@ -83,8 +84,14 @@ function MessageView({
             <div className="thinking-body">{p.content}</div>
           </details>
         ) : (
+          // A reply is markdown; what the user typed is shown as typed. A
+          // transient message is the app's own -- an error -- and plain too.
           <div className="bubble" key={i}>
-            {p.content}
+            {m.role === 'assistant' && m.transient !== true ? (
+              <Markdown text={p.content} />
+            ) : (
+              p.content
+            )}
           </div>
         )
       )}
@@ -120,10 +127,11 @@ export function Thread({
 
   // Asked once: whether this build can speak at all and has its models loaded.
   // The buttons are simply absent otherwise, rather than present and refusing.
+  // The reading lane, which is the one that speaks; see tts.ts.
   const [ttsReady, setTtsReady] = useState(false)
   useEffect(() => {
     void (async () => {
-      const st = await window.yoai.tts.status()
+      const st = await window.yoai.reader.status()
       setTtsReady(st.available && st.loaded)
     })()
   }, [messages.length])
@@ -174,7 +182,7 @@ export function Thread({
               </details>
             )}
             <div className="bubble">
-              {streamText}
+              <Markdown text={streamText} />
               <span className="caret" />
             </div>
           </div>

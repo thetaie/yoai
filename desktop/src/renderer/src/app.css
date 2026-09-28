@@ -248,6 +248,124 @@ select {
   color: var(--bc-danger);
 }
 
+/* A reply rendered from markdown. `normal` because the bubble's pre-wrap would
+   show the newlines between rendered blocks as blank lines; a code block keeps
+   its own whitespace below. Margins only between blocks, so the bubble's
+   padding is the edge. */
+.md {
+  white-space: normal;
+  line-height: 1.65;
+}
+
+.md > :first-child {
+  margin-top: 0;
+}
+
+.md > :last-child {
+  margin-bottom: 0;
+}
+
+.md p,
+.md ul,
+.md ol,
+.md pre,
+.md blockquote,
+.md .md-table {
+  margin: 0 0 0.7em;
+}
+
+.md h1,
+.md h2,
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  margin: 1em 0 0.4em;
+  font-size: 1em;
+  font-weight: 600;
+}
+
+.md h1,
+.md h2 {
+  font-size: 1.1em;
+}
+
+.md ul,
+.md ol {
+  padding-left: 1.4em;
+}
+
+.md li + li {
+  margin-top: 0.2em;
+}
+
+.md li > p {
+  margin: 0;
+}
+
+.md blockquote {
+  padding-left: 0.8em;
+  border-left: 3px solid var(--bc-border);
+  color: var(--bc-text-secondary);
+}
+
+.md code {
+  font-family: var(--bc-mono);
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: var(--bc-bg-surface);
+}
+
+.md pre {
+  padding: 10px 12px;
+  border-radius: var(--bc-radius);
+  background: var(--bc-bg-surface);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.md pre code {
+  padding: 0;
+  background: none;
+  font-size: 0.85em;
+}
+
+.md .md-table {
+  overflow-x: auto;
+}
+
+.md table {
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.md th,
+.md td {
+  padding: 4px 10px;
+  border: 1px solid var(--bc-border);
+  text-align: left;
+}
+
+.md th {
+  font-weight: 600;
+  background: var(--bc-bg-surface);
+}
+
+.md hr {
+  border: 0;
+  border-top: 1px solid var(--bc-divider);
+  margin: 1em 0;
+}
+
+.md a {
+  color: var(--bc-brand);
+}
+
+.md .md-img {
+  color: var(--bc-text-tertiary);
+}
+
 /* The model's name, and whatever actions the message offers. Flex with a gap
    rather than a margin on the button: the row is a list of items now, not a
    label with something stuck after it, and without the gap the model name and
@@ -468,7 +586,15 @@ select.control:focus {
   Settings
 -----------------------------------------------------------------------------*/
 
+/* A column: the top bar, then the part that scrolls. */
 .settings {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-scroll {
   flex: 1;
   overflow-y: auto;
   padding: 24px 0 48px;

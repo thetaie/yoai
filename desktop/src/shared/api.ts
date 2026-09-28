@@ -30,7 +30,7 @@ export const CHANNELS = {
   modelsSetActiveId: 'models:setActiveId',
   modelsVendorsWithKeys: 'models:vendorsWithKeys',
   modelsPickLocal: 'models:pickLocal',
-  modelsPreload: 'models:preload',
+  modelsLoadStates: 'models:loadStates',
 
   keysSave: 'keys:save',
   keysHas: 'keys:has',
@@ -80,10 +80,12 @@ export const CHANNELS = {
   readerLoad: 'reader:load',
   readerUnload: 'reader:unload',
   readerSet: 'reader:set',
-  readerPickReference: 'reader:pickReference',
   readerBegin: 'reader:begin',
   readerFeed: 'reader:feed',
   readerFinish: 'reader:finish',
+  readerCancel: 'reader:cancel',
+  readerPickReference: 'reader:pickReference',
+  readerResetReference: 'reader:resetReference',
   /** Main -> renderer: PCM chunks in reading order, then the timings. */
   readerEvent: 'reader:event',
 
@@ -200,6 +202,13 @@ export interface OmniEvent {
   error?: string
 }
 
+/** An on-device model's weights: being read, resident, or refused with a reason. */
+export interface ModelLoadState {
+  state: 'loading' | 'ready' | 'failed'
+  /** Why it failed; '' otherwise. */
+  reason: string
+}
+
 /** What the reading lane can do right now. */
 export interface ReaderStatus {
   available: boolean
@@ -207,15 +216,23 @@ export interface ReaderStatus {
   /** "voice_design", "base" or "custom_voice"; '' before a load. */
   modelType: string
   /**
-   * The recording every piece is anchored to. Base checkpoints only.
+   * The .spk every piece is anchored to; '' when none -- nothing loaded, or not
+   * a Base checkpoint. Picked from speaker/ by the talker's size at load.
    *
    * Without one the pieces drift in register -- one sentence in sixteen came
    * out five semitones low, heard as the voice changing mid-reply.
    */
-  referenceWav: string
+  speaker: string
+  /** The reference voice the user picked, a .wav or a .spk; '' for the bundled one. */
+  reference: string
+  /**
+   * What went wrong with the last automatic load, '' when nothing did -- a
+   * talker that is not a Base checkpoint, above all, which is refused.
+   */
+  note: string
   /** 0 means the core's measured default of 30. */
   minChars: number
-  /** Route replies through this lane instead of speaking them at the end. */
+  /** Read every reply aloud as it is written, without being asked. */
   enabled: boolean
 }
 
@@ -245,11 +262,11 @@ export interface YoaiApi {
     vendorsWithKeys(vendorIds: string[]): Promise<string[]>
     pickLocal(): Promise<PickedModel | null>
     /**
-     * Read an on-device model's weights now, so the first turn does not pay for
-     * them. Resolves to '' when the model is resident, or to the reason it is
-     * not. Takes seconds and gigabytes; call it while the user is still typing.
+     * How the automatic preload of each on-device model went, by model id. Only
+     * models a preload was started for appear: the active one, at startup and
+     * when it is switched to.
      */
-    preload(id: string): Promise<string>
+    loadStates(): Promise<Record<string, ModelLoadState>>
   }
 
   keys: {
@@ -356,14 +373,22 @@ export interface YoaiApi {
     load(): Promise<string>
     unload(): Promise<void>
     set(patch: { enabled?: boolean; minChars?: number }): Promise<ReaderStatus>
-    /** Pick the reference recording. Mono 16-bit at 24 kHz, or it is refused. */
+    /**
+     * Pick a reference voice, a .wav or a .spk, and use it at once. null when
+     * the dialog was dismissed, else '' or why the voice could not be used. A
+     * recording takes seconds the first time, while its embedding is extracted.
+     */
     pickReference(): Promise<string | null>
+    /** Back to the bundled reference voice. '' or why it could not be used. */
+    resetReference(): Promise<string>
     /** Open a stream. False when the engine is not loaded or one is open. */
     begin(): Promise<boolean>
     /** Add text. Returns at once; the audio arrives through onEvent. */
     feed(delta: string): Promise<boolean>
     /** No more text. The 'end' event follows once the last sample is out. */
     finish(): Promise<void>
+    /** Abandon the open stream. It must still be finished to be closed. */
+    cancel(): Promise<void>
     onEvent(listener: (ev: ReaderEvent) => void): () => void
   }
 

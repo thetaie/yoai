@@ -142,6 +142,26 @@ struct SplitOptions {
     // So this is the trade the streaming case makes and the buffered one does
     // not: a shorter unit, spoken sooner.
     bool clause_cuts = false;
+
+    // The pieces AFTER the first, which nobody is waiting on in the same way.
+    //
+    // The first piece is what the listener waits for, so it is cut as soon as
+    // min_chars allows. Every later one is heard only once the piece before it
+    // has finished playing, so it can wait for more text -- and a longer piece
+    // is a better one: it gives the model room to plan a pace across sentences,
+    // which is why 30 characters sounded better than 12 (see min_chars).
+    //
+    // These are the minimum and the maximum for those pieces, and **only a full
+    // stop ends one**: clause_cuts does not apply, and a comma is used only as
+    // the fallback at later_max_chars. 0 leaves min_chars, max_chars and
+    // clause_cuts in force for every piece, which is how it was before.
+    //
+    // The wait is bounded by the listener, not by these numbers. A consumer
+    // that knows how much audio is still queued calls
+    // SentenceStream::set_urgent() when it is about to run out, and the next
+    // piece is then cut by the first piece's rules instead -- see the reader.
+    std::size_t later_min_chars = 0;
+    std::size_t later_max_chars = 0;
 };
 
 // Cut `text` into pieces that can each be synthesized on their own.
@@ -193,14 +213,28 @@ public:
     // itself -- the reader does, when that piece is still queued.
     std::vector<std::string> finish();
 
+    // The listener is about to run out of audio: cut the NEXT piece by the
+    // first piece's rules -- min_chars, clause_cuts -- rather than waiting for
+    // later_min_chars. It lasts for one piece; the caller sets it again if the
+    // listener is still short. Does nothing when later_min_chars is 0.
+    void set_urgent(bool on) { urgent_ = on; }
+    bool urgent() const { return urgent_; }
+
+    // Whatever is settled now, under the current rules -- for a caller whose
+    // rules just changed through set_urgent() with no new text to feed.
+    std::vector<std::string> poll() { return drain(false); }
+
     const SplitOptions& options() const { return opt_; }
 
 private:
     std::vector<std::string> drain(bool closing);
-    bool settled_at_end(const std::string& text) const;
+    SplitOptions current() const;
+    bool settled_at_end(const std::string& text, const SplitOptions& opt) const;
 
     SplitOptions opt_;
     std::string  pending_;   // text not yet settled into a piece
+    std::size_t  pieces_out_ = 0;   // pieces handed back since the last reset
+    bool         urgent_ = false;
 };
 
 }  // namespace voice

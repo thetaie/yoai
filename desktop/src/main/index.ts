@@ -17,7 +17,7 @@ import { join } from 'node:path'
 import palettes from '../../../design/palettes.json'
 import { describeCore } from './core'
 import { cancelAllTurns, registerHandlers, watchWindow } from './ipc'
-import * as tts from './tts'
+import * as reader from './reader'
 import * as models from './models'
 import * as prefs from './prefs'
 import * as sessions from './sessions'
@@ -194,7 +194,8 @@ app.whenReady().then(() => {
   // unawaited because nothing here depends on the outcome.
   if (described.ok) {
     models.autoPreload()
-    void tts.autoLoad().then((reason) => {
+    // Into whichever lane should speak; see reader.autoLoadVoice().
+    void reader.autoLoadVoice().then((reason) => {
       if (reason.length > 0) {
         console.error(`[yoai] the voice would not load: ${reason}`)
       }

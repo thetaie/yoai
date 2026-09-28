@@ -170,6 +170,15 @@ public:
     // one they picked.
     std::string model_type() const;
 
+    // The talker's hidden size: 2048 for the 1.7B, 1024 for the 0.6B. 0 with
+    // nothing loaded, or when the GGUF does not carry
+    // `qwen3-tts.talker.embedding_length`. Read from the file's header at load,
+    // because qwen.h has no call that reports it.
+    //
+    // It is the length a mode A embedding must have, which is how a host
+    // holding one .spk per model size picks the right one.
+    int talker_hidden_size() const;
+
     // The voice, described. Takes effect on the next say(); the weights stay
     // resident, so a sweep compares descriptions rather than page caches.
     //
@@ -300,6 +309,34 @@ public:
     // call -- which is the other half of why the two modes are not the same
     // feature at two prices.
     bool set_reference_voice(const std::string& wav_path);
+
+    // Mode A from a vector the caller already has: what set_reference_voice()
+    // extracts, without the recording and without the extraction. Only where
+    // the vector comes from differs; say() treats the two the same.
+    //
+    // **Its length must equal the talker's hidden size** -- 2048 on the 1.7B
+    // Base, 1024 on the 0.6B; see talker_hidden_size(). A wrong length is
+    // refused here once a model is loaded. Set before a load, it cannot be
+    // checked, and the next say() fails with the engine's own message instead.
+    // It must also come from the SAME checkpoint's speaker encoder: a vector
+    // from another model of the same width has the right size and the wrong
+    // meaning, and nothing can detect that.
+    //
+    // Needs no loaded model, unlike set_reference_voice: nothing runs here.
+    // Refused when empty or when any value is not finite, since either would
+    // report success and then synthesize something other than the voice.
+    bool set_reference_embedding(const std::vector<float>& embedding);
+
+    // The same, from a .spk file: raw f32 values in host byte order and nothing
+    // else, which is the file qwentts.cpp's qwen-codec writes and qwen-tts
+    // --ref-spk reads.
+    bool load_reference_embedding(const std::string& spk_path);
+
+    // The embedding held now. Empty when there is none, or when the reference
+    // is mode B. After set_reference_voice() it is the extracted vector, so a
+    // recording can be reduced once, saved, and loaded from then on.
+    const std::vector<float>& reference_embedding() const;
+    bool save_reference_embedding(const std::string& spk_path);
 
     void clear_reference();
 

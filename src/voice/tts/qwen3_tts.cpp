@@ -210,6 +210,107 @@ bool read_reference_wav(const std::string& path, std::vector<float>* out, std::s
     }
 }
 
+// One integer from a GGUF file's key-value header, or 0 when the key is absent
+// or the file cannot be read.
+//
+// A reader of its own rather than ggml's gguf.h, because the qwentts SDK ships
+// only qwen.h and every build script that assembles one would have to change to
+// ship a second header. qwen.h has no call that answers this question.
+//
+// Only the header is read: it walks the key-value pairs in order, skipping each
+// value by its type, and stops at the key. GGUF v2 and v3, whose counts are
+// 64-bit. Nested arrays never occur in these files and end the walk.
+unsigned long long read_gguf_uint(const std::string& path, const char* key) {
+    std::FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) {
+        return 0;
+    }
+    struct Closer {
+        std::FILE* f;
+        ~Closer() { std::fclose(f); }
+    } closer = {f};
+
+    // Little-endian, like the format.
+    struct In {
+        std::FILE* f;
+        bool u(unsigned bytes, unsigned long long* out) {
+            unsigned char b[8];
+            if (std::fread(b, 1, bytes, f) != bytes) {
+                return false;
+            }
+            unsigned long long v = 0;
+            for (unsigned i = 0; i < bytes; ++i) {
+                v |= static_cast<unsigned long long>(b[i]) << (8 * i);
+            }
+            *out = v;
+            return true;
+        }
+        bool skip(unsigned long long n) {
+            // KV sections are megabytes at most, well inside a long.
+            return std::fseek(f, static_cast<long>(n), SEEK_CUR) == 0;
+        }
+    } in = {f};
+
+    // The byte width of each scalar type, by GGUF type id; 0 for string (8)
+    // and array (9), which are sized by what follows them.
+    static const unsigned kWidth[13] = {1, 1, 2, 2, 4, 4, 4, 1, 0, 0, 8, 8, 8};
+    const unsigned kString = 8, kArray = 9;
+
+    char magic[4];
+    unsigned long long version = 0, n_tensors = 0, n_kv = 0;
+    if (std::fread(magic, 1, 4, f) != 4 || std::memcmp(magic, "GGUF", 4) != 0 ||
+        !in.u(4, &version) || version < 2 || !in.u(8, &n_tensors) || !in.u(8, &n_kv)) {
+        return 0;
+    }
+
+    const size_t key_len = std::strlen(key);
+    std::string name;
+    for (unsigned long long k = 0; k < n_kv; ++k) {
+        unsigned long long len = 0, type = 0;
+        if (!in.u(8, &len) || len > 4096) {
+            return 0;
+        }
+        name.resize(static_cast<size_t>(len));
+        if (len && std::fread(&name[0], 1, static_cast<size_t>(len), f) != len) {
+            return 0;
+        }
+        if (!in.u(4, &type) || type > 12) {
+            return 0;
+        }
+
+        if (len == key_len && name.compare(0, key_len, key) == 0) {
+            unsigned long long v = 0;
+            const bool integer = type <= 5 || type == 10 || type == 11;
+            return integer && in.u(kWidth[type], &v) ? v : 0;
+        }
+
+        if (type == kString) {
+            unsigned long long n = 0;
+            if (!in.u(8, &n) || !in.skip(n)) {
+                return 0;
+            }
+        } else if (type == kArray) {
+            unsigned long long elem = 0, count = 0;
+            if (!in.u(4, &elem) || elem > 12 || elem == kArray || !in.u(8, &count)) {
+                return 0;
+            }
+            if (elem == kString) {
+                for (unsigned long long i = 0; i < count; ++i) {
+                    unsigned long long n = 0;
+                    if (!in.u(8, &n) || !in.skip(n)) {
+                        return 0;
+                    }
+                }
+            } else if (!in.skip(count * kWidth[elem])) {
+                return 0;
+            }
+        } else if (!in.skip(kWidth[type])) {
+            return 0;
+        }
+    }
+    return 0;
+}
+
 #ifdef YOAI_QTTS_VULKAN
 #ifdef YOAI_QTTS_VULKAN_PROBE
 // What kind of memory does this machine's GPU have?
@@ -507,6 +608,9 @@ struct Qtts::Impl {
     // which parameters are legal, and asking the engine per call would mean a
     // string compare against a pointer that only changes when the model does.
     std::string model_type;
+    // The talker's hidden size, read from its GGUF at load; 0 when unknown.
+    // A mode A embedding must be exactly this long.
+    int         hidden;
     std::string error;
     long long    seed;
     int          top_k;      // 0 leaves qwentts.cpp's own default alone
@@ -527,7 +631,7 @@ struct Qtts::Impl {
     bool            aborted;
 
     Impl()
-        : ctx(0), seed(-1), top_k(0), threads(0), streaming(true),
+        : ctx(0), hidden(0), seed(-1), top_k(0), threads(0), streaming(true),
           sink(0), sink_user(0),
           first_audio(0.0), chunks(0), produced(0), aborted(false) {}
 
@@ -619,9 +723,10 @@ bool Qtts::load(const std::string& talker_path, const std::string& codec_path) {
     }
     const char* kind = qt_model_type(m->ctx);
     m->model_type = kind ? kind : "";
-    utils::log_info("qtts: loaded in %.2f s, model type '%s', %d codebooks",
+    m->hidden = static_cast<int>(read_gguf_uint(talker_path, "qwen3-tts.talker.embedding_length"));
+    utils::log_info("qtts: loaded in %.2f s, model type '%s', %d codebooks, hidden %d",
                        seconds_since(started), m->model_type.c_str(),
-                       qt_num_codebooks(m->ctx));
+                       qt_num_codebooks(m->ctx), m->hidden);
 
     // The speaker table, logged once. "Nine named speakers" is something this
     // repo took from a model card and never checked; this is the file's answer.
@@ -639,11 +744,16 @@ void Qtts::unload() {
         qt_free(m->ctx);
         m->ctx = 0;
         m->model_type.clear();
+        m->hidden = 0;
     }
 }
 
 std::string Qtts::model_type() const {
     return impl_ ? impl_->model_type : std::string();
+}
+
+int Qtts::talker_hidden_size() const {
+    return impl_ ? impl_->hidden : 0;
 }
 
 std::vector<std::string> Qtts::speakers() const {
@@ -759,6 +869,117 @@ bool Qtts::set_reference_voice(const std::string& wav_path) {
                        "no context cost",
                        static_cast<double>(pcm.size()) / sample_rate(), wav_path.c_str(),
                        static_cast<int>(m->ref_spk_emb.size()));
+    return true;
+}
+
+bool Qtts::set_reference_embedding(const std::vector<float>& embedding) {
+    Impl* m = impl_;
+    m->error.clear();
+    if (embedding.empty()) {
+        m->error = "a reference embedding needs at least one value";
+        return false;
+    }
+    for (std::size_t k = 0; k < embedding.size(); ++k) {
+        if (!std::isfinite(embedding[k])) {
+            char why[96];
+            std::snprintf(why, sizeof(why), "reference embedding value %d is not finite",
+                          static_cast<int>(k));
+            m->error = why;
+            utils::log_error("qtts: %s", m->error.c_str());
+            return false;
+        }
+    }
+    // Checked here when the width is known, so a .spk for the other model size
+    // fails at the call that set it rather than at the next say().
+    if (m->hidden > 0 && static_cast<int>(embedding.size()) != m->hidden) {
+        char why[128];
+        std::snprintf(why, sizeof(why),
+                      "reference embedding has %d values; this talker takes %d",
+                      static_cast<int>(embedding.size()), m->hidden);
+        m->error = why;
+        utils::log_error("qtts: %s", m->error.c_str());
+        return false;
+    }
+
+    m->ref_spk_emb = embedding;
+    m->reference.clear();   // mutually exclusive; see qwen.h
+    m->reference_text.clear();
+    utils::log_info("qtts: reference voice from a %d-dimension embedding, no context cost",
+                       static_cast<int>(m->ref_spk_emb.size()));
+    return true;
+}
+
+bool Qtts::load_reference_embedding(const std::string& spk_path) {
+    Impl* m = impl_;
+    m->error.clear();
+    if (spk_path.empty()) {
+        m->error = "a reference embedding needs a .spk file";
+        return false;
+    }
+    std::FILE* f = std::fopen(spk_path.c_str(), "rb");
+    if (!f) {
+        m->error = "cannot open " + spk_path;
+        utils::log_error("qtts: %s", m->error.c_str());
+        return false;
+    }
+    std::vector<float> emb;
+    float buf[256];
+    for (;;) {
+        const size_t got = std::fread(buf, 1, sizeof(buf), f);
+        // A size that is not a whole number of floats is not a .spk, and
+        // dropping the remainder would load a vector one value short.
+        if (got % sizeof(float) != 0) {
+            std::fclose(f);
+            m->error = spk_path + " is not a whole number of f32 values";
+            utils::log_error("qtts: %s", m->error.c_str());
+            return false;
+        }
+        emb.insert(emb.end(), buf, buf + got / sizeof(float));
+        if (got < sizeof(buf)) {
+            break;
+        }
+    }
+    const bool read_error = std::ferror(f) != 0;
+    std::fclose(f);
+    if (read_error) {
+        m->error = "cannot read " + spk_path;
+        utils::log_error("qtts: %s", m->error.c_str());
+        return false;
+    }
+    if (!set_reference_embedding(emb)) {
+        m->error = spk_path + ": " + m->error;
+        return false;
+    }
+    utils::log_info("qtts: reference embedding from %s", spk_path.c_str());
+    return true;
+}
+
+const std::vector<float>& Qtts::reference_embedding() const {
+    return impl_->ref_spk_emb;
+}
+
+bool Qtts::save_reference_embedding(const std::string& spk_path) {
+    Impl* m = impl_;
+    m->error.clear();
+    if (m->ref_spk_emb.empty()) {
+        m->error = "no reference embedding to save";
+        return false;
+    }
+    std::FILE* f = std::fopen(spk_path.c_str(), "wb");
+    if (!f) {
+        m->error = "cannot create " + spk_path;
+        utils::log_error("qtts: %s", m->error.c_str());
+        return false;
+    }
+    const size_t n = m->ref_spk_emb.size();
+    const bool ok = std::fwrite(&m->ref_spk_emb[0], sizeof(float), n, f) == n;
+    if (std::fclose(f) != 0 || !ok) {
+        m->error = "cannot write " + spk_path;
+        utils::log_error("qtts: %s", m->error.c_str());
+        return false;
+    }
+    utils::log_info("qtts: wrote a %d-dimension embedding to %s", static_cast<int>(n),
+                       spk_path.c_str());
     return true;
 }
 
@@ -1011,6 +1232,8 @@ void Qtts::unload() {}
 
 std::string Qtts::model_type() const { return std::string(); }
 
+int Qtts::talker_hidden_size() const { return 0; }
+
 std::vector<std::string> Qtts::speakers() const { return std::vector<std::string>(); }
 
 void Qtts::set_voice(const std::string& instruct) { impl_->instruct = instruct; }
@@ -1027,6 +1250,26 @@ bool Qtts::set_reference(const std::string&, const std::string&) {
 }
 
 bool Qtts::set_reference_voice(const std::string&) {
+    impl_->error = "this build has no qwentts.cpp (YOAI_QTTS off)";
+    return false;
+}
+
+bool Qtts::set_reference_embedding(const std::vector<float>&) {
+    impl_->error = "this build has no qwentts.cpp (YOAI_QTTS off)";
+    return false;
+}
+
+bool Qtts::load_reference_embedding(const std::string&) {
+    impl_->error = "this build has no qwentts.cpp (YOAI_QTTS off)";
+    return false;
+}
+
+const std::vector<float>& Qtts::reference_embedding() const {
+    static const std::vector<float> kNone;
+    return kNone;
+}
+
+bool Qtts::save_reference_embedding(const std::string&) {
     impl_->error = "this build has no qwentts.cpp (YOAI_QTTS off)";
     return false;
 }

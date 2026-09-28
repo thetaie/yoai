@@ -91,11 +91,22 @@ export interface YoaiNative {
   nativeReaderModelType(): string
   nativeReaderSetVoice(instruct: string): void
   nativeReaderSetSpeaker(name: string): void
-  /** '' on success, else the reason. Base checkpoints only; runs the speaker encoder. */
-  nativeReaderSetReferenceVoice(wavPath: string): string
+  /**
+   * Base checkpoints only. Runs the speaker encoder over the recording, on a
+   * worker, seconds; onDone gets 'end' or 'error' with the reason.
+   */
+  nativeReaderSetReferenceVoice(wavPath: string, onDone: NativeHandler): void
+  /** '' on success, else the reason. A pre-extracted .spk; its length must match the talker. */
+  nativeReaderLoadReferenceEmbedding(spkPath: string): string
+  /** '' on success, else the reason. The embedding held now, as a .spk. */
+  nativeReaderSaveReferenceEmbedding(spkPath: string): string
+  /** 2048 for the 1.7B talker, 1024 for the 0.6B; 0 before a load. */
+  nativeReaderTalkerHiddenSize(): number
   nativeReaderSetSeed(seed: number): void
   /** A field <= 0 is left at the measured default. */
   nativeReaderSetSplit(minChars: number, maxChars: number, tailChars: number): void
+  /** The pieces after the first: their minimum and maximum. 0 and 0 turn it off. */
+  nativeReaderSetLaterSplit(minChars: number, maxChars: number): void
   /** A comma ends a piece once min_chars is reached. Off by default. */
   nativeReaderSetClauseCuts(on: boolean): void
   nativeReaderSetThreads(threads: number): void
@@ -104,6 +115,8 @@ export interface YoaiNative {
   nativeReaderFeed(delta: string): number
   /** Returns at once; onDone fires when the last sample has gone out. */
   nativeReaderFinish(onDone: NativeHandler): void
+  /** Abandon the open stream at its next block. It must still be finished. */
+  nativeReaderCancel(): void
   nativeReaderLastError(): string
 
   //--- Omni (MNN + Qwen2.5-Omni) -----------------------------------------------

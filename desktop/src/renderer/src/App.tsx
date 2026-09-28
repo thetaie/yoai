@@ -365,38 +365,15 @@ export function App(): JSX.Element {
           ])
         },
         onDone: (aborted) => {
-          // ONE utterance for the whole reply, once it is whole.
-          //
-          // Not sentence by sentence as it streamed: each say() is an independent
-          // generation with its own prosody arc, so consecutive ones are audibly
-          // stitched however they are cut. Waiting costs almost nothing here --
-          // measured RTF 0.56 with first audio 0.13 s -- so the speech starts
-          // immediately after the reply does, and never breaks.
-          //
-          // Asked NOW rather than remembered from startup. The models load in the
-          // background, so at the moment the window opened `loaded` was still
-          // false; a flag captured then said "do not speak" for the rest of the
-          // session, and only opening the settings screen refreshed it -- which
-          // is why the first reply was silent until the test button had been
-          // pressed.
-          //
-          // Skipped when the user stopped the turn: they asked for silence.
-          const reply = textRef.current
           if (reading) {
             // The stream has to be closed either way -- there are engines and
-            // threads behind it -- but on an abort the audio is dropped rather
-            // than played, which the player's stop() below does.
-            void reader.finish().catch(() => undefined)
+            // threads behind it. When the user stopped the turn they asked for
+            // silence, so it is cancelled rather than read to the end.
             if (aborted) {
-              void tts.stop()
+              void reader.cancel()
+            } else {
+              void reader.finish().catch(() => undefined)
             }
-          } else if (!aborted && reply.length > 0) {
-            void (async () => {
-              const st = await window.yoai.tts.status()
-              if (st.available && st.loaded && st.autoSpeak) {
-                void tts.speak(turnSession, reply)
-              }
-            })()
           }
           finishTurn(label, aborted, turnSession)
         }

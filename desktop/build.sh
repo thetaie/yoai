@@ -9,14 +9,16 @@
 # agreement -- and nothing here may assume bash 4, because macOS still ships 3.2
 # as /bin/bash.
 #
-# Usage: ./build.sh [clean] [addon] [llama] [qtts] [app]
+# Usage: ./build.sh [clean] [native] [llama] [qtts] [app]
 #
-#   (no args)  addon + app
-#   addon      just the Node-API addon (build/Release/yoai.node)
+#   (no args)  native + app
+#   native     just the C++ side: the Node-API addon built from native/
+#              (build/yoai.node). Rebuild it after any change under src/ or
+#              native/.
 #   llama      assemble a desktop llama.cpp SDK and build the addon WITH the
-#              on-device lane. Implies addon.
+#              on-device lane. Implies native.
 #   qtts       assemble a desktop qwentts.cpp SDK with the platform's GPU
-#              backend and build the addon with speech output. Implies addon.
+#              backend and build the addon with speech output. Implies native.
 #              Needs a llama.cpp checkout too, whether or not `llama` is asked
 #              for: it compiles llama.cpp's ggml. See the lane below for why.
 #   app        just the Electron bundles (out/)
@@ -24,7 +26,7 @@
 #              addon is reconfigured every run, so `llama` on an existing tree
 #              takes effect by itself. DROPPING one does: a lane that is not
 #              asked for is not passed as OFF, it is not passed at all, and
-#              CMake keeps the cached value. So `./build.sh addon` on a tree
+#              CMake keeps the cached value. So `./build.sh native` on a tree
 #              built with `llama qtts` rebuilds it with both still on. The SDKs
 #              under sdk/ are NOT discarded either way.
 #
@@ -74,18 +76,20 @@ BUILD_DIR="$DESKTOP_DIR/build"
 SDK_DIR="$DESKTOP_DIR/sdk"
 
 DO_CLEAN=""
-DO_ADDON=""
+DO_NATIVE=""
 DO_LLAMA=""
 DO_QTTS=""
 DO_APP=""
 for arg in "$@"; do
   case "$arg" in
-    clean) DO_CLEAN=1 ;;
-    addon) DO_ADDON=1 ;;
-    llama) DO_LLAMA=1; DO_ADDON=1 ;;
-    qtts)  DO_QTTS=1;  DO_ADDON=1 ;;
-    app)   DO_APP=1 ;;
-    *) echo "Unknown argument \"$arg\". Usage: ./build.sh [clean] [addon] [llama] [qtts] [app]" >&2; exit 1 ;;
+    clean)  DO_CLEAN=1 ;;
+    native) DO_NATIVE=1 ;;
+    llama)  DO_LLAMA=1; DO_NATIVE=1 ;;
+    qtts)   DO_QTTS=1;  DO_NATIVE=1 ;;
+    app)    DO_APP=1 ;;
+    # The old name for native, named here so it is not mistaken for a typo.
+    addon)  echo "\`addon\` is now \`native\`: ./build.sh native" >&2; exit 1 ;;
+    *) echo "Unknown argument \"$arg\". Usage: ./build.sh [clean] [native] [llama] [qtts] [app]" >&2; exit 1 ;;
   esac
 done
 
@@ -96,8 +100,8 @@ done
 yoai_load_env VCPKG_ROOT OPENSSL_ROOT_DIR LLAMA_SRC QTTS_SRC VULKAN_SDK || exit 1
 
 # No target named means both, which is what a first run wants.
-if [ -z "$DO_ADDON" ] && [ -z "$DO_APP" ]; then
-  DO_ADDON=1
+if [ -z "$DO_NATIVE" ] && [ -z "$DO_APP" ]; then
+  DO_NATIVE=1
   DO_APP=1
 fi
 
@@ -113,7 +117,7 @@ fi
 #------------------------------------------------------------------------------
 # The Node-API addon
 #------------------------------------------------------------------------------
-if [ -n "$DO_ADDON" ]; then
+if [ -n "$DO_NATIVE" ]; then
   CMAKE_JS_ARGS=()
 
   # Same policy as the root build: vcpkg is one way to get curl and openssl,
@@ -139,7 +143,7 @@ if [ -n "$DO_ADDON" ]; then
       echo "[build] build/ was configured before the addon used the root vcpkg.json," >&2
       echo "[build] and vcpkg cannot switch an existing tree to manifest mode. Start it" >&2
       echo "[build] over, naming the lanes it had -- clean does not keep them:" >&2
-      echo "[build]   ./build.sh clean addon [llama] [qtts]" >&2
+      echo "[build]   ./build.sh clean native [llama] [qtts]" >&2
       exit 1
     fi
   elif [ -n "$VCPKG_EXPLICIT" ]; then

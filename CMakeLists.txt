@@ -282,6 +282,9 @@ add_library(yoai_core STATIC
     # Streamed text cut into pieces that can each be spoken on their own. Plain
     # text processing, no engine; the reader is its first user.
     src/voice/text/sentence_stream.cpp
+    # A reply as written -- markdown, emoji -- turned into what is spoken, ahead
+    # of the cutter. In the core so no host has to write it again.
+    src/voice/text/speakable.cpp
 )
 
 target_include_directories(yoai_core PUBLIC src)

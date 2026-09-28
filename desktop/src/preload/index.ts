@@ -17,6 +17,7 @@ import {
   YoaiApi,
   CHANNELS,
   ChatSettings,
+  ModelLoadState,
   OmniEvent,
   OmniStatus,
   PickedModel,
@@ -43,7 +44,8 @@ const api: YoaiApi = {
     vendorsWithKeys: (ids) =>
       ipcRenderer.invoke(CHANNELS.modelsVendorsWithKeys, ids) as Promise<string[]>,
     pickLocal: () => ipcRenderer.invoke(CHANNELS.modelsPickLocal) as Promise<PickedModel | null>,
-    preload: (id) => ipcRenderer.invoke(CHANNELS.modelsPreload, id) as Promise<string>
+    loadStates: () =>
+      ipcRenderer.invoke(CHANNELS.modelsLoadStates) as Promise<Record<string, ModelLoadState>>
   },
 
   keys: {
@@ -135,10 +137,13 @@ const api: YoaiApi = {
     load: () => ipcRenderer.invoke(CHANNELS.readerLoad) as Promise<string>,
     unload: () => ipcRenderer.invoke(CHANNELS.readerUnload) as Promise<void>,
     set: (patch) => ipcRenderer.invoke(CHANNELS.readerSet, patch) as Promise<ReaderStatus>,
-    pickReference: () => ipcRenderer.invoke(CHANNELS.readerPickReference) as Promise<string | null>,
+    pickReference: () =>
+      ipcRenderer.invoke(CHANNELS.readerPickReference) as Promise<string | null>,
+    resetReference: () => ipcRenderer.invoke(CHANNELS.readerResetReference) as Promise<string>,
     begin: () => ipcRenderer.invoke(CHANNELS.readerBegin) as Promise<boolean>,
     feed: (delta: string) => ipcRenderer.invoke(CHANNELS.readerFeed, delta) as Promise<boolean>,
     finish: () => ipcRenderer.invoke(CHANNELS.readerFinish) as Promise<void>,
+    cancel: () => ipcRenderer.invoke(CHANNELS.readerCancel) as Promise<void>,
 
     onEvent: (listener: (ev: ReaderEvent) => void) => {
       const wrapped = (_event: unknown, ev: ReaderEvent): void => listener(ev)

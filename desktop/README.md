@@ -56,8 +56,10 @@ build.cmd            # Windows
 ```
 
 That builds the addon into `build/Release/yoai.node` and the Electron
-bundles into `out/`. The two are separate arguments (`addon`, `app`) because the
-C++ half is minutes and rarely changes while the UI half is seconds.
+bundles into `out/`. The two are separate arguments (`native`, `app`) because the
+C++ half is minutes and rarely changes while the UI half is seconds. After a
+change under `src/` or `native/`, `build.cmd native` rebuilds the addon alone;
+close the app first, since a running one holds `yoai.node` open.
 
 While writing UI, the loop is:
 

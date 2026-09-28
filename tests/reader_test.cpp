@@ -2,7 +2,7 @@
 //
 //     build/yoai-reader-test
 //     build/yoai-reader-test <talker.gguf> <tokenizer.gguf> [voices] [instruct] [seed]
-//                            [subtalker_temperature] [reference.wav] [min_chars]
+//                            [subtalker_temperature] [reference.wav|.spk] [min_chars]
 //
 // With no arguments this is split_sentences() and SentenceStream alone --
 // plain text processing, so it runs anywhere the core builds and says yes or no
@@ -25,6 +25,7 @@
 
 #include "voice/prosody/prosody.hpp"
 #include "voice/text/sentence_stream.hpp"
+#include "voice/text/speakable.hpp"
 #include "voice/tts/reader.hpp"
 
 #include <chrono>
@@ -34,6 +35,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -114,6 +116,89 @@ void show(const char* label, const std::vector<Sentence>& out) {
         std::printf("    [%d] %2d chars  %s\n", static_cast<int>(k),
                     static_cast<int>(chars_of(out[k].text)), out[k].text.c_str());
     }
+}
+
+//------------------------------------------------------------------------------
+// Markdown to speech
+//------------------------------------------------------------------------------
+
+// `markdown` must come out as `spoken`, whole AND fed in pieces of every size
+// from one byte up -- the pieces cut through UTF-8 sequences, bullets and line
+// breaks, which is exactly what the desktop version got wrong.
+void speakable_case(const char* label, const std::string& markdown, const std::string& spoken) {
+    const std::string whole = yoai::voice::speakable(markdown);
+    std::printf("speakable %-10s -> %s\n", label, whole.c_str());
+    expect(whole == spoken, label, "expected: " + spoken);
+
+    const std::size_t steps[] = {1, 2, 3, 5, 7, 13};
+    for (std::size_t s = 0; s < sizeof(steps) / sizeof(steps[0]); ++s) {
+        yoai::voice::SpeakableStream stream;
+        std::string got;
+        for (std::size_t i = 0; i < markdown.size(); i += steps[s]) {
+            got += stream.feed(markdown.substr(i, steps[s]));
+        }
+        got += stream.finish();
+        if (got != whole) {
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "fed %d byte(s) at a time: ",
+                          static_cast<int>(steps[s]));
+            fail(label, buf + got);
+        }
+    }
+}
+
+void check_speakable() {
+    // The reply that found it: a list whose items carry no punctuation, where
+    // the line breaks were the only thing between "上海" and "南接".
+    speakable_case("list",
+        "太湖位于中国江苏省南部和浙江省北部。具体地理范围包括：\n"
+        "- 东邻：上海\n- 南接：浙江湖州、嘉兴等地\n- 西连：安徽芜湖\n"
+        "- 北靠：江苏南京、镇江及苏州、无锡、常州等市\n\n"
+        "它是我国第三大淡水湖，也是长江下游南岸最大的湖泊。",
+        "太湖位于中国江苏省南部和浙江省北部。具体地理范围包括。东邻：上海。"
+        "南接：浙江湖州、嘉兴等地。西连：安徽芜湖。"
+        "北靠：江苏南京、镇江及苏州、无锡、常州等市。"
+        "它是我国第三大淡水湖，也是长江下游南岸最大的湖泊。");
+    speakable_case("english",
+        "Two points:\n- first line\n- second line\n\nDone.",
+        "Two points. first line. second line. Done.");
+    // Single "_" and "~" are words; doubled ones are markup.
+    speakable_case("inline",
+        "**榨菜**是一种`下饭菜`，Q4_K_M 很小，3~5 度，~~删掉~~保留，__粗__体。",
+        "榨菜是一种下饭菜，Q4_K_M 很小，3~5 度，删掉保留，粗体。");
+    speakable_case("links",
+        "看[文档](docs/a_b.md)和![图](x.png)，[没有链接]就算了。",
+        "看文档和图，[没有链接]就算了。");
+    speakable_case("table",
+        "| 城市 | 人口 |\n|---|---|\n| 上海 | 2400万 |\n",
+        "城市，人口。上海，2400万。");
+    speakable_case("fence",
+        "看这段：\n```python\nx = 1\n```\n就这样",
+        "看这段。x = 1. 就这样");
+    speakable_case("blocks",
+        "# 标题\n> 引用一句\n---\n正文",
+        "标题。引用一句。正文");
+    // A bullet needs a space after it; these are words that start with a mark.
+    speakable_case("not marks",
+        "温度：\n-5 度\n#话题 也算\n*斜体*开头",
+        "温度。-5 度。#话题 也算。斜体开头");
+    speakable_case("emoji",
+        "好的\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBB，我们走吧\xF0\x9F\x9A\x80！"
+        "1\xEF\xB8\x8F\xE2\x83\xA3 第一",
+        "好的，我们走吧！1 第一");
+    speakable_case("closers",
+        "他说：“好。”\n（上海）\n下一行",
+        "他说：“好。”（上海）。下一行");
+    // A line already ending in a full stop gets no second one: two in a row
+    // are read as a hesitation, an audible "呃". A comma before the break is
+    // replaced; one inside the line stays.
+    speakable_case("stops",
+        "第一句说完了。\n第二句，还没完，\n第三句！\nLast one.\nand, then\n结束",
+        "第一句说完了。第二句，还没完。第三句！Last one. and, then. 结束");
+    speakable_case("prose",
+        "你好！有什么我可以帮你的吗？",
+        "你好！有什么我可以帮你的吗？");
+    speakable_case("only marks", "---\n```\n\n", "");
 }
 
 //------------------------------------------------------------------------------
@@ -276,6 +361,40 @@ bool streamed_pass(Reader& reader, const std::string& passage, const SplitOption
         ++*failures;
     }
     pcm->swap(heard.pcm);
+    return true;
+}
+
+// The passage written at a steady pace, one character every `ms_per_char`,
+// the way a language model writes it -- for the pacing, which only exists
+// against a clock. Prints what was cut; the reader logs each piece as well.
+bool paced_pass(Reader& reader, const std::string& passage, const SplitOptions& opt,
+                int ms_per_char, ReaderResult* out, int* failures) {
+    reader.set_split(opt);
+    Heard heard;
+    if (!reader.begin(&on_audio, &heard)) {
+        std::printf("  FAIL paced: %s\n", reader.last_error().c_str());
+        ++*failures;
+        return false;
+    }
+    for (std::size_t i = 0; i < passage.size(); ) {
+        const unsigned char c = static_cast<unsigned char>(passage[i]);
+        std::size_t len = 1;
+        if ((c & 0xE0) == 0xC0)      len = 2;
+        else if ((c & 0xF0) == 0xE0) len = 3;
+        else if ((c & 0xF8) == 0xF0) len = 4;
+        reader.feed(passage.substr(i, len));
+        i += len;
+        std::this_thread::sleep_for(std::chrono::milliseconds(ms_per_char));
+    }
+    if (!reader.finish(out)) {
+        std::printf("  FAIL paced: %s\n", reader.last_error().c_str());
+        ++*failures;
+        return false;
+    }
+    if (heard.out_of_order || heard.last_markers != 1 || heard.after_last) {
+        std::printf("  FAIL paced: order or end marker wrong\n");
+        ++*failures;
+    }
     return true;
 }
 
@@ -493,14 +612,45 @@ int compare(const char* talker, const char* tokenizer, int voices, const char* i
         reader.set_speaker(named[0]);
     }
     // Clone mode A, for the Base checkpoint: one voice for every piece, from a
-    // recording reduced to an embedding. After load(), which is what the
-    // extraction needs.
-    if (ref_wav && *ref_wav) {
-        if (!reader.set_reference_voice(ref_wav)) {
+    // recording reduced to an embedding, or from that embedding saved as a
+    // .spk. After load(), which is what the extraction needs.
+    //
+    // A recording is also written back out as a .spk and read in again, so
+    // the file path is checked against the vector it came from: it must load
+    // the same values, bit for bit, or the voice it anchors is not the same.
+    const std::string ref = ref_wav ? ref_wav : "";
+    const bool ref_is_spk = ref.size() > 4 && ref.compare(ref.size() - 4, 4, ".spk") == 0;
+    if (ref_is_spk) {
+        if (!reader.load_reference_embedding(ref)) {
             std::printf("  FAIL reference: %s\n", reader.last_error().c_str());
             return 1;
         }
-        std::printf("  reference voice from %s\n", ref_wav);
+        std::printf("  reference embedding from %s, %d values\n", ref.c_str(),
+                    static_cast<int>(reader.reference_embedding().size()));
+    } else if (!ref.empty()) {
+        if (!reader.set_reference_voice(ref)) {
+            std::printf("  FAIL reference: %s\n", reader.last_error().c_str());
+            return 1;
+        }
+        const std::vector<float> extracted = reader.reference_embedding();
+        std::printf("  reference voice from %s, %d values\n", ref.c_str(),
+                    static_cast<int>(extracted.size()));
+
+        const std::string spk = "reference-" + reader.model_type() + ".spk";
+        if (!reader.save_reference_embedding(spk) || !reader.load_reference_embedding(spk)) {
+            std::printf("  FAIL reference: %s\n", reader.last_error().c_str());
+            return 1;
+        }
+        const std::vector<float>& loaded = reader.reference_embedding();
+        const bool same = loaded.size() == extracted.size() &&
+                          (extracted.empty() ||
+                           std::memcmp(&loaded[0], &extracted[0],
+                                       extracted.size() * sizeof(float)) == 0);
+        if (!same) {
+            std::printf("  FAIL reference: %s does not load back what was saved\n", spk.c_str());
+            return 1;
+        }
+        std::printf("  wrote %s and read it back unchanged\n", spk.c_str());
     }
     reader.set_seed(seed);
     // The one field this sweep is about. Negative leaves the engine's 0.9.
@@ -582,6 +732,27 @@ int compare(const char* talker, const char* tokenizer, int voices, const char* i
                 stream_r.sentences, stream_r.speech_seconds, stream_r.elapsed,
                 stream_r.speech_seconds > 0.0f ? stream_r.elapsed / stream_r.speech_seconds : 0.0,
                 stream_r.first_audio_seconds);
+
+    // Later pieces allowed to wait, against a writer as fast as the speech and
+    // one far faster. The reader's own log lines show where each piece fell.
+    {
+        SplitOptions paced = split_opt;
+        paced.min_chars       = 12;
+        paced.clause_cuts     = true;
+        paced.later_min_chars = 30;
+        paced.later_max_chars = 80;
+        const int speeds[] = {200, 20};   // 5 and 50 characters a second
+        for (int s = 0; s < 2; ++s) {
+            std::printf("\n  -- paced, later pieces from 30, %d ms a character --\n", speeds[s]);
+            ReaderResult r;
+            if (paced_pass(reader, passage, paced, speeds[s], &r, &failures)) {
+                std::printf("    paced  %d piece(s)  %5.2f s of speech in %5.2f s  "
+                            "first audio %.2f s  starved %.2f s\n",
+                            r.sentences, r.speech_seconds, r.elapsed,
+                            r.first_audio_seconds, r.starved_seconds);
+            }
+        }
+    }
 
     std::printf("\n  voice\n");
     describe("whole", whole_pcm);
@@ -855,6 +1026,135 @@ int main(int argc, char** argv) {
         std::printf("stream whole -> %d piece(s), %s the splitter\n",
                     static_cast<int>(got.size()), same ? "same as" : "DIFFERENT from");
         expect(same, "stream whole", "fed in one go, the stream cut differently");
+    }
+
+    // 14. What reaches the cutter at all: markdown turned into speech.
+    check_speakable();
+
+    // 15. A closing quote ends a sentence only after a terminator. Mid-sentence
+    //     it closes a quotation, and the stream must not hand the piece over
+    //     there -- it did, and "的地方（断桥）。" was spoken as a piece alone.
+    {
+        SplitOptions opt;
+        opt.min_chars   = 12;
+        opt.max_chars   = 40;
+        opt.tail_chars  = 1;
+        opt.clause_cuts = true;
+
+        const std::string text = "也是《白蛇传》中“白娘子和许仙相遇”的地方（断桥）。";
+        SentenceStream stream(opt);
+        std::vector<std::string> got;
+        for (std::size_t i = 0; i < text.size(); ) {
+            const std::size_t len = (static_cast<unsigned char>(text[i]) & 0x80) ? 3 : 1;
+            const std::vector<std::string> ready = stream.feed(text.substr(i, len));
+            got.insert(got.end(), ready.begin(), ready.end());
+            i += len;
+        }
+        const std::vector<std::string> rest = stream.finish();
+        got.insert(got.end(), rest.begin(), rest.end());
+        std::printf("stream quote -> %d piece(s)\n", static_cast<int>(got.size()));
+        for (std::size_t k = 0; k < got.size(); ++k) {
+            std::printf("    [%d] %s\n", static_cast<int>(k), got[k].c_str());
+        }
+        expect(got.size() == 1, "stream quote", "cut at a closing quote mid-sentence");
+
+        // And after a terminator it still settles at once, without waiting for
+        // the next sentence to begin.
+        SentenceStream quoted(opt);
+        const std::vector<std::string> now = quoted.feed("他说：“我明天一早就去那里看看。”");
+        expect(now.size() == 1, "stream quote",
+               "a quotation ending in a full stop was not settled");
+    }
+
+    // 16. Later pieces wait for more text; an urgent one does not.
+    //
+    //     The first piece is cut short, because the listener is waiting for
+    //     it. The ones after it end only at a full stop from later_min_chars
+    //     on. And when the reader says the audio is about to run out, the next
+    //     piece is cut by the first piece's rules again -- once.
+    {
+        SplitOptions opt;
+        opt.min_chars       = 12;
+        opt.max_chars       = 40;
+        opt.tail_chars      = 1;
+        opt.clause_cuts     = true;
+        opt.later_min_chars = 30;
+        opt.later_max_chars = 80;
+
+        const std::string first  = "太湖位于中国江苏省南部和浙江省北部。";
+        const std::string second = "它是我国第三大淡水湖，也是长江下游南岸最大的湖泊。";
+        const std::string third  = "湖中有大小岛屿五十多个，其中西山岛最大。";
+        const std::string fourth = "沿岸有无锡、苏州、湖州等城市，风景秀丽，物产丰富。";
+        const std::string text = first + second + third + fourth;
+
+        // Fed one character at a time, as a writer would, and fed whole, as
+        // a fast one effectively does: the same cuts either way.
+        for (int whole = 0; whole < 2; ++whole) {
+            SentenceStream stream(opt);
+            std::vector<std::string> got;
+            if (whole) {
+                got = stream.feed(text);
+            } else {
+                for (std::size_t i = 0; i < text.size(); i += 3) {   // CJK only
+                    const std::vector<std::string> ready = stream.feed(text.substr(i, 3));
+                    got.insert(got.end(), ready.begin(), ready.end());
+                }
+            }
+            const std::vector<std::string> rest = stream.finish();
+            got.insert(got.end(), rest.begin(), rest.end());
+
+            std::printf("later pieces, %s -> %d piece(s)\n", whole ? "fed whole" : "streamed",
+                        static_cast<int>(got.size()));
+            for (std::size_t k = 0; k < got.size(); ++k) {
+                std::printf("    [%d] %2d chars  %s\n", static_cast<int>(k),
+                            static_cast<int>(chars_of(got[k])), got[k].c_str());
+            }
+            std::string joined;
+            for (std::size_t k = 0; k < got.size(); ++k) {
+                joined += got[k];
+            }
+            expect(joined == text, "later pieces", "the pieces do not reproduce the passage");
+            expect(!got.empty() && got[0] == first, "later pieces",
+                   "the first piece is not the first sentence");
+            // At least the second and third sentences: 24 characters is below
+            // later_min_chars, so the second piece runs on to the next full
+            // stop. Fed whole it takes the fourth as well, because a remainder
+            // shorter than the minimum joins the piece before it.
+            const std::string both = second + third;
+            expect(got.size() >= 2 && got[1].compare(0, both.size(), both) == 0,
+                   "later pieces",
+                   "the second piece did not wait for a full stop past later_min_chars");
+        }
+
+        // Urgent: the reader is running dry after the first piece, so the next
+        // is cut as soon as the first piece's rules allow, and only that one.
+        {
+            SentenceStream stream(opt);
+            std::vector<std::string> got = stream.feed(first);
+            stream.set_urgent(true);
+            for (std::size_t i = 0; i < second.size() + third.size(); i += 3) {
+                const std::vector<std::string> ready =
+                    stream.feed((second + third).substr(i, 3));
+                got.insert(got.end(), ready.begin(), ready.end());
+            }
+            expect(got.size() == 2 && got[1] == second, "urgent",
+                   "an urgent piece was not cut by the first piece's rules");
+            expect(!stream.urgent(), "urgent", "urgency outlived the piece it was for");
+        }
+
+        // And the case the pacer exists for: a finished sentence already in the
+        // stream, too short to go by the later rules, with no more text coming
+        // for now. poll() after set_urgent() hands it over.
+        {
+            SentenceStream stream(opt);
+            stream.feed(first);
+            expect(stream.feed(second).empty(), "poll",
+                   "a later piece below later_min_chars was handed over without waiting");
+            stream.set_urgent(true);
+            const std::vector<std::string> now = stream.poll();
+            expect(now.size() == 1 && now[0] == second, "poll",
+                   "an urgent poll did not hand over the finished sentence");
+        }
     }
 
     if (argc >= 3) {

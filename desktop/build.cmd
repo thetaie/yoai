@@ -5,15 +5,17 @@ rem The addon is the slow half and changes rarely; the bundles are seconds. They
 rem are separate arguments for that reason -- the loop while writing UI is
 rem `npm run dev`, and nothing here has to run again until the C++ changes.
 rem
-rem Usage: build.cmd [clean] [addon] [llama] [qtts] [mnn] [app]
+rem Usage: build.cmd [clean] [native] [llama] [qtts] [mnn] [app]
 rem
-rem   (no args)  addon + app
-rem   addon      just the Node-API addon (build\Release\yoai.node)
+rem   (no args)  native + app
+rem   native     just the C++ side: the Node-API addon built from native\
+rem              (build\yoai.node). Rebuild it after any change under src\ or
+rem              native\, with the app closed -- a running app holds the file.
 rem   llama      assemble a desktop llama.cpp SDK and build the addon WITH the
-rem              on-device lane. Implies addon. Recognition rides along: it
+rem              on-device lane. Implies native. Recognition rides along: it
 rem              links ggml and never libllama, so the same SDK turns it on.
 rem   qtts       assemble a desktop qwentts.cpp SDK WITH the Vulkan backend and
-rem              build the addon with speech output. Implies addon.
+rem              build the addon with speech output. Implies native.
 rem              Vulkan is not a nicety here: this lane measures RTF 1.13 on
 rem              this CPU and 0.63 on its integrated GPU, and only below 1 can
 rem              a stream start without pre-buffering the whole utterance.
@@ -21,14 +23,14 @@ rem              Needs a Vulkan SDK on PATH (VULKAN_SDK) for glslc and the C++
 rem              headers ggml-vulkan includes.
 rem   mnn        assemble a desktop MNN SDK and build the addon with the omni
 rem              lane: audio in, a spoken answer out, no text in between.
-rem              Implies addon. A second inference engine and 3.8 GB of
+rem              Implies native. A second inference engine and 3.8 GB of
 rem              weights -- see design/voice.md before turning it on.
 rem   app        just the Electron bundles (out\)
 rem   clean      discard build\ first. ADDING a lane no longer needs it -- the
 rem              addon is reconfigured every run, so `llama` on an existing tree
 rem              takes effect by itself. DROPPING one does: a lane that is not
 rem              asked for is not passed as OFF, it is not passed at all, and
-rem              CMake keeps the cached value. So `build.cmd addon` on a tree
+rem              CMake keeps the cached value. So `build.cmd native` on a tree
 rem              built with `llama qtts` rebuilds it with both still on.
 rem
 rem Env overrides:
@@ -57,20 +59,25 @@ rem rebuild them for nothing.
 set "SDK_DIR=%DESKTOP_DIR%\sdk"
 
 set "DO_CLEAN="
-set "DO_ADDON="
+set "DO_NATIVE="
 set "DO_LLAMA="
 set "DO_QTTS="
 set "DO_MNN="
 set "DO_APP="
 :args
 if "%~1"=="" goto args_done
-if /I "%~1"=="clean" ( set "DO_CLEAN=1" & shift & goto args )
-if /I "%~1"=="addon" ( set "DO_ADDON=1" & shift & goto args )
-if /I "%~1"=="llama" ( set "DO_LLAMA=1" & set "DO_ADDON=1" & shift & goto args )
-if /I "%~1"=="qtts"  ( set "DO_QTTS=1"  & set "DO_ADDON=1" & shift & goto args )
-if /I "%~1"=="mnn"   ( set "DO_MNN=1"   & set "DO_ADDON=1" & shift & goto args )
-if /I "%~1"=="app"   ( set "DO_APP=1"   & shift & goto args )
-echo Unknown argument "%~1". Usage: build.cmd [clean] [addon] [llama] [qtts] [mnn] [app]>&2
+if /I "%~1"=="clean"  ( set "DO_CLEAN=1"  & shift & goto args )
+if /I "%~1"=="native" ( set "DO_NATIVE=1" & shift & goto args )
+if /I "%~1"=="llama"  ( set "DO_LLAMA=1"  & set "DO_NATIVE=1" & shift & goto args )
+if /I "%~1"=="qtts"   ( set "DO_QTTS=1"   & set "DO_NATIVE=1" & shift & goto args )
+if /I "%~1"=="mnn"    ( set "DO_MNN=1"    & set "DO_NATIVE=1" & shift & goto args )
+if /I "%~1"=="app"    ( set "DO_APP=1"    & shift & goto args )
+rem The old name for native, named here so it is not mistaken for a typo.
+if /I "%~1"=="addon" (
+    echo `addon` is now `native`: build.cmd native>&2
+    exit /b 1
+)
+echo Unknown argument "%~1". Usage: build.cmd [clean] [native] [llama] [qtts] [mnn] [app]>&2
 exit /b 1
 :args_done
 
@@ -82,8 +89,8 @@ call "%PROJECT_DIR%\_load-env.cmd" VS_DIR NINJA VCPKG_ROOT LLAMA_SRC QTTS_SRC MN
 set "THIRD_SYNC=%PROJECT_DIR%\third\sync.cmd"
 
 rem No target named means both, which is what a first run wants.
-if not defined DO_ADDON if not defined DO_APP (
-    set "DO_ADDON=1"
+if not defined DO_NATIVE if not defined DO_APP (
+    set "DO_NATIVE=1"
     set "DO_APP=1"
 )
 
@@ -95,14 +102,14 @@ if not exist "%DESKTOP_DIR%\node_modules" (
     if errorlevel 1 exit /b 1
 )
 
-if defined DO_ADDON call :addon || exit /b 1
-if defined DO_APP   call :app   || exit /b 1
+if defined DO_NATIVE call :native || exit /b 1
+if defined DO_APP    call :app    || exit /b 1
 exit /b 0
 
 rem -----------------------------------------------------------------------------
 rem The Node-API addon
 rem -----------------------------------------------------------------------------
-:addon
+:native
 if not defined VS_DIR set "VS_DIR=%ProgramFiles%\Microsoft Visual Studio\18\Community"
 if not defined NINJA set "NINJA=%VS_DIR%\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe"
 
@@ -205,7 +212,7 @@ if not errorlevel 1 (
     echo [build] build\ was configured before the addon used the root vcpkg.json,>&2
     echo [build] and vcpkg cannot switch an existing tree to manifest mode. Start it>&2
     echo [build] over, naming the lanes it had -- `clean` does not keep them:>&2
-    echo [build]   build.cmd clean addon [llama] [qtts] [mnn]>&2
+    echo [build]   build.cmd clean native [llama] [qtts] [mnn]>&2
     exit /b 1
 )
 for %%C in (configure build) do (
