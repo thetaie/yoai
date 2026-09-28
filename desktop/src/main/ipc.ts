@@ -175,9 +175,11 @@ export function registerHandlers(): void {
   //----------------------------------------------------------------------------
 
   handle<[], ChatSettings>(CHANNELS.chatSettingsGet, () => chat.get())
-  handle<[Partial<ChatSettings>], ChatSettings>(CHANNELS.chatSettingsSet, (patch) =>
-    chat.set(patch ?? {})
-  )
+  handle<[Partial<ChatSettings>], ChatSettings>(CHANNELS.chatSettingsSet, (patch) => {
+    const next = chat.set(patch ?? {})
+    models.warmActive()   // the front the next turn shares has just changed
+    return next
+  })
 
   ipcMain.handle(
     CHANNELS.chatStart,
@@ -281,6 +283,7 @@ export function registerHandlers(): void {
       if (reason.length > 0) {
         console.error(`[yoai] the voice would not load: ${reason}`)
       }
+      models.warmActive()   // whether replies are read may have changed
     })
     return { path, name: basename(path) }
   })
@@ -404,7 +407,10 @@ export function registerHandlers(): void {
   handle<[], void>(CHANNELS.readerUnload, () => reader.unload())
 
   handle<[{ enabled?: boolean; minChars?: number }], ReaderStatus>(CHANNELS.readerSet, (patch) => {
-    if (typeof patch?.enabled === 'boolean') reader.setEnabled(patch.enabled)
+    if (typeof patch?.enabled === 'boolean') {
+      reader.setEnabled(patch.enabled)
+      models.warmActive()   // reading adds the spoken-style paragraph, or drops it
+    }
     if (typeof patch?.minChars === 'number') reader.setMinChars(patch.minChars)
     return reader.status()
   })

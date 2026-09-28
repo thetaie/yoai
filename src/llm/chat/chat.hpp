@@ -40,6 +40,16 @@ public:
     // LocalClient::forget for why sending a shorter transcript is not enough.
     virtual void forget() = 0;
 
+    // Compute now the part every prompt with this system prompt begins with, so
+    // the first turn does not wait for it. A model that keeps nothing between
+    // turns has nothing to compute, and this does nothing there. Returns false
+    // with `err` set when it could not; the next turn then simply pays as usual.
+    virtual bool warm(const std::string& system_prompt, std::string& err) {
+        (void)system_prompt;
+        (void)err;
+        return true;
+    }
+
 protected:
     explicit Chat(Engine engine) : Backend(engine) {}
 };

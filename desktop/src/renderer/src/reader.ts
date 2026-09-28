@@ -87,6 +87,15 @@ function ensureSubscribed(): void {
   }
 }
 
+// In development a module that is edited is run again, and the copy it replaces
+// keeps its subscription unless told to let go. Every edit then added a listener
+// pushing the same audio into the one player, and a reply was heard several
+// times over. Nothing in a built app runs this.
+import.meta.hot?.dispose(() => {
+  unsubscribe?.()
+  unsubscribe = null
+})
+
 /**
  * Whether this lane should take the reply, asked FRESH rather than remembered.
  *

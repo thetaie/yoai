@@ -162,6 +162,25 @@ struct SplitOptions {
     // piece is then cut by the first piece's rules instead -- see the reader.
     std::size_t later_min_chars = 0;
     std::size_t later_max_chars = 0;
+
+    // A full stop ends a piece from this many characters on, below min_chars.
+    // 0 leaves min_chars in charge. A comma still needs min_chars.
+    //
+    // **For the first piece, whose length is the listener's wait.** Measured on
+    // a reply opening "我知道苏州河。它是上海的一条重要河流，": at min_chars 12 the
+    // 7-character first sentence could not stand alone, so the voice waited for
+    // the next clause as well -- a second or two more of the model writing. A
+    // full stop is where a sentence can end without sounding cut, so it is the
+    // one mark allowed to cut early.
+    //
+    // Not below about six. min_chars exists because "你好。" and "你觉得呢？",
+    // three and five characters, came out clipped and oddly stressed alone;
+    // those still wait for the sentence after them.
+    //
+    // SentenceStream applies this to the first piece and to an urgent one, and
+    // not to the pieces between -- those wait for later_min_chars. Given to
+    // split_sentences() directly it applies to every piece.
+    std::size_t stop_chars = 0;
 };
 
 // Cut `text` into pieces that can each be synthesized on their own.
@@ -214,9 +233,10 @@ public:
     std::vector<std::string> finish();
 
     // The listener is about to run out of audio: cut the NEXT piece by the
-    // first piece's rules -- min_chars, clause_cuts -- rather than waiting for
-    // later_min_chars. It lasts for one piece; the caller sets it again if the
-    // listener is still short. Does nothing when later_min_chars is 0.
+    // first piece's rules -- min_chars, clause_cuts, stop_chars -- rather than
+    // waiting for later_min_chars. It lasts for one piece; the caller sets it
+    // again if the listener is still short. Does nothing when later_min_chars
+    // and stop_chars are both 0.
     void set_urgent(bool on) { urgent_ = on; }
     bool urgent() const { return urgent_; }
 

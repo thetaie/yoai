@@ -86,6 +86,8 @@ void usage() {
         "  --ctx N          context ceiling in tokens (default 32768)\n"
         "  --predict N      most tokens per reply (default 8192)\n"
         "  --stats          prefill and decode speed after each turn\n"
+        "  --warm           prefill the system prompt before the first turn and after\n"
+        "                   /new, as the desktop does; --stats then shows the reuse\n"
         "  Interactive: /new starts a new conversation; Ctrl-D (Ctrl-Z, Enter on\n"
         "  Windows) quits.\n"
         "\n"
@@ -116,7 +118,23 @@ struct ChatArgs {
     std::string     question;
     RequestOptions  req;
     bool            stats = false;
+    bool            warm  = false;
 };
+
+// Prefill the system prompt now, reporting how long that took -- the time a
+// first turn no longer spends before its reply.
+void warm_prompt(LocalClient& client, const ChatArgs& a) {
+    if (!a.warm) {
+        return;
+    }
+    std::string why;
+    const clk::time_point t0 = clk::now();
+    if (!client.warm(a.system, why)) {
+        err("yoai-llama: warm failed: " + why + "\n");
+        return;
+    }
+    err(format("warmed the system prompt in %.0f ms\n", ms_since(t0)));
+}
 
 // What one turn accumulates: the reply goes back into the transcript.
 struct Turn {
@@ -215,6 +233,8 @@ int chat_main(const std::vector<std::string>& args) {
             a.local.n_predict = std::atoi(v->c_str());
         } else if (s == "--stats") {
             a.stats = true;
+        } else if (s == "--warm") {
+            a.warm = true;
         } else if (s == "--debug") {
             yoai::utils::set_log_level("debug");
         } else if (!s.empty() && s[0] == '-') {
@@ -233,6 +253,7 @@ int chat_main(const std::vector<std::string>& args) {
         return 1;
     }
     err(format("loaded in %.0f ms\n", ms_since(t0)));
+    warm_prompt(client, a);
 
     std::vector<ChatMessage> history;
     if (!a.question.empty()) {
@@ -257,6 +278,7 @@ int chat_main(const std::vector<std::string>& args) {
             client.forget();
             history.clear();
             err("(new conversation)\n");
+            warm_prompt(client, a);
             continue;
         }
         ChatMessage m;

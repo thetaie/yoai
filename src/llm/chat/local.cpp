@@ -99,6 +99,19 @@ std::string build_prompt(llama_model*                    model,
     return out;
 }
 
+/** `text` as the model's tokens, special markers parsed. False on failure. */
+bool tokenize_prompt(const llama_vocab* vocab, const std::string& text,
+                     std::vector<llama_token>* out) {
+    const int n = -llama_tokenize(vocab, text.c_str(), static_cast<int>(text.size()),
+                                  nullptr, 0, /*add_special=*/true, /*parse_special=*/true);
+    if (n <= 0) {
+        return false;
+    }
+    out->resize(static_cast<std::size_t>(n));
+    return llama_tokenize(vocab, text.c_str(), static_cast<int>(text.size()),
+                          out->data(), n, true, true) >= 0;
+}
+
 #endif   // YOAI_ONDEVICE_LLM
 
 bool emit_event(const EventHandler& on_event, EventType type, const std::string& content) {
@@ -309,6 +322,71 @@ struct LocalClient::Impl {
         stats.load_ms = ms_since(t0);
         return true;
     }
+
+    // The context, built on first need and kept, with this turn's thread count
+    // applied. Needs the model. Fills stats.n_threads and stats.n_ctx.
+    bool ensure_context(std::string& err) {
+        int n_threads = opt.n_threads;
+        if (n_threads <= 0) {
+            const unsigned hw = std::thread::hardware_concurrency();
+            n_threads = hw > 0 ? static_cast<int>(hw) : 4;
+        }
+
+        /**
+         * Take the largest context that both the model supports and the device
+         * can actually give us, walking down from n_ctx_max.
+         *
+         * The rungs halve, so this costs at most a few failed allocations, and
+         * llama_init_from_model returning null is the only trustworthy signal that
+         * a size does not fit (see LocalOptions::n_ctx_max for why arithmetic is
+         * not an option).
+         */
+        llama_context_params cp = llama_context_default_params();
+        cp.n_ubatch        = 512;   // physical batch: what sizes the compute buffer
+        cp.n_threads       = n_threads;
+        cp.n_threads_batch = n_threads;
+        stats.n_threads    = n_threads;
+
+        const int trained = llama_model_n_ctx_train(model);
+        int want = opt.n_ctx_max;
+        if (trained > 0 && trained < want) {
+            want = trained;                  // never ask for more than it was trained on
+        }
+
+        // n_batch tracks n_ctx because a prefill hands the WHOLE prompt to one
+        // llama_decode, and the prompt is fitted to `n_ctx - n_reply_reserve`.
+        // n_batch is the logical batch -- the most tokens a single decode may take
+        // -- and llama.cpp enforces it with an assert that aborts the PROCESS
+        // rather than returning an error the caller could report. A fixed 512
+        // there means any conversation whose prompt passes 512 tokens takes the
+        // app down on a real device. The physical batch (n_ubatch, above) is what
+        // actually costs memory; llama.cpp splits the logical batch into n_ubatch
+        // chunks itself, so this stays free.
+        //
+        // Built once and kept. The ladder therefore runs once too, so its failed
+        // allocations are a startup cost rather than a per-turn one, and n_ctx
+        // stops varying between turns -- which it could before, if memory
+        // pressure changed, silently moving the point at which history gets shed.
+        if (ctx == nullptr) {
+            for (int c = want; c >= 1024; c /= 2) {
+                cp.n_ctx   = static_cast<uint32_t>(c);
+                cp.n_batch = static_cast<uint32_t>(c);
+                ctx = llama_init_from_model(model, cp);
+                if (ctx != nullptr) {
+                    break;
+                }
+            }
+            if (ctx == nullptr) {
+                err = "could not create a context for this model";
+                return false;
+            }
+        }
+        // Applied per call rather than at creation, because set_threads() may have
+        // changed the count since, and a kept context would otherwise ignore it.
+        llama_set_n_threads(ctx, n_threads, n_threads);
+        stats.n_ctx = static_cast<int>(llama_n_ctx(ctx));
+        return true;
+    }
 };
 
 bool LocalClient::available() { return true; }
@@ -325,6 +403,72 @@ void LocalClient::set_threads(int n) {
 void LocalClient::forget() {
     std::lock_guard<std::mutex> lock(impl_->turn);   // never mid-turn
     impl_->drop_cache();
+}
+
+bool LocalClient::warm(const std::string& system_prompt, std::string& err) {
+    // Under the turn lock, so a turn that arrives meanwhile waits for this and
+    // then reuses it, rather than racing it for the same KV.
+    std::lock_guard<std::mutex> lock(impl_->turn);
+    if (!impl_->ensure_model(err) || !impl_->ensure_context(err)) {
+        return false;
+    }
+    llama_model*       model = impl_->model;
+    const llama_vocab* vocab = llama_model_get_vocab(model);
+
+    // The system prompt rides in the first user message (see build_prompt), so
+    // what every turn shares is the rendering up to where that message's own
+    // text starts. Two different messages find exactly that point, in tokens --
+    // a boundary token that merged with the message would simply not be shared.
+    std::vector<ChatMessage> one(1), two(1);
+    one[0].role = "user";
+    one[0].content = "\xE7\x94\xB2";   // 甲
+    two[0].role = "user";
+    two[0].content = "\xE4\xB9\x99";   // 乙
+    std::vector<llama_token> a, b;
+    if (!tokenize_prompt(vocab, build_prompt(model, one, system_prompt, impl_->opt.thinking), &a) ||
+        !tokenize_prompt(vocab, build_prompt(model, two, system_prompt, impl_->opt.thinking), &b)) {
+        err = "could not tokenize the system prompt";
+        return false;
+    }
+    std::size_t n = 0;
+    while (n < a.size() && n < b.size() && a[n] == b[n]) {
+        ++n;
+    }
+    if (n == 0) {
+        return true;   // nothing in common to compute
+    }
+
+    // Whatever of it the cache already holds -- the last turn's prompt began the
+    // same way -- stays, and only the rest is computed. The same rewind as a
+    // turn's, with the same fallback when the memory refuses it.
+    std::size_t reuse = 0;
+    const std::size_t max_reuse = std::min(impl_->cached.size(), n);
+    while (reuse < max_reuse && impl_->cached[reuse] == a[reuse]) {
+        ++reuse;
+    }
+    if (reuse == n) {
+        return true;
+    }
+    llama_context* ctx = impl_->ctx;
+    if (reuse > 0 &&
+        !llama_memory_seq_rm(llama_get_memory(ctx), 0, static_cast<llama_pos>(reuse), -1)) {
+        reuse = 0;
+    }
+    if (reuse == 0) {
+        llama_memory_seq_rm(llama_get_memory(ctx), 0, -1, -1);
+    }
+
+    const clk::time_point t0 = clk::now();
+    llama_batch batch = llama_batch_get_one(a.data() + reuse, static_cast<int>(n - reuse));
+    if (llama_decode(ctx, batch) != 0) {
+        impl_->drop_cache();
+        err = "prefilling the system prompt failed";
+        return false;
+    }
+    impl_->cached.assign(a.begin(), a.begin() + static_cast<std::ptrdiff_t>(n));
+    utils::log_info("local: warmed %zu prompt token(s) (%zu already held) in %.0f ms",
+                    n, reuse, ms_since(t0));
+    return true;
 }
 
 bool LocalClient::loaded() const { return impl_->model != nullptr; }
@@ -359,68 +503,12 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
     llama_model* model = impl_->model;
     const llama_vocab* vocab = llama_model_get_vocab(model);
 
-    int n_threads = impl_->opt.n_threads;
-    if (n_threads <= 0) {
-        const unsigned hw = std::thread::hardware_concurrency();
-        n_threads = hw > 0 ? static_cast<int>(hw) : 4;
+    if (!impl_->ensure_context(err)) {
+        emit_event(on_event, EventType::Error, err);
+        return false;
     }
-
-    /**
-     * Take the largest context that both the model supports and the device can
-     * actually give us, walking down from n_ctx_max.
-     *
-     * The rungs halve, so this costs at most a few failed allocations once per turn,
-     * and llama_init_from_model returning null is the only trustworthy signal that a
-     * size does not fit (see LocalOptions::n_ctx_max for why arithmetic is not an
-     * option).
-     */
-    llama_context_params cp = llama_context_default_params();
-    cp.n_ubatch        = 512;   // physical batch: what sizes the compute buffer
-    cp.n_threads       = n_threads;
-    cp.n_threads_batch = n_threads;
-    impl_->stats.n_threads = n_threads;
-
-    const int trained = llama_model_n_ctx_train(model);
-    int want = impl_->opt.n_ctx_max;
-    if (trained > 0 && trained < want) {
-        want = trained;                  // never ask for more than it was trained on
-    }
-
-    // n_batch tracks n_ctx because the prefill below hands the WHOLE prompt to one
-    // llama_decode, and the prompt is fitted to `n_ctx - n_reply_reserve`. n_batch is
-    // the logical batch -- the most tokens a single decode may take -- and llama.cpp
-    // enforces it with an assert that aborts the PROCESS rather than returning an
-    // error the caller could report. A fixed 512 there means any conversation whose
-    // prompt passes 512 tokens takes the app down on a real device. The physical
-    // batch (n_ubatch, above) is what actually costs memory; llama.cpp splits the
-    // logical batch into n_ubatch chunks itself, so this stays free.
-    //
-    // Built once and kept. The ladder therefore runs once too, so its failed
-    // allocations are a startup cost rather than a per-turn one, and n_ctx stops
-    // varying between turns -- which it could before, if memory pressure changed,
-    // silently moving the point at which history gets shed.
     llama_context* ctx = impl_->ctx;
-    if (ctx == nullptr) {
-        for (int c = want; c >= 1024; c /= 2) {
-            cp.n_ctx   = static_cast<uint32_t>(c);
-            cp.n_batch = static_cast<uint32_t>(c);
-            ctx = llama_init_from_model(model, cp);
-            if (ctx != nullptr) {
-                break;
-            }
-        }
-        if (ctx == nullptr) {
-            emit_event(on_event, EventType::Error, "could not create a context for this model");
-            return false;
-        }
-        impl_->ctx = ctx;
-    }
-    // Applied per turn rather than at creation, because set_threads() may have
-    // changed the count since, and a kept context would otherwise ignore it.
-    llama_set_n_threads(ctx, n_threads, n_threads);
-
-    const int n_ctx = static_cast<int>(llama_n_ctx(ctx));
-    impl_->stats.n_ctx = n_ctx;
+    const int n_ctx = impl_->stats.n_ctx;
 
     /**
      * Fit the conversation into the window, shedding the OLDEST turns until the
@@ -748,6 +836,12 @@ LocalClient::~LocalClient() = default;
 
 void LocalClient::set_threads(int) {}
 void LocalClient::forget() {}
+
+bool LocalClient::warm(const std::string&, std::string& err) {
+    err = "this build has no on-device engine";
+    return false;
+}
+
 bool LocalClient::loaded() const { return false; }
 
 bool LocalClient::load(std::string& err) {

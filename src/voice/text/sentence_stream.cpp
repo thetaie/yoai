@@ -206,8 +206,12 @@ std::vector<Sentence> split_sentences(const std::string& text, const SplitOption
         // A comma is a pause, and once a piece is long enough to stand alone
         // there is nothing to gain by running past one. See clause_cuts.
         const bool clause = opt.clause_cuts && is_secondary(cp) && chars >= min_chars;
-        if (terminates_here(text, cur, cp, len, prev_cp) || clause ||
-            (newline && chars >= min_chars)) {
+        const bool stop = terminates_here(text, cur, cp, len, prev_cp);
+        // How long a piece must be to end here: shorter at a full stop when
+        // SplitOptions::stop_chars says so.
+        const std::size_t need =
+            (stop && opt.stop_chars > 0 && opt.stop_chars < min_chars) ? opt.stop_chars : min_chars;
+        if (stop || clause || (newline && chars >= min_chars)) {
             // Take the closers and any further terminators with it: "好了！」"
             // and "什么？！" are one ending each.
             while (i < text.size()) {
@@ -230,7 +234,7 @@ std::vector<Sentence> split_sentences(const std::string& text, const SplitOption
                 }
                 i += n2;
             }
-            if (chars >= min_chars) {
+            if (chars >= need) {
                 Sentence s;
                 s.begin = begin;
                 s.end   = i;
@@ -325,7 +329,13 @@ void SentenceStream::reset(const SplitOptions& opt) {
 // and for an urgent one, the later pieces' otherwise.
 SplitOptions SentenceStream::current() const {
     SplitOptions o = opt_;
-    if (opt_.later_min_chars == 0 || pieces_out_ == 0 || urgent_) {
+    if (pieces_out_ == 0 || urgent_) {
+        return o;   // the first piece's rules, stop_chars included
+    }
+    // The pieces between wait for a whole sentence of their own; stop_chars is
+    // for the one the listener is waiting on.
+    o.stop_chars = 0;
+    if (opt_.later_min_chars == 0) {
         return o;
     }
     o.min_chars   = opt_.later_min_chars;
@@ -357,7 +367,15 @@ std::vector<std::string> SentenceStream::finish() {
 // text extends it, or a full stop three characters later moves its end.
 bool SentenceStream::settled_at_end(const std::string& text, const SplitOptions& opt) const {
     const std::string body = trimmed(text);
-    if (body.empty() || count_chars(body) < opt.min_chars) {
+    if (body.empty()) {
+        return false;
+    }
+    // The shortest a settled piece can be: stop_chars when it ends at a full
+    // stop, which is checked below, and min_chars otherwise.
+    const std::size_t n = count_chars(body);
+    const std::size_t shortest =
+        (opt.stop_chars > 0 && opt.stop_chars < opt.min_chars) ? opt.stop_chars : opt.min_chars;
+    if (n < shortest) {
         return false;
     }
     // The last character that is not a closing quote or bracket. A closer ends
@@ -383,6 +401,10 @@ bool SentenceStream::settled_at_end(const std::string& text, const SplitOptions&
     if (is_hard_stop(cp)) {
         return true;
     }
+    // Below min_chars only a full stop settles a piece.
+    if (n < opt.min_chars) {
+        return false;
+    }
     // With clause cuts on, a comma ends a piece as firmly as a full stop does,
     // so a fragment ending at one is not going to move either.
     return opt.clause_cuts && is_secondary(cp);
@@ -398,7 +420,7 @@ std::vector<std::string> SentenceStream::drain(bool closing) {
     while (!pending_.empty()) {
         const SplitOptions rules = current();
         const bool one_piece =
-            opt_.later_min_chars != 0 && (pieces_out_ == 0 || urgent_);
+            (opt_.later_min_chars != 0 || opt_.stop_chars != 0) && (pieces_out_ == 0 || urgent_);
 
         // **The tail rule is off until the text is finished**, and leaving it
         // on was the second thing that kept a stream silent. It exists to stop

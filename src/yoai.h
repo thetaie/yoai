@@ -350,6 +350,20 @@ int yoai_local_set_threads(const char* id, int threads);
 // that never fails, and this is the way to ask for it.
 int yoai_local_forget(const char* id);
 
+// Compute now the front every prompt with `system_prompt` shares -- the chat
+// template's opening and the system prompt -- and keep it for the next turn.
+// BLOCKS for that prefill (seconds on a long prompt), so call it off the drawing
+// thread: after a load, after yoai_local_forget, and when the system prompt
+// changes. Loads the model first if it is not resident.
+//
+// **The first turn otherwise pays for it while someone is waiting.** A 236-token
+// prompt took 3.5 s of prefill on the desktop before the reply's first word, and
+// all of it but the user's message was the system prompt.
+//
+// Returns 0, or non-zero for an id that is not an on-device model or a prefill
+// that failed; the next turn then simply prefills as it always did.
+int yoai_local_warm(const char* id, const char* system_prompt);
+
 // How fast this machine reads memory, measured WITHOUT a language model.
 //
 // Returns a JSON object -- threads, bytes, passes, seconds, gbPerSecond (in
@@ -1021,6 +1035,15 @@ void yoai_reader_set_clause_cuts(int on);
 // about 4.5 -- keeps the listener near the margin, and pieces stay close to
 // what they were.
 void yoai_reader_set_later_split(int min_chars, int max_chars);
+
+// The first piece ends at a full stop from this many characters on, below
+// min_chars; 0, the default, leaves min_chars in charge. A comma still needs
+// min_chars. The first piece is the listener's whole wait, and "我知道苏州河。"
+// at 7 characters could not stand alone at min_chars 12, so the voice waited
+// for the next clause too. About 6 keeps "你好。" and "你觉得呢？" -- which came
+// out clipped alone -- joined to what follows. Applies to an urgent piece as
+// well (see yoai_reader_set_later_split), for the same reason.
+void yoai_reader_set_first_stop_chars(int chars);
 
 // Worker threads per engine for the NEXT load. <= 0 leaves the engine's choice.
 void yoai_reader_set_threads(int threads);

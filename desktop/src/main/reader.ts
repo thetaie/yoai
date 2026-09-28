@@ -104,6 +104,15 @@ const DEFAULT_MAX_CHARS = 40
 const LATER_MIN_CHARS = 30
 const LATER_MAX_CHARS = 80
 
+/**
+ * And the first piece, the whole of the listener's wait, may end at a full stop
+ * from 6 characters on rather than DEFAULT_MIN_CHARS: "我知道苏州河。" is spoken
+ * at once instead of waiting for the next clause to be written. Six keeps
+ * "你好。" and "你觉得呢？", which were measured to sound clipped alone, joined to
+ * what follows. See the core's SplitOptions::stop_chars.
+ */
+const FIRST_STOP_CHARS = 6
+
 const FILE = 'reader.json'
 const EMPTY: Stored = { enabled: true, reference: '', minChars: 0 }
 
@@ -381,6 +390,7 @@ export function load(): Promise<string> {
         0
       )
       core().nativeReaderSetLaterSplit(LATER_MIN_CHARS, LATER_MAX_CHARS)
+      core().nativeReaderSetFirstStopChars(FIRST_STOP_CHARS)
       // The setting that decides whether this lane speaks while the model is
       // still writing. Without it a comma is only a fallback at max_chars, and
       // a reply whose one full stop is at the end cannot be started at all.

@@ -294,6 +294,41 @@ napi_value NativeLocalLoad(napi_env env, napi_callback_info info) {
     return nullptr;
 }
 
+void WarmWorker(std::string id, std::string prompt, napi_threadsafe_function tsfn) {
+    const int rc = yoai_local_warm(id.c_str(), prompt.c_str());
+    StreamEvent* ev = new StreamEvent{rc == 0 ? "end" : "error",
+                                      rc == 0 ? "" : "could not warm the prompt"};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+}
+
+// nativeLocalWarm(id, systemPrompt, onDone: (type, content) => void): void
+//
+// On a worker like a load: it prefills the system prompt, seconds on a long
+// one, and loads the model first if it is not resident. Fires once.
+napi_value NativeLocalWarm(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value argv[3] = {nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 3) {
+        napi_throw_error(env, nullptr, "nativeLocalWarm(id, systemPrompt, onDone) needs three arguments");
+        return nullptr;
+    }
+    std::string id     = ToUtf8(env, argv[0]);
+    std::string prompt = ToUtf8(env, argv[1]);
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "yoai_local_warm", NAPI_AUTO_LENGTH, &work_name);
+    napi_threadsafe_function tsfn = nullptr;
+    if (napi_create_threadsafe_function(env, argv[2], nullptr, work_name, 0, 1,
+                                        nullptr, nullptr, nullptr, CallJs, &tsfn) != napi_ok) {
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+    std::thread(WarmWorker, std::move(id), std::move(prompt), tsfn).detach();
+    return nullptr;
+}
+
 // nativeLocalSetThreads(id: string, threads: number): number
 //
 // Synchronous and cheap -- it sets a field the next turn reads, and does not
@@ -895,6 +930,17 @@ napi_value NativeReaderSetLaterSplit(napi_env env, napi_callback_info info) {
     return nullptr;
 }
 
+// nativeReaderSetFirstStopChars(chars): void. 0 turns it off.
+napi_value NativeReaderSetFirstStopChars(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    std::int32_t n = 0;
+    if (argc >= 1) napi_get_value_int32(env, argv[0], &n);
+    yoai_reader_set_first_stop_chars(n);
+    return nullptr;
+}
+
 napi_value NativeReaderSetClauseCuts(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value argv[1] = {nullptr};
@@ -1192,6 +1238,7 @@ NAPI_MODULE_INIT() {
         {"nativeLocalLoad",       nullptr, NativeLocalLoad,       nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeLocalSetThreads", nullptr, NativeLocalSetThreads, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeLocalForget",     nullptr, NativeLocalForget,     nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeLocalWarm",       nullptr, NativeLocalWarm,       nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChat",            nullptr, NativeChat,            nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChatCancel",      nullptr, NativeChatCancel,      nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChatCancelAll",   nullptr, NativeChatCancelAll,   nullptr, nullptr, nullptr, napi_default, nullptr},
@@ -1211,6 +1258,7 @@ NAPI_MODULE_INIT() {
         {"nativeReaderSetSeed", nullptr, NativeReaderSetSeed, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderSetSplit", nullptr, NativeReaderSetSplit, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderSetLaterSplit", nullptr, NativeReaderSetLaterSplit, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetFirstStopChars", nullptr, NativeReaderSetFirstStopChars, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderSetClauseCuts", nullptr, NativeReaderSetClauseCuts, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderSetThreads", nullptr, NativeReaderSetThreads, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderBegin", nullptr, NativeReaderBegin, nullptr, nullptr, nullptr, napi_default, nullptr},

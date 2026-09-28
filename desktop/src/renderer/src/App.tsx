@@ -8,6 +8,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react'
 import type { ChatMessage, MessagePart, Usage } from '@shared/chat'
+import { turnSystemPrompt } from '@shared/prompts'
 import { ModelConfig, modelLabel } from '@shared/provider'
 import {
   DEFAULT_PREFS,
@@ -329,8 +330,12 @@ export function App(): JSX.Element {
       if (reading) {
         await reader.begin()
       }
+      // A reply that will be heard is asked to be written for the ear. Built
+      // by the same function the local model's warm-up uses, so the prompt
+      // computed ahead of this turn is the one it sends.
+      const prompt = turnSystemPrompt(systemPrompt, reading)
 
-      cancelerRef.current = runTurn(activeId, withUser, systemPrompt, {
+      cancelerRef.current = runTurn(activeId, withUser, prompt, {
         onDelta: (t) => {
           textRef.current += t
           setStreamText(textRef.current)

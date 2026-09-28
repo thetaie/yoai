@@ -13,8 +13,11 @@
  */
 import { existsSync } from 'node:fs'
 import type { ModelLoadState } from '../shared/api'
+import { turnSystemPrompt } from '../shared/prompts'
 import { ModelConfig, isLocal } from '../shared/provider'
+import * as chat from './chat'
 import { core } from './core'
+import * as reader from './reader'
 import { dataFile, readJson, writeJson } from './jsonfile'
 import { getKey, hasKey } from './keystore'
 
@@ -234,6 +237,9 @@ export function forgetAll(): number {
       cleared++
     }
   }
+  // The system prompt went with the conversation; put it back before the new
+  // conversation's first turn needs it.
+  warmActive()
   return cleared
 }
 
@@ -253,6 +259,41 @@ export function loadStates(): Record<string, ModelLoadState> {
   return out
 }
 
+/**
+ * Compute the active on-device model's prompt front now: the system prompt the
+ * next turn will be sent with, as the page builds it (shared/prompts.ts).
+ *
+ * The first turn of a conversation otherwise prefills it while someone waits --
+ * measured at 3.5 s for a 236-token prompt, before the reply's first word, when
+ * everything but the user's message was the system prompt. Called whenever that
+ * front would otherwise be missing or stale: after the weights load, after a new
+ * conversation drops the cache, when the system prompt changes, and when the
+ * voice comes up or goes, which adds or removes the spoken-style paragraph.
+ *
+ * Fire and forget. A turn that arrives meanwhile waits for it in the core and
+ * then reuses it; one that finds a different prompt reuses what they share.
+ */
+export function warmActive(): void {
+  const s = read()
+  const cfg = s.configured.find((m) => m.id === s.active)
+  if (cfg === undefined || !isLocal(cfg) || loadState.get(cfg.id)?.state !== 'ready') {
+    return
+  }
+  const st = reader.status()
+  const prompt = turnSystemPrompt(chat.get().systemPrompt, st.available && st.loaded && st.enabled)
+  try {
+    core().nativeLocalWarm(cfg.id, prompt, (type, content) => {
+      if (type !== 'end') {
+        console.warn(`[yoai] ${cfg.id}: the prompt was not warmed: ${content}`)
+      }
+    })
+  } catch (e) {
+    // An addon built before this call existed. The turn prefills as it always
+    // did; nothing is lost but the head start.
+    console.warn(`[yoai] the prompt was not warmed: ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
 export function autoPreload(): void {
   const s = read()
   const cfg = s.configured.find((m) => m.id === s.active)
@@ -265,6 +306,7 @@ export function autoPreload(): void {
     if (type === 'end') {
       console.log(`[yoai] ${cfg.id} is resident`)
       loadState.set(cfg.id, { state: 'ready', reason: '' })
+      warmActive()
     } else {
       console.error(`[yoai] ${cfg.id} would not preload: ${content}`)
       loadState.set(cfg.id, {

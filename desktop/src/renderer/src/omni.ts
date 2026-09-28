@@ -115,6 +115,12 @@ function ensureSubscribed(): void {
   }
 }
 
+// Let go on a development reload of this module; see the same in reader.ts.
+import.meta.hot?.dispose(() => {
+  unsubscribe?.()
+  unsubscribe = null
+})
+
 /**
  * Ask, and resolve when the whole exchange is done.
  *

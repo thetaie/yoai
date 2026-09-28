@@ -273,6 +273,23 @@ public:
     /// and cannot be refused: removing a whole sequence always succeeds.
     void forget() override;
 
+    /// Prefill the prompt's fixed front -- the chat template's opening and the
+    /// system prompt -- into the KV cache, and remember it as the prefix the next
+    /// turn reuses.
+    ///
+    /// **It is most of a first turn's wait.** A 236-token prompt took 3.5 s of
+    /// prefill on the desktop, at 68 tok/s, before the first word of the reply --
+    /// and all but the user's own message was the system prompt, identical on
+    /// every turn. Warmed while nobody is waiting, the first turn prefills only
+    /// the message.
+    ///
+    /// The front is found by rendering the system prompt with two different user
+    /// messages and keeping the tokens they share, so it is exactly what a real
+    /// turn's tokenization starts with. Loads the model and builds the context if
+    /// they are not there yet. Call it again after forget(), which drops it with
+    /// the rest of the conversation.
+    bool warm(const std::string& system_prompt, std::string& err) override;
+
     /// True once the model is resident (i.e. after a successful first turn).
     bool loaded() const override;
 

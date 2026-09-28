@@ -199,6 +199,9 @@ app.whenReady().then(() => {
       if (reason.length > 0) {
         console.error(`[yoai] the voice would not load: ${reason}`)
       }
+      // A voice that is up means replies are read, which changes the prompt
+      // they are sent with; whichever of the two loads finishes last warms it.
+      models.warmActive()
     })
   }
 

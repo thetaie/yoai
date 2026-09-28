@@ -769,6 +769,23 @@ extern "C" int yoai_local_forget(const char* id) {
     return 0;
 }
 
+extern "C" int yoai_local_warm(const char* id, const char* system_prompt) {
+    if (blank(id)) return 1;
+
+    // Outside the registry lock, like a load: this prefills for seconds.
+    std::shared_ptr<Chat> client = chat_for(id, true);
+    if (!client) {
+        yoai::utils::log_warn("yoai_local_warm: %s is not an on-device model", id);
+        return 1;
+    }
+    std::string err;
+    if (!client->warm(system_prompt ? system_prompt : "", err)) {
+        yoai::utils::log_warn("yoai_local_warm(%s): %s", id, err.c_str());
+        return 1;
+    }
+    return 0;
+}
+
 extern "C" const char* yoai_memory_bandwidth(int threads, int mib, int passes) {
     yoai::utils::MemoryBandwidth m;
     if (!yoai::utils::measure_memory_bandwidth(threads, mib, passes, &m)) {
@@ -1828,6 +1845,13 @@ extern "C" void yoai_reader_set_later_split(int min_chars, int max_chars) {
     yoai::voice::SplitOptions opt = reader().split();
     opt.later_min_chars = min_chars > 0 ? static_cast<size_t>(min_chars) : 0;
     opt.later_max_chars = max_chars > 0 ? static_cast<size_t>(max_chars) : 0;
+    reader().set_split(opt);
+}
+
+extern "C" void yoai_reader_set_first_stop_chars(int chars) {
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    yoai::voice::SplitOptions opt = reader().split();
+    opt.stop_chars = chars > 0 ? static_cast<size_t>(chars) : 0;
     reader().set_split(opt);
 }
 

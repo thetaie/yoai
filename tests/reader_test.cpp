@@ -1157,6 +1157,56 @@ int main(int argc, char** argv) {
         }
     }
 
+    // 17. The first piece ends at a full stop from stop_chars on, so a short
+    //     opening sentence is spoken at once -- but not one short enough to be
+    //     read clipped, and not at a comma, and not for the pieces after it.
+    {
+        SplitOptions opt;
+        opt.min_chars       = 12;
+        opt.max_chars       = 40;
+        opt.tail_chars      = 1;
+        opt.clause_cuts     = true;
+        opt.later_min_chars = 30;
+        opt.later_max_chars = 80;
+        opt.stop_chars      = 6;
+
+        struct Case {
+            const char* text;
+            const char* first;   // what the first piece must be
+        };
+        const Case cases[] = {
+            // 7 characters and a full stop: alone.
+            {"我知道苏州河。它是上海的一条重要河流，流经中心城区，最后汇入黄浦江。",
+             "我知道苏州河。"},
+            // 3 characters: still joined to what follows.
+            {"你好。我是 YoAI 的助手，很高兴认识你。", "你好。我是 YoAI 的助手，"},
+            // A comma at 7 is not a full stop: min_chars still applies.
+            {"苏州河在上海市区，它流经中心城区，最后汇入黄浦江。", "苏州河在上海市区，它流经中心城区，"},
+        };
+        for (std::size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); ++c) {
+            const std::string text = cases[c].text;
+            SentenceStream stream(opt);
+            std::vector<std::string> got;
+            for (std::size_t i = 0; i < text.size(); ) {
+                const std::size_t len = (static_cast<unsigned char>(text[i]) & 0x80) ? 3 : 1;
+                const std::vector<std::string> ready = stream.feed(text.substr(i, len));
+                got.insert(got.end(), ready.begin(), ready.end());
+                i += len;
+            }
+            const std::vector<std::string> rest = stream.finish();
+            got.insert(got.end(), rest.begin(), rest.end());
+            std::printf("first stop -> %s\n", got.empty() ? "(nothing)" : got[0].c_str());
+            expect(!got.empty() && got[0] == cases[c].first, "first stop",
+                   std::string("expected the first piece to be ") + cases[c].first);
+        }
+
+        // Only the first: a short sentence later waits for later_min_chars.
+        SentenceStream stream(opt);
+        stream.feed("我知道苏州河。");
+        expect(stream.feed("它很长。").empty(), "first stop",
+               "a short later sentence was cut as if it were the first");
+    }
+
     if (argc >= 3) {
         const int voices = (argc >= 4) ? std::atoi(argv[3]) : 1;
         const long long seed = (argc >= 6) ? std::atoll(argv[5]) : 23;

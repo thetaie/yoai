@@ -40,6 +40,8 @@ export interface YoaiNative {
   nativeLocalLoad(id: string, onDone: NativeHandler): void
   nativeLocalSetThreads(id: string, threads: number): number
   nativeLocalForget(id: string): number
+  /** Prefill the system prompt's front on a worker; onDone fires once with 'end' or 'error'. */
+  nativeLocalWarm(id: string, systemPrompt: string, onDone: NativeHandler): void
 
   nativeChat(
     providerId: string,
@@ -107,6 +109,8 @@ export interface YoaiNative {
   nativeReaderSetSplit(minChars: number, maxChars: number, tailChars: number): void
   /** The pieces after the first: their minimum and maximum. 0 and 0 turn it off. */
   nativeReaderSetLaterSplit(minChars: number, maxChars: number): void
+  /** The first piece ends at a full stop from this many characters on. 0 turns it off. */
+  nativeReaderSetFirstStopChars(chars: number): void
   /** A comma ends a piece once min_chars is reached. Off by default. */
   nativeReaderSetClauseCuts(on: boolean): void
   nativeReaderSetThreads(threads: number): void
