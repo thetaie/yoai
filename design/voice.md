@@ -481,7 +481,7 @@ necessarily shows the model its own scale — "-1 very unpleasant, 0 neutral" �
 the penalty lands on the handful of tokens the grammar allows as the answer.
 
 Both are now automatic: a non-empty grammar makes the turn deterministic in
-`llm/local.cpp`, documented at `yoai_chat`. The generalisation is worth
+`llm/chat/local.cpp`, documented at `yoai_chat`. The generalisation is worth
 keeping — **a reply that is a value, not prose, must not be sampled like
 prose.**
 

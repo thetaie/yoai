@@ -1,4 +1,4 @@
-#include "llm/event.hpp"
+#include "llm/chat/event.hpp"
 
 namespace yoai { namespace llm {
 

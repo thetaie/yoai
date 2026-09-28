@@ -1,13 +1,24 @@
-#include "client/http_client.hpp"
-
-#include "client/curl_tls.hpp"
+#include "utils/http.hpp"
 
 #include <curl/curl.h>
 
 #include <cctype>
 #include <stdexcept>
 
-namespace yoai { namespace client {
+namespace yoai { namespace utils {
+
+void configure_tls_trust(void* handle) {
+    CURL* curl = static_cast<CURL*>(handle);
+#if defined(__OHOS__)
+    curl_easy_setopt(curl, CURLOPT_CAINFO, "/etc/ssl/certs/cacert.pem");
+#elif defined(CURLSSLOPT_NATIVE_CA)
+    curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, static_cast<long>(CURLSSLOPT_NATIVE_CA));
+#else
+    (void)curl;
+#endif
+}
+
+//------------------------------------------------------------------------------
 
 namespace {
 

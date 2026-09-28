@@ -1,7 +1,7 @@
-// memory/vector_index.hpp, exercised against an in-memory database.
+// store/vector_index.hpp, exercised against an in-memory database.
 //
-// Two things are being checked. First, that sqlite-vec is compiled in and
-// registers on a connection -- a build that silently dropped it would only fail
+// Two things are being checked. First, that sqlite-vec is compiled in and that
+// Db::open registers it -- a build that silently dropped it would only fail
 // once a migration tried to create the table. Second, the one behavior this
 // layer adds on top of vec0: put() replaces, and a put() that fails leaves the
 // old vector where it was.
@@ -10,17 +10,20 @@
 //
 //     build/yoai-vector-index-test
 
-#include "memory/vector_index.hpp"
+#include "store/db.hpp"
+#include "store/vector_index.hpp"
 
 #include <sqlite3.h>
 
 #include <cmath>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <vector>
 
-using yoai::memory::Hit;
-using yoai::memory::VectorIndex;
+using yoai::store::Db;
+using yoai::store::Hit;
+using yoai::store::VectorIndex;
 
 namespace {
 
@@ -65,36 +68,31 @@ int count_rows(sqlite3* db) {
 int main() {
     std::string err;
 
-    // --- without registration there is no vec0 -------------------------------
-    // Explicit, per connection, is the design; this pins that nothing registers
-    // it behind our back, which would hide a missing enable_vectors() call.
+    // --- only Db::open registers vec0 -----------------------------------------
+    // Per connection and on purpose, never through sqlite3_auto_extension; this
+    // pins that nothing registers it behind the store's back.
     {
         sqlite3* bare = 0;
         sqlite3_open(":memory:", &bare);
         check(sqlite3_exec(bare, "CREATE VIRTUAL TABLE embeddings USING vec0(embedding float[4]);",
                            0, 0, 0) != SQLITE_OK,
-              "vec0 is unknown on a connection that did not enable it");
+              "vec0 is unknown on a connection Db::open did not make");
         sqlite3_close(bare);
     }
 
-    sqlite3* db = 0;
-    if (sqlite3_open(":memory:", &db) != SQLITE_OK) {
-        std::fprintf(stderr, "cannot open an in-memory database\n");
+    std::shared_ptr<Db> store = Db::open(":memory:", &err);
+    if (!did(store != nullptr, err, "Db::open")) {
         return 1;
     }
-    if (!did(yoai::memory::enable_vectors(db, &err), err, "enable_vectors")) {
-        sqlite3_close(db);
-        return 1;
-    }
+    sqlite3* db = store->handle();
     // What a migration will do once the embedding model is chosen.
     if (sqlite3_exec(db, "CREATE VIRTUAL TABLE embeddings USING vec0(embedding float[4]);",
                      0, 0, 0) != SQLITE_OK) {
         std::printf("FAIL  create vec0 table: %s\n", sqlite3_errmsg(db));
-        sqlite3_close(db);
         return 1;
     }
 
-    VectorIndex ix(db);
+    VectorIndex ix(store);
     std::vector<Hit> hits;
 
     // --- nearest first, with L2 distances --------------------------------------
@@ -150,8 +148,6 @@ int main() {
     check(!ix.nearest(vec4(0, 1, 0, 0), 0, &hits, &err), "k = 0 is refused");
     check(!ix.nearest(std::vector<float>(), 1, &hits, &err), "an empty query is refused");
     check(!ix.put(5, std::vector<float>(), &err), "an empty vector is refused");
-
-    sqlite3_close(db);
 
     std::printf("\n%s\n", g_failures ? "FAILED" : "all ok");
     return g_failures ? 1 : 0;

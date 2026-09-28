@@ -107,10 +107,11 @@ find_package(Threads REQUIRED)
 target_link_libraries(bodyclock_sqlite3 PUBLIC Threads::Threads)
 
 # sqlite-vec, vendored beside it: vector search as a vec0 virtual table, for
-# src/memory. See third/sqlite-vec/README.md for the version.
+# src/store/vector_index. See third/sqlite-vec/README.md for the version.
 #
-# Compiled in rather than loaded, so SQLITE_OMIT_LOAD_EXTENSION above stays. A
-# connection gets it by calling sqlite3_vec_init directly.
+# Compiled in rather than loaded, so SQLITE_OMIT_LOAD_EXTENSION above stays.
+# src/store/db.cpp gives the one connection it by calling sqlite3_vec_init
+# directly.
 add_library(yoai_sqlite_vec STATIC third/sqlite-vec/sqlite-vec.c)
 target_include_directories(yoai_sqlite_vec PUBLIC third/sqlite-vec)
 target_link_libraries(yoai_sqlite_vec PUBLIC bodyclock_sqlite3)
@@ -212,27 +213,39 @@ configure_file("${_bodyclock_gen_dir}/store/migrations.hpp.in"
 #-------------------------------------------------------------------------------
 
 add_library(bodyclock_core STATIC
-    src/client/http_client.cpp
-    src/llm/event.cpp
+    # The C ABI, src/yoai.h. Everything below is reached through it.
+    src/yoai.cpp
+    # Backend's constructor, which starts each local model's engine. A no-op
+    # for an engine the build does not have.
+    src/llm/backend.cpp
+    src/llm/chat/event.cpp
     # Compiles to a stub unless YOAI_ONDEVICE_LLM is on (see below), so the
     # default build needs no llama.cpp and still exposes the on-device entry
     # points -- they just answer "not built in".
-    src/llm/local.cpp
-    src/llm/openai_chat.cpp
-    src/llm/sse_parser.cpp
-    src/memory/vector_index.cpp
-    src/platform/bundle.cpp
-    src/platform/c_api.cpp
-    src/platform/log.cpp
+    src/llm/chat/local.cpp
+    # The same for MNN: a stub unless YOAI_MNN is on.
+    src/llm/chat/mnn.cpp
+    src/llm/chat/openai.cpp
+    src/llm/chat/sse_parser.cpp
+    # Text to vectors for search by meaning, on the same llama.cpp and the same
+    # switch as chat/local.cpp above, and a stub the same way without it.
+    src/llm/embed/local.cpp
+    # The one connection to yoai.db, and the modules that are views over it.
+    src/store/db.cpp
+    src/store/timeline.cpp
+    src/store/vector_index.cpp
+    # Whatever is too small for a subsystem of its own.
+    src/utils/bundle.cpp
+    src/utils/http.cpp
+    src/utils/log.cpp
     # No engine behind it: it reads a buffer and divides. See its header for the
     # claim it is there to check.
-    src/platform/membw.cpp
-    src/store/timeline.cpp
+    src/utils/memory_bandwidth.cpp
 
     # Voice. One subsystem, two halves with different appetites -- the same split
     # design/voice.md is built on. fbank and prosody are arithmetic over a sample
     # buffer and build everywhere; sensevoice needs ggml and compiles to a
-    # truthful stub without it, the way llm/local.cpp does for the LLM lane.
+    # truthful stub without it, the way llm/chat/local.cpp does for the LLM lane.
     src/voice/asr/fbank/common.cpp
     src/voice/asr/fbank/funasr.cpp
     src/voice/asr/sensevoice.cpp
@@ -280,7 +293,7 @@ target_link_libraries(bodyclock_core PUBLIC
     bodyclock_sqlite3
 )
 
-# platform/log.cpp routes to the platform's own log sink where there is one --
+# utils/log.cpp routes to the platform's own log sink where there is one --
 # stderr reaches nobody on a phone.
 if(CMAKE_SYSTEM_NAME STREQUAL "Android")
     target_link_libraries(bodyclock_core PUBLIC log)
@@ -294,7 +307,7 @@ endif()
 #
 # Three things here run on ggml and they need different amounts of it:
 #
-#   - The on-device LLM (src/llm/local.cpp) needs libllama on top.
+#   - The on-device LLM (src/llm/chat/local.cpp) needs libllama on top.
 #   - Speech recognition (src/voice/asr/sensevoice.cpp) does NOT. SenseVoice is an
 #     encoder plus a CTC head with no autoregression, so it links ggml directly
 #     and never touches llama. That is why recognition can be switched on by
@@ -510,7 +523,7 @@ endif()
 #-------------------------------------------------------------------------------
 
 # OFF by default: the engine is a few hundred MB of static archives that only the
-# mobile hosts want, and src/llm/local.cpp compiles a stub without it, so the
+# mobile hosts want, and src/llm/chat/local.cpp compiles a stub without it, so the
 # desktop build stays a two-minute vcpkg affair.
 option(YOAI_ONDEVICE_LLM "Build the on-device LLM engine (llama.cpp + GGUF)" OFF)
 
@@ -529,7 +542,7 @@ if(YOAI_ONDEVICE_LLM)
         message(FATAL_ERROR "llama.h not found under ${LLAMA_CPP_DIR}/include.")
     endif()
 
-    # The SDK's API LEVEL, not just its presence. src/llm/local.cpp passes the
+    # The SDK's API LEVEL, not just its presence. src/llm/chat/local.cpp passes the
     # n_vocab first argument to llama_sampler_init_penalties, which upstream
     # restored to that signature in 2026; the four-argument form had stood since
     # 2024-12. Against an older SDK everything else compiles and only that one call
@@ -542,7 +555,7 @@ if(YOAI_ONDEVICE_LLM)
     if(NOT _llama_h_flat MATCHES "llama_sampler_init_penalties\\(int32_tn_vocab")
         message(FATAL_ERROR
             "The llama.cpp SDK at ${LLAMA_CPP_DIR} is older than this repo needs: its "
-            "llama_sampler_init_penalties has no n_vocab parameter, so src/llm/local.cpp "
+            "llama_sampler_init_penalties has no n_vocab parameter, so src/llm/chat/local.cpp "
             "will not compile against it.\n"
             "Update the llama.cpp checkout and re-run harmony/build.cmd <abi> llama (or .sh) "
             "with `clean`, so the cached SDK is discarded rather than reused.")
@@ -602,23 +615,29 @@ if(YOAI_GGML_LIBS)
 endif()
 
 #-------------------------------------------------------------------------------
-# Omni speech output (MNN)
+# The MNN engine: omni speech output, and chat
 #-------------------------------------------------------------------------------
 
-# A second inference engine, and the only reason to carry one: MNN has the omni
-# Talker -- thinker to codec tokens to a diffusion transformer to a vocoder --
-# and llama.cpp has no Talker checkpoint in GGUF at all. Everything else this
-# engine could do is already done by something smaller here, so src/voice/omni.*
-# is deliberately narrow: no transcription, no scoring.
+# A second inference engine, carried for two things.
+#
+#   - Omni speech output. MNN has the omni Talker -- thinker to codec tokens to
+#     a diffusion transformer to a vocoder -- and llama.cpp has no Talker
+#     checkpoint in GGUF at all. src/voice/omni.* is deliberately narrow: no
+#     transcription, no scoring.
+#   - Chat on an MNN export (src/llm/chat/mnn.cpp), as the second local engine
+#     beside llama.cpp. A build can have either or both; yoai_local_set picks
+#     by the model path. Worth having where MNN's GPU backends beat llama.cpp's
+#     CPU-only build, which is unmeasured.
 #
 # OFF by default, and more firmly than the other lanes. It is a second model
-# format, a second quantization story and 3.8 GB of weights, bought for one
-# capability whose cost has not been measured on a phone -- about 3x slower than
-# real time on a desktop CPU. See design/voice.md before turning it on.
+# format and a second quantization story, and the omni half is 3.8 GB of
+# weights bought for one capability whose cost has not been measured on a phone
+# -- about 3x slower than real time on a desktop CPU. See design/voice.md
+# before turning it on.
 #
 # MNN_DIR points at an SDK dir shaped like the llama one: include/ + lib/.
 # harmony/build.cmd mnn assembles it at harmony/prebuilt/mnn-sdk/<abi>.
-option(YOAI_MNN "Build omni speech output (MNN + Qwen2.5-Omni)" OFF)
+option(YOAI_MNN "Build the MNN engine: omni speech output and chat" OFF)
 
 if(YOAI_MNN)
     if(NOT DEFINED MNN_DIR)
@@ -687,7 +706,7 @@ if(YOAI_MNN)
     #
     # rapidjson is header-only templates: its member functions are emitted as
     # weak symbols into every object that includes it, and the linker keeps ONE
-    # definition of each across the .so. src/llm and src/platform include the
+    # definition of each across the .so. src/llm and src/utils include the
     # rapidjson this repo vendors in third/rapidjson (a 2025 master); libMNN.a was
     # compiled against the 1.1.0 release MNN keeps in 3rd_party. Same mangled
     # names, different struct layouts -- the newer MemoryPoolAllocator holds a
@@ -705,7 +724,7 @@ if(YOAI_MNN)
     target_include_directories(bodyclock_core BEFORE PRIVATE "${MNN_DIR}/include")
     target_link_libraries(bodyclock_core PUBLIC "${MNN_LIB}")
 
-    message(STATUS "bodyclock_core: omni speech output ON -> ${MNN_LIB}")
+    message(STATUS "bodyclock_core: MNN (omni, chat) ON -> ${MNN_LIB}")
 endif()
 
 #-------------------------------------------------------------------------------
@@ -750,6 +769,11 @@ if(YOAI_BUILD_CLI)
     # what was stored, in distance order.
     add_executable(yoai-vector-index-test tests/vector_index_test.cpp)
     target_link_libraries(yoai-vector-index-test PRIVATE bodyclock_core)
+
+    # The embedder and the index together: text in, the related text out.
+    # Builds whether or not YOAI_ONDEVICE_LLM is on, and says which.
+    add_executable(yoai-embed-test tests/embed_test.cpp)
+    target_link_libraries(yoai-embed-test PRIVATE bodyclock_core)
 
     # Builds whether or not YOAI_ASR is on. Without it the front-end checks
     # still run and still mean something -- the filterbank is the half that has

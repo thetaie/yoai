@@ -78,7 +78,7 @@ fails with `Error: Electron uninstall`, which names neither npm nor a download.
 ### On-device models
 
 The GGUF lane is off by default here for the same reason it is off in the root
-build: it is a few hundred megabytes of static archives, and `src/llm/local.cpp`
+build: it is a few hundred megabytes of static archives, and `src/llm/chat/local.cpp`
 compiles to a truthful stub without them. Turning it on:
 
 ```

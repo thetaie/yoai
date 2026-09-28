@@ -2,7 +2,7 @@
  * Picking an on-device model, and keeping it openable.
  *
  * HARD CONSTRAINT that shapes all of this: llama.cpp loads a model by PATH and
- * mmaps it (src/llm/local.cpp), so an ArkTS-readable URI or a file descriptor is
+ * mmaps it (src/llm/chat/local.cpp), so an ArkTS-readable URI or a file descriptor is
  * not enough. And a multi-GB file has no business being copied into app-private
  * storage, where it would be duplicated and then deleted on uninstall.
  *

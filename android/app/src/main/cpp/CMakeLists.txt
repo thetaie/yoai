@@ -136,7 +136,7 @@ set_target_properties(bodyclock_jni PROPERTIES OUTPUT_NAME bodyclock)
 
 target_include_directories(bodyclock_jni PRIVATE "${YOAI_REPO_ROOT}/src")
 
-# log: __android_log_print, which is where src/platform/log.cpp routes on this
+# log: __android_log_print, which is where src/utils/log.cpp routes on this
 # platform and where the worker threads' output has to land to be readable at
 # all -- stderr reaches nobody on a phone.
 target_link_libraries(bodyclock_jni PUBLIC

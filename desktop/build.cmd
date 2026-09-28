@@ -552,7 +552,7 @@ rem And MNN's OWN rapidjson, which is not a convenience -- it is the fix for a
 rem crash. rapidjson is header-only templates, so its member functions land in
 rem the object files of whoever includes it, as weak symbols; the whole addon is
 rem one module and the linker keeps exactly ONE definition of each. This repo
-rem already carries a much newer rapidjson for src/llm and src/platform, and
+rem already carries a much newer rapidjson for src/llm and src/utils, and
 rem libMNN was compiled against the 1.1.0 release it vendors. Two layouts, one
 rem symbol: measured as a SIGSEGV at 0x10 inside MemoryPoolAllocator::Malloc, on
 rem the FIRST json parse of Llm::createLLM, before a line of MNN's own logging.

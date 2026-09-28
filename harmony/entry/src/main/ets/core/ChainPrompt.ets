@@ -22,7 +22,7 @@ const KEY_PROMPT: string = 'chainPrompt';
  * words. Three examples demonstrate the shape instead, with no prohibition
  * anywhere in the text.
  *
- * Examples are affordable because of the prefix cache in llm/local.cpp: this
+ * Examples are affordable because of the prefix cache in llm/chat/local.cpp: this
  * block is prefilled once per session and reused by every turn after it.
  */
 export const DEFAULT_CHAIN_PROMPT: string =

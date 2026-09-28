@@ -7,7 +7,7 @@ So the whole directory has to arrive intact. Asking somebody to copy twenty
 files onto a phone and preserve the layout is asking them to fail; one file they
 can manage.
 
-The app extracts it with src/platform/bundle.cpp, which holds the format.
+The app extracts it with src/utils/bundle.cpp, which holds the format.
 
 No compression, deliberately. The payload is quantized weights -- int4 and int8
 blobs with nothing a general-purpose compressor can find -- so the ceiling is a

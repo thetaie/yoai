@@ -2,11 +2,10 @@
 
 // On-device LLM client: llama.cpp + a GGUF model, no network.
 //
-// Deliberately the same `ainvoke(messages, system_prompt, on_event, user)` shape
-// as OpenAIChatClient, so it can be held behind llm::Client via
-// make_client<LocalClient>() and reached through the same C ABI. Nothing above
-// the client needs to know a turn ran locally -- see llm/client.hpp, which was
-// written for exactly this second implementation.
+// A local Chat (llm/chat/chat.hpp): constructing one starts llama.cpp before
+// anything here runs (see Backend's constructor). yoai.cpp runs a
+// turn the same way whether an id resolves to this or to OpenAIChatClient;
+// nothing above the client needs to know a turn ran locally.
 //
 // Built only when configured with -DYOAI_ONDEVICE_LLM=ON and pointed at a
 // llama.cpp SDK via -DLLAMA_CPP_DIR=<dir with include/llama.h + lib/>.
@@ -23,8 +22,10 @@
 // turn gets a fresh context, so turns are stateless and history is replayed
 // from `messages`, matching how the remote client behaves.
 
-#include "llm/event.hpp"
-#include "llm/types.hpp"   // ChatMessage, EventHandler, UserContext
+#include "llm/backend.hpp"
+#include "llm/chat/chat.hpp"
+#include "llm/chat/event.hpp"
+#include "llm/chat/types.hpp"   // ChatMessage, EventHandler, UserContext
 
 #include <cstddef>
 #include <functional>
@@ -147,9 +148,9 @@ struct LocalOptions {
     int   repeat_last_n  = 256;
 };
 
-/// What the last turn cost. Zeroed at the start of every ainvoke(); the C ABI
-/// turns it into the same CostStatistics event a remote turn ends with, so the
-/// host's token counter works on both lanes.
+/// What the last turn cost. Zeroed at the start of every ainvoke(); a turn that
+/// completes turns it into the same CostStatistics event a remote turn ends
+/// with, so the host's token counter works on both lanes.
 struct LocalStats {
     double load_ms        = 0;   // model load; non-zero only on the turn that paid
     double prefill_ms     = 0;
@@ -229,33 +230,34 @@ private:
 
 //------------------------------------------------------------------------------
 
-class LocalClient {
+class LocalClient : public Chat {
 public:
     /// True when compiled against llama.cpp (YOAI_ONDEVICE_LLM).
     static bool available();
 
     explicit LocalClient(LocalOptions opt);
-    ~LocalClient();
+    ~LocalClient() override;
 
     LocalClient(const LocalClient&)            = delete;
     LocalClient& operator=(const LocalClient&) = delete;
 
-    /// Stream a reply. Emits Reply deltas, Thinking for `<think>` spans, and on
-    /// failure a single Error. Returns true when the turn completed; false on error
-    /// or when `on_event` returned false (the handler aborting is not an error --
-    /// it is how the host cancels, exactly as on the remote lane).
+    /// Stream a reply. Emits Reply deltas, Thinking for `<think>` spans, and a
+    /// CostStatistics built from stats() when the turn completes; on failure a
+    /// single Error. Returns true when the turn completed; false on error or when
+    /// `on_event` returned false (the handler aborting is not an error -- it is
+    /// how the host cancels, exactly as on the remote lane).
     /// `user` is accepted for interface parity and ignored: a local turn runs no
     /// tools, so there is no identity to forward.
     bool ainvoke(const std::vector<ChatMessage>& messages,
                  const std::string&              system_prompt,
                  const EventHandler&             on_event,
                  const UserContext&              user = UserContext(),
-                 const RequestOptions&           req  = RequestOptions());
+                 const RequestOptions&           req  = RequestOptions()) override;
 
     /// Threads for subsequent turns; <= 0 means hardware_concurrency(). Takes
     /// effect on the next turn without reloading the model, because the count is
     /// applied when a turn builds its context, not when the weights are read.
-    void setThreads(int n);
+    void set_threads(int n) override;
 
     /// Forget the conversation: drop the KV cache and the token sequence the
     /// prefix reuse is computed against. The weights stay resident.
@@ -269,10 +271,10 @@ public:
     /// which costs the reuse and, before that refusal was checked, the
     /// conversation's privacy from the next one. Saying so explicitly is cheaper
     /// and cannot be refused: removing a whole sequence always succeeds.
-    void forget();
+    void forget() override;
 
     /// True once the model is resident (i.e. after a successful first turn).
-    bool loaded() const;
+    bool loaded() const override;
 
     /**
      * Read the weights now, so the first turn does not pay for them.
@@ -285,7 +287,7 @@ public:
      * Idempotent; returns false with `err` set if the file will not load. A no-op
      * returning false in the stub build.
      */
-    bool load(std::string& err);
+    bool load(std::string& err) override;
 
     LocalStats stats() const;
 

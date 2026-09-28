@@ -1,8 +1,8 @@
-#include "llm/openai_chat.hpp"
+#include "llm/chat/openai.hpp"
 
-#include "client/curl_tls.hpp"
-#include "llm/sse_parser.hpp"
-#include "platform/log.hpp"
+#include "llm/chat/sse_parser.hpp"
+#include "utils/http.hpp"
+#include "utils/log.hpp"
 
 #include <curl/curl.h>
 #include <rapidjson/document.h>
@@ -174,7 +174,7 @@ void handle_data_event(StreamContext& ctx, const char* payload) {
     rapidjson::Document doc;
     doc.Parse(payload);
     if (doc.HasParseError() || !doc.IsObject()) {
-        yoai::platform::log_warn("openai-chat: bad SSE JSON: %.200s", payload);
+        yoai::utils::log_warn("openai-chat: bad SSE JSON: %.200s", payload);
         return;
     }
 
@@ -355,7 +355,7 @@ std::string build_request_body(const OpenAIChatOptions& opt,
     if (!opt.extra_body_json.empty()) {
         rapidjson::Document extra;
         if (extra.Parse(opt.extra_body_json.c_str()).HasParseError() || !extra.IsObject()) {
-            yoai::platform::log_warn(
+            yoai::utils::log_warn(
                 "openai-chat: ignoring extra_body_json, not a JSON object: %.120s",
                 opt.extra_body_json.c_str());
         } else {
@@ -448,7 +448,7 @@ RequestOutcome run_request(const OpenAIChatOptions& opt,
     hdrs = curl_slist_append(hdrs, "Accept: text/event-stream");
     hdrs = curl_slist_append(hdrs, auth.c_str());
 
-    yoai::client::configure_tls_trust(curl);
+    yoai::utils::configure_tls_trust(curl);
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(body.size()));
@@ -487,7 +487,8 @@ RequestOutcome run_request(const OpenAIChatOptions& opt,
 // OpenAIChatClient
 //------------------------------------------------------------------------------
 
-OpenAIChatClient::OpenAIChatClient(OpenAIChatOptions opt) : opt_(std::move(opt)) {}
+OpenAIChatClient::OpenAIChatClient(OpenAIChatOptions opt)
+    : Chat(Engine::Remote), opt_(std::move(opt)) {}
 
 //------------------------------------------------------------------------------
 
@@ -502,7 +503,7 @@ bool OpenAIChatClient::ainvoke(const std::vector<ChatMessage>& messages,
         // text was requested fails later and further away. GBNF is a llama.cpp
         // concept with no OpenAI-protocol equivalent; a provider-specific
         // `response_format` would go through OpenAIChatOptions::extra_json.
-        yoai::platform::log_warn(
+        yoai::utils::log_warn(
             "remote provider ignores the requested grammar; reply is unconstrained");
     }
     auto emit_error = [&](std::string msg) {

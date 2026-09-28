@@ -7,19 +7,9 @@
 // platform, governed by rules that are easy to get subtly wrong, so it lives
 // here once instead of being reimplemented per host.
 //
-// It owns three tables -- states, entries, notes -- but NOT the file they are
-// in. yoai.db is the app's one database, and what comes next goes in it
-// too: embeddings carry a foreign key into entries, and so will photos, tags
-// and the rest. They are unprefixed because the file is the namespace and the
-// names are already distinct; a module prefix would claim `entries` for this
-// class when in fact everything else hangs off it.
-//
-// When a second module does arrive it must NOT open its own connection to the
-// same file. Two SQLite connections in one process, each with its own locks on
-// one database, is the failure that makes linking the platform's SQLite from
-// native code a data-corruption bug on Android. The connection gets lifted into
-// something both share, and this class becomes one facade over it. That is not
-// worth building for a single occupant, so it has not been.
+// It owns three tables -- states, entries, notes -- but neither the file they
+// are in nor the connection to it. Both belong to store/db.hpp, which every
+// module in store/ shares; this class is one view over it.
 //
 // The rules, which are the reason this is not just a table:
 //
@@ -86,6 +76,9 @@
 
 #pragma once
 
+#include "store/db.hpp"
+
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -125,20 +118,18 @@ struct Now {
     Entry last_ended;
 };
 
-// One SQLite database, one process. Every method is safe to call from any
-// thread.
+// Every method is safe to call from any thread: each takes the connection's
+// lock (Db::lock) for as long as it touches the file.
 //
 // Errors are returned, never thrown: this sits directly under a C ABI, and an
 // exception crossing that boundary is undefined. A false return always fills
 // `err` with something a log line can carry.
 class Timeline {
 public:
-    // Opens (creating if needed) `dir`/yoai.db and brings the schema up to
-    // date. `dir` must already exist -- it is the host's sandbox directory, and
-    // creating it is the host's business.
-    //
-    // Returns null on failure. The caller owns the result.
-    static Timeline* open(const std::string& dir, std::string* err);
+    // A view over `db`, which must be open; the schema is already up to date by
+    // then. Holds a share of it, so the connection outlives this object as
+    // long as anything else still uses it.
+    explicit Timeline(std::shared_ptr<Db> db);
 
     ~Timeline();
 
@@ -239,7 +230,6 @@ public:
     static int         iso_to_day(const std::string& iso);   // -1 if unparseable
 
 private:
-    Timeline();
     Timeline(const Timeline&);
     Timeline& operator=(const Timeline&);
 

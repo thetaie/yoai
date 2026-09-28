@@ -1,24 +1,27 @@
-// Implementation of the public C ABI (src/yoai.h).
+// Implementation of the public C ABI (yoai.h).
 //
-// Thin by design: the registry is a map, and a remote turn is one
-// OpenAIChatClient built from a copy of the matching entry. No session state, no
-// config file, no background thread -- everything the core knows, the host told
-// it.
+// Thin by design: the registry is a map from id to options, and each id gets one
+// llm::Chat built from them on first use. No session state, no config file, no
+// background thread -- everything the core knows, the host told it.
 //
-// The one place that is not stateless is the on-device lane: a LocalClient holds
-// several GB of mmapped weights, so it is cached per id and outlives the turn.
-// Reloading per turn would make on-device chat unusable, which is why this file
-// keeps clients for one kind of entry and not the other.
+// The Chat is cached per id for every engine. For an on-device model that is
+// the point: it holds gigabytes of weights, and reloading them per turn would
+// make on-device chat unusable. A remote client holds only its options, so
+// caching it costs nothing -- and it means a turn never asks which engine it
+// has.
 
 #include "yoai.h"
 
-#include "client/http_client.hpp"
-#include "llm/local.hpp"
-#include "llm/openai_chat.hpp"
-#include "llm/types.hpp"
-#include "platform/bundle.hpp"
-#include "platform/log.hpp"
-#include "platform/membw.hpp"
+#include "llm/chat/chat.hpp"
+#include "llm/chat/local.hpp"
+#include "llm/chat/mnn.hpp"
+#include "llm/chat/openai.hpp"
+#include "llm/chat/types.hpp"
+#include "utils/bundle.hpp"
+#include "utils/http.hpp"
+#include "utils/log.hpp"
+#include "utils/memory_bandwidth.hpp"
+#include "store/db.hpp"
 #include "store/timeline.hpp"
 #include "voice/omni/qwen25_omni.hpp"
 #include "voice/prosody/prosody.hpp"
@@ -27,6 +30,7 @@
 #include "voice/asr/sensevoice.hpp"
 
 #include <chrono>
+#include <cstdio>
 
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -40,13 +44,17 @@
 
 namespace {
 
+using yoai::llm::Chat;
 using yoai::llm::ChatMessage;
 using yoai::llm::Event;
 using yoai::llm::EventType;
 using yoai::llm::LocalClient;
 using yoai::llm::LocalOptions;
-using yoai::llm::LocalStats;
+using yoai::llm::MnnClient;
+using yoai::llm::MnnOptions;
+using yoai::llm::OpenAIChatClient;
 using yoai::llm::OpenAIChatOptions;
+using Engine = yoai::llm::Backend::Engine;
 
 // Wall clock, not clock(). These figures are reported to a person as "how long
 // it took", and clock() answers a different question: on POSIX it is processor
@@ -64,14 +72,16 @@ double wall_seconds_since(wall_clk::time_point started) {
 // Registry
 //------------------------------------------------------------------------------
 
-// One entry, of either kind. A tagged struct rather than two maps because the
-// id namespace is shared: yoai_chat, yoai_providers and yoai_provider_remove all
-// take an id without being told which lane it is, and two maps would let the
-// same id exist twice with nothing deciding which one wins.
+// One entry, of any engine. A tagged struct rather than one map per engine
+// because the id namespace is shared: yoai_chat, yoai_providers and
+// yoai_provider_remove all take an id without being told which engine it is,
+// and several maps would let the same id exist twice with nothing deciding
+// which one wins.
 struct Entry {
-    bool              local = false;
-    OpenAIChatOptions remote;      // meaningful when !local
-    LocalOptions      on_device;   // meaningful when local
+    Engine            engine = Engine::Remote;
+    OpenAIChatOptions remote;   // Engine::Remote
+    LocalOptions      llama;    // Engine::LlamaCpp
+    MnnOptions        mnn;      // Engine::Mnn
 };
 
 std::mutex& registry_mutex() {
@@ -87,13 +97,13 @@ std::map<std::string, Entry>& registry() {
     return r;
 }
 
-// Guarded by registry_mutex(). One live engine per on-device id, kept because a
-// LocalClient owns the loaded weights: dropping it between turns would re-read
-// gigabytes every time. Entries are erased whenever their registry entry is
-// replaced or removed, so a re-registered path never keeps answering from the
-// model it used to point at.
-std::map<std::string, std::shared_ptr<LocalClient> >& local_clients() {
-    static std::map<std::string, std::shared_ptr<LocalClient> > c;
+// Guarded by registry_mutex(). One live Chat per id, kept because a LocalClient
+// owns the loaded weights: dropping it between turns would re-read gigabytes
+// every time. Entries are erased whenever their registry entry is replaced or
+// removed, so a re-registered id never keeps answering from the model it used to
+// point at.
+std::map<std::string, std::shared_ptr<Chat> >& chats() {
+    static std::map<std::string, std::shared_ptr<Chat> > c;
     return c;
 }
 
@@ -102,49 +112,47 @@ std::map<std::string, std::shared_ptr<LocalClient> >& local_clients() {
 // the first one a host calls.
 void ensure_curl() {
     static std::once_flag once;
-    std::call_once(once, []() { yoai::client::HttpClient::global_init(); });
+    std::call_once(once, []() { yoai::utils::HttpClient::global_init(); });
 }
 
-// Look up `id` and hand back a COPY of its entry, so the turn that follows is
-// unaffected by a concurrent registry edit. Returns false when unknown.
-bool lookup(const std::string& id, Entry* out) {
-    std::lock_guard<std::mutex> lock(registry_mutex());
-    auto it = registry().find(id);
-    if (it == registry().end()) return false;
-    *out = it->second;
-    return true;
-}
-
-// The engine for one on-device id, built on first use. Returns null when `id` is
-// unknown or is a remote provider.
+// The Chat for one id, built on first use. Returns null when `id` is unknown, or
+// when `local_only` is set and `id` is a remote provider -- the yoai_local_*
+// entry points still refuse remote ids, as yoai.h documents.
 //
-// The client is constructed under the lock -- cheap, it only initializes the
-// llama.cpp backend -- but the WEIGHTS are not read here: that happens on the
-// first ainvoke() or in yoai_local_load, both of which run with no lock held.
-// Holding the registry mutex across a multi-second, multi-gigabyte read would
-// stall every other entry point in this file for the duration.
-std::shared_ptr<LocalClient> local_client_for(const std::string& id) {
+// The client is constructed under the lock -- cheap, it only starts its engine
+// -- but the WEIGHTS are not read here: that happens on the first ainvoke() or
+// in yoai_local_load, both of which run with no lock held. Holding the registry
+// mutex across a multi-second, multi-gigabyte read would stall every other
+// entry point in this file.
+std::shared_ptr<Chat> chat_for(const std::string& id, bool local_only) {
     std::lock_guard<std::mutex> lock(registry_mutex());
     auto it = registry().find(id);
-    if (it == registry().end() || !it->second.local) return std::shared_ptr<LocalClient>();
+    if (it == registry().end() || (local_only && it->second.engine == Engine::Remote)) {
+        return std::shared_ptr<Chat>();
+    }
 
-    std::shared_ptr<LocalClient>& slot = local_clients()[id];
+    std::shared_ptr<Chat>& slot = chats()[id];
     if (!slot) {
-        slot.reset(new LocalClient(it->second.on_device));
+        const Entry& e = it->second;
+        switch (e.engine) {
+            case Engine::LlamaCpp: slot.reset(new LocalClient(e.llama));      break;
+            case Engine::Mnn:      slot.reset(new MnnClient(e.mnn));          break;
+            case Engine::Remote:   slot.reset(new OpenAIChatClient(e.remote)); break;
+        }
     }
     return slot;
 }
 
-// Drop any cached engine for `id`. Call whenever its entry changes or goes away.
+// Drop any cached Chat for `id`. Call whenever its entry changes or goes away.
 // Expects registry_mutex() to be HELD -- the erase has to be atomic with the
-// registry edit that made the engine stale.
+// registry edit that made the Chat stale.
 //
 // Safe to call during a turn: yoai_chat holds its own shared_ptr for the
-// duration, so erasing here only means the NEXT turn builds a fresh engine. The
+// duration, so erasing here only means the NEXT turn builds a fresh one. The
 // running one finishes against the model it started with, and the weights are
 // freed when it lets go.
-void forget_local_client(const std::string& id) {
-    local_clients().erase(id);
+void forget_chat(const std::string& id) {
+    chats().erase(id);
 }
 
 //------------------------------------------------------------------------------
@@ -216,7 +224,7 @@ void apply_local_options(const char* options_json, LocalOptions* opt) {
     rapidjson::Document doc;
     doc.Parse(options_json);
     if (doc.HasParseError() || !doc.IsObject()) {
-        yoai::platform::log_warn(
+        yoai::utils::log_warn(
             "yoai_local_set: ignoring options_json, not a JSON object: %.120s", options_json);
         return;
     }
@@ -232,15 +240,6 @@ void apply_local_options(const char* options_json, LocalOptions* opt) {
     opt->temperature     = json_float(doc, "temperature",   opt->temperature);
     opt->top_p           = json_float(doc, "topP",          opt->top_p);
     opt->repeat_penalty  = json_float(doc, "repeatPenalty", opt->repeat_penalty);
-}
-
-// The last path segment, for labelling a local turn's usage event. The host's id
-// would be the other candidate, but a GGUF's file name is what the user actually
-// recognizes ("Qwen3-4B-Q4_K_M.gguf") and it is the same thing the remote lane
-// reports there: the model, not the entry.
-std::string file_name(const std::string& path) {
-    const size_t slash = path.find_last_of("/\\");
-    return slash == std::string::npos ? path : path.substr(slash + 1);
 }
 
 //------------------------------------------------------------------------------
@@ -289,8 +288,8 @@ std::mutex& timeline_mutex() {
 // Guarded by timeline_mutex(). A shared_ptr rather than a raw owner so that a
 // read already in flight keeps the store alive across a concurrent
 // yoai_timeline_close(): the pointer is copied out under the lock and the
-// COPY is what the call runs against, the same way lookup() copies a registry
-// entry so a turn is unaffected by an edit beside it.
+// COPY is what the call runs against, the same way yoai_chat holds its Chat so
+// a turn is unaffected by an edit beside it.
 std::shared_ptr<Timeline>& timeline_slot() {
     static std::shared_ptr<Timeline> t;
     return t;
@@ -402,7 +401,7 @@ extern "C" const char* yoai_version(void) {
 
 extern "C" void yoai_set_log_level(const char* level) {
     if (blank(level)) return;
-    yoai::platform::set_log_level(level);
+    yoai::utils::set_log_level(level);
 }
 
 //------------------------------------------------------------------------------
@@ -430,12 +429,12 @@ extern "C" int yoai_timeline_open(const char* dir) {
     timeline_dir().clear();
 
     std::string err;
-    Timeline* opened = Timeline::open(want, &err);
-    if (!opened) {
+    std::shared_ptr<yoai::store::Db> db = yoai::store::Db::open(yoai::store::Db::path_in(want), &err);
+    if (!db) {
         timeline_error() = err;
         return 1;
     }
-    timeline_slot().reset(opened);
+    timeline_slot() = std::make_shared<Timeline>(db);
     timeline_dir() = want;
     return 0;
 }
@@ -597,7 +596,7 @@ extern "C" int yoai_provider_set(const char* id,
                                  const char* model,
                                  const char* extra_json) {
     if (blank(id) || blank(base_url) || blank(api_key) || blank(model)) {
-        yoai::platform::log_warn("yoai_provider_set: id, base_url, api_key and model are all required");
+        yoai::utils::log_warn("yoai_provider_set: id, base_url, api_key and model are all required");
         return 1;
     }
 
@@ -612,7 +611,7 @@ extern "C" int yoai_provider_set(const char* id,
     while (!opt.base_url.empty() && opt.base_url.back() == '/') opt.base_url.pop_back();
 
     Entry entry;
-    entry.local  = false;
+    entry.engine = Engine::Remote;
     entry.remote = std::move(opt);
 
     {
@@ -620,24 +619,24 @@ extern "C" int yoai_provider_set(const char* id,
         registry()[id] = std::move(entry);
         // This id may have been an on-device model a moment ago; its engine is
         // now unreachable and would otherwise hold gigabytes for nothing.
-        forget_local_client(id);
+        forget_chat(id);
     }
     // The key is deliberately absent from this line.
-    yoai::platform::log_info("provider registered: %s -> %s (%s)", id, base_url, model);
+    yoai::utils::log_info("provider registered: %s -> %s (%s)", id, base_url, model);
     return 0;
 }
 
 extern "C" int yoai_provider_remove(const char* id) {
     if (blank(id)) return 0;
     std::lock_guard<std::mutex> lock(registry_mutex());
-    forget_local_client(id);
+    forget_chat(id);
     return registry().erase(id) > 0 ? 1 : 0;
 }
 
 extern "C" void yoai_provider_clear(void) {
     std::lock_guard<std::mutex> lock(registry_mutex());
     registry().clear();
-    local_clients().clear();
+    chats().clear();
 }
 
 extern "C" const char* yoai_providers(void) {
@@ -656,24 +655,56 @@ extern "C" const char* yoai_providers(void) {
 //------------------------------------------------------------------------------
 
 extern "C" int yoai_local_available(void) {
-    return LocalClient::available() ? 1 : 0;
+    return (LocalClient::available() || MnnClient::available()) ? 1 : 0;
 }
+
+namespace {
+
+// An MNN export is a directory with config.json in it; anything else is taken
+// to be a GGUF. Decided here so a host never names the engine: it hands over
+// what the user picked, and the path says which engine can run it.
+bool is_mnn_model(const std::string& path) {
+    std::string config = path;
+    if (!config.empty() && config.back() != '/' && config.back() != '\\') {
+        config += '/';
+    }
+    config += "config.json";
+    std::FILE* f = std::fopen(config.c_str(), "rb");
+    if (f == nullptr) {
+        return false;
+    }
+    std::fclose(f);
+    return true;
+}
+
+}  // namespace
 
 extern "C" int yoai_local_set(const char* id,
                               const char* model_path,
                               const char* options_json) {
     if (blank(id) || blank(model_path)) {
-        yoai::platform::log_warn("yoai_local_set: id and model_path are both required");
+        yoai::utils::log_warn("yoai_local_set: id and model_path are both required");
         return 1;
     }
 
+    // Parsed once into llama.cpp's options, which hold every key; MNN takes
+    // the three it has an equivalent for.
     LocalOptions opt;
     opt.model_path = model_path;
     apply_local_options(options_json, &opt);
 
+    const bool mnn = is_mnn_model(model_path);
     Entry entry;
-    entry.local     = true;
-    entry.on_device = opt;
+    if (mnn) {
+        entry.engine        = Engine::Mnn;
+        entry.mnn.model_dir = model_path;
+        entry.mnn.n_threads = opt.n_threads;
+        entry.mnn.thinking  = opt.thinking;
+        entry.mnn.n_predict = opt.n_predict;
+    } else {
+        entry.engine = Engine::LlamaCpp;
+        entry.llama  = opt;
+    }
 
     {
         std::lock_guard<std::mutex> lock(registry_mutex());
@@ -681,9 +712,10 @@ extern "C" int yoai_local_set(const char* id,
         // Whatever was cached under this id answered for the OLD options -- a
         // different file, or the same file with a different context size. The
         // next turn builds a fresh engine from what was just registered.
-        forget_local_client(id);
+        forget_chat(id);
     }
-    yoai::platform::log_info("on-device model registered: %s -> %s", id, model_path);
+    yoai::utils::log_info("on-device model registered: %s -> %s (%s)", id, model_path,
+                       mnn ? "mnn" : "llama.cpp");
     return 0;
 }
 
@@ -691,15 +723,15 @@ extern "C" int yoai_local_load(const char* id) {
     if (blank(id)) return 1;
 
     // Outside the registry lock, deliberately: this reads gigabytes.
-    std::shared_ptr<LocalClient> client = local_client_for(id);
+    std::shared_ptr<Chat> client = chat_for(id, true);
     if (!client) {
-        yoai::platform::log_warn("yoai_local_load: %s is not an on-device model", id);
+        yoai::utils::log_warn("yoai_local_load: %s is not an on-device model", id);
         return 1;
     }
 
     std::string err;
     if (!client->load(err)) {
-        yoai::platform::log_warn("yoai_local_load(%s): %s", id, err.c_str());
+        yoai::utils::log_warn("yoai_local_load(%s): %s", id, err.c_str());
         return 1;
     }
     return 0;
@@ -708,36 +740,36 @@ extern "C" int yoai_local_load(const char* id) {
 extern "C" int yoai_local_set_threads(const char* id, int threads) {
     if (blank(id)) return 1;
 
-    std::shared_ptr<LocalClient> client = local_client_for(id);
+    std::shared_ptr<Chat> client = chat_for(id, true);
     if (!client) {
-        yoai::platform::log_warn(
+        yoai::utils::log_warn(
             "yoai_local_set_threads: %s is not an on-device model", id);
         return 1;
     }
-    client->setThreads(threads);
+    client->set_threads(threads);
     // Logged rather than returned, because the number that matters is the one
     // the NEXT "on-device turn:" line was produced with, and the two lines are
     // read together.
-    yoai::platform::log_info("on-device threads: %s -> %d", id, threads);
+    yoai::utils::log_info("on-device threads: %s -> %d", id, threads);
     return 0;
 }
 
 extern "C" int yoai_local_forget(const char* id) {
     if (blank(id)) return 1;
 
-    std::shared_ptr<LocalClient> client = local_client_for(id);
+    std::shared_ptr<Chat> client = chat_for(id, true);
     if (!client) {
-        yoai::platform::log_warn("yoai_local_forget: %s is not an on-device model", id);
+        yoai::utils::log_warn("yoai_local_forget: %s is not an on-device model", id);
         return 1;
     }
     client->forget();
-    yoai::platform::log_info("on-device context cleared: %s", id);
+    yoai::utils::log_info("on-device context cleared: %s", id);
     return 0;
 }
 
 extern "C" const char* yoai_memory_bandwidth(int threads, int mib, int passes) {
-    yoai::platform::MemoryBandwidth m;
-    if (!yoai::platform::measure_memory_bandwidth(threads, mib, passes, &m)) {
+    yoai::utils::MemoryBandwidth m;
+    if (!yoai::utils::measure_memory_bandwidth(threads, mib, passes, &m)) {
         return nullptr;
     }
 
@@ -776,7 +808,7 @@ extern "C" int yoai_chat(const char* provider_id,
     // return code: the host has a place to show text and no way to turn an int
     // into one.
     auto fail = [&](const std::string& msg) {
-        yoai::platform::log_warn("yoai_chat: %s", msg.c_str());
+        yoai::utils::log_warn("yoai_chat: %s", msg.c_str());
         on_event("error", msg.c_str(), user_data);
         return 1;
     };
@@ -784,8 +816,10 @@ extern "C" int yoai_chat(const char* provider_id,
     if (blank(provider_id))   return fail("no provider given");
     if (blank(messages_json)) return fail("no messages given");
 
-    Entry entry;
-    if (!lookup(provider_id, &entry)) {
+    // Held for the whole turn, so a concurrent edit of this id only affects the
+    // turns after it.
+    std::shared_ptr<Chat> chat = chat_for(provider_id, false);
+    if (!chat) {
         return fail(std::string("unknown provider: ") + provider_id);
     }
 
@@ -803,8 +837,8 @@ extern "C" int yoai_chat(const char* provider_id,
         req.grammar = grammar;
     }
 
-    // One handler for both lanes: the clients speak the same Event vocabulary, so
-    // the only per-lane work is which client runs the turn.
+    // The clients speak the same Event vocabulary, the on-device one included:
+    // it ends a completed turn with CostStatistics just as the remote one does.
     const yoai::llm::EventHandler forward = [&](const Event& e) -> bool {
         const std::string payload = (e.type == EventType::CostStatistics)
                                   ? usage_json(e.cost)
@@ -812,67 +846,11 @@ extern "C" int yoai_chat(const char* provider_id,
         return on_event(tag_for(e.type), payload.c_str(), user_data) != 0;
     };
 
-    if (entry.local) {
-        std::shared_ptr<LocalClient> client = local_client_for(provider_id);
-        if (!client) {
-            // Only reachable if the entry was replaced between the lookup above
-            // and here, which is legal -- the host may edit the registry mid-turn.
-            return fail(std::string("no on-device engine for: ") + provider_id);
-        }
-
-        const bool ok = client->ainvoke(messages, system, forward,
-                                        yoai::llm::UserContext(), req);
-
-        // The engine reports token counts through stats() rather than as an event,
-        // because it has no wire protocol to carry one. Turning them into the same
-        // "usage" event the remote lane ends with is what lets a host show one
-        // token counter instead of two. Skipped when the turn failed or was
-        // cancelled: a partial count presented as a total is worse than none.
-        if (ok) {
-            const LocalStats st = client->stats();
-            yoai::llm::CostStatistics cost;
-            cost.model         = file_name(entry.on_device.model_path);
-            cost.input_tokens  = st.prompt_tokens;
-            cost.output_tokens = st.decoded_tokens;
-            cost.total_tokens  = st.prompt_tokens + st.decoded_tokens;
-            cost.total_cost    = 0.0;   // nobody was billed; the tokens still matter
-            const std::string payload = usage_json(cost);
-            on_event("usage", payload.c_str(), user_data);
-
-            // threads and the two rates are on this line rather than derived by
-            // whoever reads the log: a sweep is compared across many of these,
-            // and pairing each one with a separate "threads ->" line breaks the
-            // moment another turn interleaves. st.n_threads is what the turn
-            // ACTUALLY ran with, after <= 0 has been resolved to a core count.
-            yoai::platform::log_info(
-                "on-device turn: %d prompt (%d reused) + %d decoded tokens, ctx %d, "
-                "threads %d, load %.0fms prefill %.0fms (%.1f tok/s) "
-                "decode %.0fms (first %.0fms, then %.1f tok/s), %d msgs dropped",
-                st.prompt_tokens, st.reused_tokens, st.decoded_tokens, st.n_ctx,
-                st.n_threads, st.load_ms,
-                st.prefill_ms,
-                st.prefill_ms > 0
-                    ? (st.prompt_tokens - st.reused_tokens) * 1000.0 / st.prefill_ms : 0.0,
-                st.decode_ms, st.first_token_ms,
-                // The rate AFTER the first token, which is the one that predicts
-                // a longer reply. Dividing the whole span by the whole count
-                // mixes in a per-turn cost that does not repeat, and on an
-                // eleven-token reply that cost is most of the span.
-                (st.decode_ms - st.first_token_ms) > 0 && st.decoded_tokens > 1
-                    ? (st.decoded_tokens - 1) * 1000.0 /
-                          (st.decode_ms - st.first_token_ms)
-                    : 0.0,
-                st.dropped_msgs);
-        }
-        return ok ? 0 : 1;
-    }
-
+    // Needed only by a remote turn, and a no-op after the first call, so it is
+    // not worth asking which kind of Chat this is.
     ensure_curl();
 
-    yoai::llm::OpenAIChatClient client(entry.remote);
-    const bool ok = client.ainvoke(messages, system, forward,
-                                   yoai::llm::UserContext(), req);
-
+    const bool ok = chat->ainvoke(messages, system, forward, yoai::llm::UserContext(), req);
     return ok ? 0 : 1;
 }
 
@@ -990,7 +968,7 @@ extern "C" int yoai_voice_available(void) {
 
 extern "C" int yoai_voice_load(const char* model_path) {
     if (blank(model_path)) {
-        yoai::platform::log_warn("yoai_voice_load: model_path is required");
+        yoai::utils::log_warn("yoai_voice_load: model_path is required");
         return 1;
     }
     std::lock_guard<std::mutex> guard(voice_mutex());
@@ -1014,7 +992,7 @@ extern "C" void yoai_voice_unload(void) {
 extern "C" int yoai_voice_set_itn(int on) {
     std::lock_guard<std::mutex> guard(voice_mutex());
     if (!voice_loaded()) {
-        yoai::platform::log_warn("yoai_voice_set_itn: no model is loaded");
+        yoai::utils::log_warn("yoai_voice_set_itn: no model is loaded");
         return 1;
     }
     return recognizer().set_inverse_text_normalization(on != 0) ? 0 : 1;
@@ -1023,14 +1001,14 @@ extern "C" int yoai_voice_set_itn(int on) {
 extern "C" int yoai_voice_set_threads(int threads) {
     std::lock_guard<std::mutex> guard(voice_mutex());
     if (!voice_loaded()) {
-        yoai::platform::log_warn("yoai_voice_set_threads: no model is loaded");
+        yoai::utils::log_warn("yoai_voice_set_threads: no model is loaded");
         return 1;
     }
     recognizer().set_threads(threads);
     // Logged rather than returned, for the same reason the on-device lane's is:
     // the number that matters is the one the NEXT transcript was produced with,
     // and the two lines are read together.
-    yoai::platform::log_info("voice threads: -> %d", threads);
+    yoai::utils::log_info("voice threads: -> %d", threads);
     return 0;
 }
 
@@ -1038,11 +1016,11 @@ extern "C" const char* yoai_voice_analyze(const short* pcm,
                                           int n_samples,
                                           int sample_rate) {
     if (pcm == nullptr || n_samples <= 0) {
-        yoai::platform::log_warn("yoai_voice_analyze: pcm and n_samples are required");
+        yoai::utils::log_warn("yoai_voice_analyze: pcm and n_samples are required");
         return nullptr;
     }
     if (sample_rate != 16000) {
-        yoai::platform::log_error(
+        yoai::utils::log_error(
             "yoai_voice_analyze: sample_rate is %d, must be 16000 -- the core carries "
             "no resampler, capture at 16 kHz",
             sample_rate);
@@ -1261,7 +1239,7 @@ extern "C" int yoai_omni_available(void) {
 
 extern "C" int yoai_omni_load(const char* model_dir) {
     if (blank(model_dir)) {
-        yoai::platform::log_warn("yoai_omni_load: model_dir is required");
+        yoai::utils::log_warn("yoai_omni_load: model_dir is required");
         return 1;
     }
     std::lock_guard<std::mutex> guard(omni_mutex());
@@ -1282,7 +1260,7 @@ extern "C" void yoai_omni_unload(void) {
     // Nothing to release explicitly: the engine drops its weights when another
     // load replaces them or the process ends. Kept for symmetry with the other
     // lanes, and so a host has one place to say "I am done with this".
-    yoai::platform::log_info("yoai_omni_unload: weights stay until replaced");
+    yoai::utils::log_info("yoai_omni_unload: weights stay until replaced");
 }
 
 extern "C" const char* yoai_omni_ask(const short* pcm,
@@ -1292,7 +1270,7 @@ extern "C" const char* yoai_omni_ask(const short* pcm,
                                      yoai_omni_text_handler on_text,
                                      void* user_data) {
     if (pcm == nullptr || n_samples <= 0 || blank(prompt)) {
-        yoai::platform::log_warn("yoai_omni_ask: pcm, n_samples and prompt are required");
+        yoai::utils::log_warn("yoai_omni_ask: pcm, n_samples and prompt are required");
         return nullptr;
     }
 
@@ -1417,7 +1395,7 @@ extern "C" int yoai_tts_available(void) {
 
 extern "C" int yoai_tts_load(const char* talker_path, const char* codec_path) {
     if (blank(talker_path) || blank(codec_path)) {
-        yoai::platform::log_warn("yoai_tts_load: both model paths are required");
+        yoai::utils::log_warn("yoai_tts_load: both model paths are required");
         return 1;
     }
     std::lock_guard<std::mutex> guard(tts_mutex());
@@ -1517,7 +1495,7 @@ extern "C" const char* yoai_tts_say(const char* text,
                                     yoai_tts_audio_handler on_audio,
                                     void* user_data) {
     if (blank(text)) {
-        yoai::platform::log_warn("yoai_tts_say: text is required");
+        yoai::utils::log_warn("yoai_tts_say: text is required");
         return nullptr;
     }
 
@@ -1592,13 +1570,13 @@ bool bundle_progress_bridge(const char* name, unsigned long long done,
 
 extern "C" const char* yoai_bundle_list(const char* bundle_path) {
     if (blank(bundle_path)) {
-        yoai::platform::log_warn("yoai_bundle_list: bundle_path is required");
+        yoai::utils::log_warn("yoai_bundle_list: bundle_path is required");
         return nullptr;
     }
 
-    std::vector<yoai::platform::BundleEntry> entries;
+    std::vector<yoai::utils::BundleEntry> entries;
     unsigned long long total = 0;
-    if (!yoai::platform::bundle_list(bundle_path, &entries, &total)) {
+    if (!yoai::utils::bundle_list(bundle_path, &entries, &total)) {
         return nullptr;
     }
 
@@ -1628,7 +1606,7 @@ extern "C" int yoai_bundle_extract(const char* bundle_path,
                                    yoai_bundle_progress on_progress,
                                    void* user_data) {
     if (blank(bundle_path) || blank(dest_dir)) {
-        yoai::platform::log_warn(
+        yoai::utils::log_warn(
             "yoai_bundle_extract: bundle_path and dest_dir are both required");
         return 1;
     }
@@ -1637,7 +1615,7 @@ extern "C" int yoai_bundle_extract(const char* bundle_path,
     bridge.handler   = on_progress;
     bridge.user_data = user_data;
 
-    const bool ok = yoai::platform::bundle_extract(
+    const bool ok = yoai::utils::bundle_extract(
         bundle_path, dest_dir,
         on_progress ? bundle_progress_bridge : 0,
         on_progress ? &bridge : 0);
@@ -1714,7 +1692,7 @@ extern "C" int yoai_reader_load(const char* talker_path, const char* codec_path,
                                 int voices) {
     if (blank(talker_path) || blank(codec_path)) {
         reader_error() = "talker_path and codec_path are both required";
-        yoai::platform::log_warn("yoai_reader_load: %s", reader_error().c_str());
+        yoai::utils::log_warn("yoai_reader_load: %s", reader_error().c_str());
         return 1;
     }
     std::lock_guard<std::mutex> guard(reader_mutex());

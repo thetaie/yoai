@@ -1,6 +1,6 @@
 #include "voice/tts/reader.hpp"
 
-#include "platform/log.hpp"
+#include "utils/log.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -566,7 +566,7 @@ bool Reader::load(const std::string& talker_path, const std::string& codec_path,
             // All or nothing: a half-loaded pool would read some sentences and
             // silently skip the rest, which is worse than not starting.
             m->drop_engines();
-            platform::log_error("reader: voice %d of %d failed to load -- %s",
+            utils::log_error("reader: voice %d of %d failed to load -- %s",
                                 k + 1, voices, m->error.c_str());
             return false;
         }
@@ -574,7 +574,7 @@ bool Reader::load(const std::string& talker_path, const std::string& codec_path,
     }
 
     m->apply_settings();
-    platform::log_info("reader: %d voice(s) loaded in %.1f s, %s",
+    utils::log_info("reader: %d voice(s) loaded in %.1f s, %s",
                        voices, seconds_since(started), m->engines[0]->model_type().c_str());
     return true;
 }
@@ -704,10 +704,10 @@ void Reader::Impl::dispatch(const std::vector<std::string>& ready, bool closing)
         //
         // This used to come out as mojibake on a Windows console, which is a
         // code page rendering correct UTF-8 bytes rather than anything wrong
-        // with the text. platform/log.cpp now writes a record through
+        // with the text. utils/log.cpp now writes a record through
         // WriteConsoleW when stderr is a console, so the code page is out of
         // the path and `chcp 65001` is no longer needed to read this line.
-        platform::log_info("reader: piece %d, %d char(s): %s",
+        utils::log_info("reader: piece %d, %d char(s): %s",
                            static_cast<int>(pieces.size()) - 1,
                            static_cast<int>(count_chars(spoken)), spoken.c_str());
     }
@@ -807,7 +807,7 @@ bool Reader::finish(ReaderResult* out) {
         if (m->error.empty()) {
             m->error = "a sentence failed to synthesize";
         }
-        platform::log_error("reader: stopped after %.2f s -- %s", elapsed, m->error.c_str());
+        utils::log_error("reader: stopped after %.2f s -- %s", elapsed, m->error.c_str());
         return false;
     }
 
@@ -833,7 +833,7 @@ bool Reader::finish(ReaderResult* out) {
     // however long the writer took as well as the synthesis. Measured on one
     // turn, the engine reported 0.67x for the same audio this line called 2.01x
     // -- the gap was the language model, not the speech.
-    platform::log_info("reader: %d piece(s) on %d voice(s) -- %.2f s of speech in %.2f s "
+    utils::log_info("reader: %d piece(s) on %d voice(s) -- %.2f s of speech in %.2f s "
                        "(%.2fx of wall clock, text included), first audio %.2f s, "
                        "%.2f s starved, %.2f s held",
                        static_cast<int>(m->pieces.size()), static_cast<int>(m->engines.size()),

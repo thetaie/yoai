@@ -1,6 +1,6 @@
 #include "voice/tts/qwen3_tts.hpp"
 
-#include "platform/log.hpp"
+#include "utils/log.hpp"
 
 #include <chrono>
 #include <string>
@@ -52,10 +52,10 @@ void forward_log(qt_log_level level, const char* msg, void* /*user_data*/) {
         return;
     }
     switch (level) {
-        case QT_LOG_ERROR: platform::log_error("qtts: %s", msg); break;
-        case QT_LOG_WARN:  platform::log_warn("qtts: %s", msg);  break;
-        case QT_LOG_INFO:  platform::log_info("qtts: %s", msg);  break;
-        default:           platform::log_debug("qtts: %s", msg); break;
+        case QT_LOG_ERROR: utils::log_error("qtts: %s", msg); break;
+        case QT_LOG_WARN:  utils::log_warn("qtts: %s", msg);  break;
+        case QT_LOG_INFO:  utils::log_info("qtts: %s", msg);  break;
+        default:           utils::log_debug("qtts: %s", msg); break;
     }
 }
 
@@ -248,14 +248,14 @@ GpuMemory vulkan_gpu_memory() {
     VkInstance     instance = VK_NULL_HANDLE;
     const VkResult rc       = vkCreateInstance(&ci, nullptr, &instance);
     if (rc != VK_SUCCESS) {
-        platform::log_warn("qtts: GPU probe: vkCreateInstance failed (%d)", static_cast<int>(rc));
+        utils::log_warn("qtts: GPU probe: vkCreateInstance failed (%d)", static_cast<int>(rc));
         return GpuMemory::Unknown;
     }
 
     uint32_t       count = 0;
     const VkResult n_rc  = vkEnumeratePhysicalDevices(instance, &count, nullptr);
     if (n_rc != VK_SUCCESS || count == 0) {
-        platform::log_warn("qtts: GPU probe: no physical devices (%d, count %u)",
+        utils::log_warn("qtts: GPU probe: no physical devices (%d, count %u)",
                            static_cast<int>(n_rc), count);
         vkDestroyInstance(instance, nullptr);
         return GpuMemory::Unknown;
@@ -264,7 +264,7 @@ GpuMemory vulkan_gpu_memory() {
     std::vector<VkPhysicalDevice> devices(count);
     const VkResult                e_rc = vkEnumeratePhysicalDevices(instance, &count, devices.data());
     if (e_rc != VK_SUCCESS) {
-        platform::log_warn("qtts: GPU probe: enumerate failed (%d)", static_cast<int>(e_rc));
+        utils::log_warn("qtts: GPU probe: enumerate failed (%d)", static_cast<int>(e_rc));
         vkDestroyInstance(instance, nullptr);
         return GpuMemory::Unknown;
     }
@@ -274,7 +274,7 @@ GpuMemory vulkan_gpu_memory() {
     for (VkPhysicalDevice dev : devices) {
         VkPhysicalDeviceProperties props{};
         vkGetPhysicalDeviceProperties(dev, &props);
-        platform::log_info("qtts: GPU probe: %s (type %d)", props.deviceName,
+        utils::log_info("qtts: GPU probe: %s (type %d)", props.deviceName,
                            static_cast<int>(props.deviceType));
         if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
             discrete = true;
@@ -389,11 +389,11 @@ void apply_vulkan_env() {
         unset_env("GGML_VK_PREFER_HOST_MEMORY");
         unset_env("GGML_VK_SUBALLOCATION_BLOCK_SIZE");
         unset_env("GGML_VK_DISABLE_MMVQ");
-        platform::log_info("qtts: %s -- ggml's Vulkan defaults, not the shared-memory tuning",
+        utils::log_info("qtts: %s -- ggml's Vulkan defaults, not the shared-memory tuning",
                            mem == GpuMemory::Dedicated ? "discrete GPU" : "GPU memory unknown");
         return;
     }
-    platform::log_info("qtts: integrated GPU -- the shared-memory tuning");
+    utils::log_info("qtts: integrated GPU -- the shared-memory tuning");
 #endif
     set_env_default("GGML_VK_PREFER_HOST_MEMORY", "1");
     set_env_default("GGML_VK_SUBALLOCATION_BLOCK_SIZE", "67108864");
@@ -582,15 +582,15 @@ bool Qtts::load(const std::string& talker_path, const std::string& codec_path) {
 
     if (talker_path.empty() || codec_path.empty()) {
         m->error = "both a talker GGUF and a codec GGUF are required";
-        platform::log_error("qtts: %s", m->error.c_str());
+        utils::log_error("qtts: %s", m->error.c_str());
         return false;
     }
     unload();
 
     qt_log_set(&forward_log, 0);
-    platform::log_info("qtts: %s", qt_version());
-    platform::log_info("qtts: talker %s", talker_path.c_str());
-    platform::log_info("qtts: codec  %s", codec_path.c_str());
+    utils::log_info("qtts: %s", qt_version());
+    utils::log_info("qtts: talker %s", talker_path.c_str());
+    utils::log_info("qtts: codec  %s", codec_path.c_str());
 
     // Before qt_init, because that is the only moment it is read. The engine
     // logs the count it settled on -- "[Load] ... (CPU threads: N)" -- which is
@@ -614,12 +614,12 @@ bool Qtts::load(const std::string& talker_path, const std::string& codec_path) {
     if (!m->ctx) {
         const char* why = qt_last_error();
         m->error = why && *why ? why : "qt_init failed";
-        platform::log_error("qtts: load failed -- %s", m->error.c_str());
+        utils::log_error("qtts: load failed -- %s", m->error.c_str());
         return false;
     }
     const char* kind = qt_model_type(m->ctx);
     m->model_type = kind ? kind : "";
-    platform::log_info("qtts: loaded in %.2f s, model type '%s', %d codebooks",
+    utils::log_info("qtts: loaded in %.2f s, model type '%s', %d codebooks",
                        seconds_since(started), m->model_type.c_str(),
                        qt_num_codebooks(m->ctx));
 
@@ -628,7 +628,7 @@ bool Qtts::load(const std::string& talker_path, const std::string& codec_path) {
     const int n = qt_n_speakers(m->ctx);
     for (int i = 0; i < n; ++i) {
         const char* name = qt_speaker_name(m->ctx, i);
-        platform::log_info("qtts:   speaker %d: %s", i, name ? name : "(null)");
+        utils::log_info("qtts:   speaker %d: %s", i, name ? name : "(null)");
     }
     return true;
 }
@@ -681,14 +681,14 @@ bool Qtts::set_reference(const std::string& wav_path, const std::string& transcr
     std::string why;
     if (!read_reference_wav(wav_path, &pcm, &why)) {
         m->error = why;
-        platform::log_error("qtts: reference %s -- %s", wav_path.c_str(), why.c_str());
+        utils::log_error("qtts: reference %s -- %s", wav_path.c_str(), why.c_str());
         return false;
     }
     // Refused rather than stored: say() treats an empty reference as none, so
     // accepting it would report success and then synthesize unanchored.
     if (pcm.empty()) {
         m->error = "reference " + wav_path + " has no samples";
-        platform::log_error("qtts: %s", m->error.c_str());
+        utils::log_error("qtts: %s", m->error.c_str());
         return false;
     }
 
@@ -700,7 +700,7 @@ bool Qtts::set_reference(const std::string& wav_path, const std::string& transcr
     // many frames of attention are added to each one. Asked of the model rather
     // than divided out here, so it stays right if the codec's rate ever differs.
     const int frames = m->ctx ? qt_duration_sec_to_tokens(m->ctx, reference_seconds()) : 0;
-    platform::log_info("qtts: reference %.2f s, %d frames of context, from %s",
+    utils::log_info("qtts: reference %.2f s, %d frames of context, from %s",
                        reference_seconds(), frames, wav_path.c_str());
     return true;
 }
@@ -725,12 +725,12 @@ bool Qtts::set_reference_voice(const std::string& wav_path) {
     std::string why;
     if (!read_reference_wav(wav_path, &pcm, &why)) {
         m->error = why;
-        platform::log_error("qtts: reference voice %s -- %s", wav_path.c_str(), why.c_str());
+        utils::log_error("qtts: reference voice %s -- %s", wav_path.c_str(), why.c_str());
         return false;
     }
     if (pcm.empty()) {
         m->error = "reference voice " + wav_path + " has no samples";
-        platform::log_error("qtts: %s", m->error.c_str());
+        utils::log_error("qtts: %s", m->error.c_str());
         return false;
     }
 
@@ -742,7 +742,7 @@ bool Qtts::set_reference_voice(const std::string& wav_path) {
         m->error = std::string("could not extract a speaker embedding: ") +
                    (engine && *engine ? engine : status_name(rc));
         qt_voice_ref_free(&ref);
-        platform::log_error("qtts: %s", m->error.c_str());
+        utils::log_error("qtts: %s", m->error.c_str());
         return false;
     }
 
@@ -755,7 +755,7 @@ bool Qtts::set_reference_voice(const std::string& wav_path) {
     m->reference.clear();
     m->reference_text.clear();
 
-    platform::log_info("qtts: reference voice from %.2f s of %s -- %d-dimension embedding, "
+    utils::log_info("qtts: reference voice from %.2f s of %s -- %d-dimension embedding, "
                        "no context cost",
                        static_cast<double>(pcm.size()) / sample_rate(), wav_path.c_str(),
                        static_cast<int>(m->ref_spk_emb.size()));
@@ -927,7 +927,7 @@ bool Qtts::say(const std::string& text, QttsAudioSink sink, void* user_data, Qtt
     if (rc != QT_STATUS_OK && !cancelled_by_sink) {
         const char* why = qt_last_error();
         m->error = std::string(status_name(rc)) + (why && *why ? std::string(": ") + why : std::string());
-        platform::log_error("qtts: synthesis failed after %.2f s -- %s", elapsed, m->error.c_str());
+        utils::log_error("qtts: synthesis failed after %.2f s -- %s", elapsed, m->error.c_str());
         qt_audio_free(&audio);
         m->sink = 0;
         return false;
@@ -968,7 +968,7 @@ bool Qtts::say(const std::string& text, QttsAudioSink sink, void* user_data, Qtt
         out->peak_dbfs           = m->level.peak_dbfs();
         out->level_drift_db      = m->level.drift_db();
     }
-    platform::log_info("qtts: %.2f s of speech in %.2f s (%.2fx), %s, first audio %.0f ms, "
+    utils::log_info("qtts: %.2f s of speech in %.2f s (%.2fx), %s, first audio %.0f ms, "
                        "%d chunk(s), peak %.1f dBFS, level drift %.1f dB%s",
                        speech, elapsed, speech > 0.0f ? elapsed / speech : 0.0,
                        stream ? "streamed" : "buffered",
@@ -1003,7 +1003,7 @@ bool Qtts::loaded() const { return false; }
 
 bool Qtts::load(const std::string&, const std::string&) {
     impl_->error = "this build has no qwentts.cpp (YOAI_QTTS off)";
-    platform::log_error("qtts: %s", impl_->error.c_str());
+    utils::log_error("qtts: %s", impl_->error.c_str());
     return false;
 }
 

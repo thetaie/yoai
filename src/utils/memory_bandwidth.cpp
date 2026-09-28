@@ -1,6 +1,6 @@
-#include "platform/membw.hpp"
+#include "utils/memory_bandwidth.hpp"
 
-#include "platform/log.hpp"
+#include "utils/log.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -14,7 +14,7 @@
 #endif
 
 namespace yoai {
-namespace platform {
+namespace utils {
 
 namespace {
 
@@ -140,7 +140,7 @@ bool measure_memory_bandwidth(int threads, int mib, int passes, MemoryBandwidth*
         try {
             fallback.resize(words);
         } catch (...) {
-            log_error("membw: could not allocate %d MiB", mib);
+            log_error("memory bandwidth: could not allocate %d MiB", mib);
             return false;
         }
         data = &fallback[0];
@@ -178,7 +178,7 @@ bool measure_memory_bandwidth(int threads, int mib, int passes, MemoryBandwidth*
     out->gb_per_s =
         elapsed > 0.0 ? (static_cast<double>(bytes) * passes) / elapsed / 1e9 : 0.0;
 
-    log_info("membw: %d thread(s), %d MiB x %d passes in %.3f s = %.1f GB/s (%s pages)",
+    log_info("memory bandwidth: %d thread(s), %d MiB x %d passes in %.3f s = %.1f GB/s (%s pages)",
              threads, mib, passes, elapsed, out->gb_per_s,
              huge ? "huge" : "default");
 
@@ -190,5 +190,5 @@ bool measure_memory_bandwidth(int threads, int mib, int passes, MemoryBandwidth*
     return true;
 }
 
-}  // namespace platform
+}  // namespace utils
 }  // namespace yoai

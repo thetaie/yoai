@@ -1,7 +1,6 @@
 #include "store/timeline.hpp"
 
-#include "platform/log.hpp"
-#include "store/migrations.hpp"   // generated from sql/sqlite/*.sql
+#include "store/sql.hpp"
 
 #include <sqlite3.h>
 
@@ -10,6 +9,7 @@
 #include <cstring>
 #include <ctime>
 #include <mutex>
+#include <utility>
 
 namespace yoai {
 namespace store {
@@ -60,112 +60,10 @@ int day_of(long long ms, int tz_minutes) {
     return static_cast<int>((ms + static_cast<long long>(tz_minutes) * 60000) / 86400000);
 }
 
-//------------------------------------------------------------------------------
-// SQLite helpers
-//------------------------------------------------------------------------------
-
-// A prepared statement that finalizes itself. Every query below is prepared per
-// call rather than cached: these run at human speed -- a tap, a screen open --
-// and a cache would buy nothing while adding a lifetime to get wrong.
-class Stmt {
-public:
-    Stmt(sqlite3* db, const char* sql) : stmt_(0) {
-        rc_ = sqlite3_prepare_v2(db, sql, -1, &stmt_, 0);
-    }
-    ~Stmt() { sqlite3_finalize(stmt_); }
-
-    bool ok() const { return rc_ == SQLITE_OK && stmt_ != 0; }
-    sqlite3_stmt* get() { return stmt_; }
-
-    void bind(int i, long long v) { sqlite3_bind_int64(stmt_, i, v); }
-    void bind(int i, const std::string& v) {
-        sqlite3_bind_text(stmt_, i, v.c_str(), static_cast<int>(v.size()), SQLITE_TRANSIENT);
-    }
-    void bind_null(int i) { sqlite3_bind_null(stmt_, i); }
-
-    int step() { return sqlite3_step(stmt_); }
-
-private:
-    Stmt(const Stmt&);
-    Stmt& operator=(const Stmt&);
-    sqlite3_stmt* stmt_;
-    int           rc_;
-};
-
-std::string col_text(sqlite3_stmt* s, int i) {
-    const unsigned char* p = sqlite3_column_text(s, i);
-    return p ? std::string(reinterpret_cast<const char*>(p)) : std::string();
-}
-
-bool fail(sqlite3* db, const char* what, std::string* err) {
-    if (err) {
-        *err = std::string(what) + ": " + (db ? sqlite3_errmsg(db) : "no database");
-    }
-    return false;
-}
-
-bool exec(sqlite3* db, const char* sql, std::string* err) {
-    char* msg = 0;
-    if (sqlite3_exec(db, sql, 0, 0, &msg) != SQLITE_OK) {
-        if (err) {
-            *err = std::string("exec: ") + (msg ? msg : "unknown");
-        }
-        sqlite3_free(msg);
-        return false;
-    }
-    return true;
-}
-
-//------------------------------------------------------------------------------
-// Schema
-//------------------------------------------------------------------------------
-
-// The applied schema version, or 0 for a database that has never been touched.
-//
-// Reads user_version rather than a row in meta: meta is itself created by the
-// first migration, so asking it what version we are at would require the schema
-// it is supposed to tell us about. user_version is a header field that exists
-// before any table does.
-int schema_version(sqlite3* db) {
-    Stmt s(db, "PRAGMA user_version;");
-    if (!s.ok() || s.step() != SQLITE_ROW) {
-        return 0;
-    }
-    return sqlite3_column_int(s.get(), 0);
-}
-
-// Apply every migration newer than the current version, each in its own
-// transaction so a failure leaves the database at the last version that fully
-// succeeded rather than half way through one.
-bool migrate(sqlite3* db, std::string* err) {
-    const int from = schema_version(db);
-    for (int i = 0; i < kMigrationCount; ++i) {
-        const Migration& m = kMigrations[i];
-        if (m.version <= from) {
-            continue;
-        }
-        if (!exec(db, "BEGIN IMMEDIATE;", err)) {
-            return false;
-        }
-        if (!exec(db, m.sql, err)) {
-            exec(db, "ROLLBACK;", 0);
-            if (err) {
-                *err = std::string("migration ") + m.name + ": " + *err;
-            }
-            return false;
-        }
-        // PRAGMA takes no parameters, so this one is composed. The value is an
-        // int from a build-time table, never anything a user typed.
-        char pragma[64];
-        std::snprintf(pragma, sizeof(pragma), "PRAGMA user_version = %d;", m.version);
-        if (!exec(db, pragma, err) || !exec(db, "COMMIT;", err)) {
-            exec(db, "ROLLBACK;", 0);
-            return false;
-        }
-        platform::log_info("applied %s", m.name);
-    }
-    return true;
-}
+using sql::Stmt;
+using sql::col_text;
+using sql::exec;
+using sql::fail;
 
 }  // namespace
 
@@ -174,18 +72,14 @@ bool migrate(sqlite3* db, std::string* err) {
 //------------------------------------------------------------------------------
 
 struct Timeline::Impl {
-    sqlite3*   db;
-    std::mutex mutex;   // guards the multi-statement transactions below
+    std::shared_ptr<Db> db;
 
-    Impl() : db(0) {}
+    explicit Impl(std::shared_ptr<Db> d) : db(std::move(d)) {}
 };
 
-Timeline::Timeline() : impl_(new Impl) {}
+Timeline::Timeline(std::shared_ptr<Db> db) : impl_(new Impl(std::move(db))) {}
 
 Timeline::~Timeline() {
-    if (impl_->db) {
-        sqlite3_close(impl_->db);
-    }
     delete impl_;
 }
 
@@ -225,45 +119,6 @@ int Timeline::iso_to_day(const std::string& iso) {
     // Read back as UTC, so no timezone is consulted: a day number is already
     // offset-applied and must not pick up the device's offset a second time.
     return static_cast<int>(as_utc(tm) / 86400);
-}
-
-Timeline* Timeline::open(const std::string& dir, std::string* err) {
-    Timeline* self = new Timeline();
-    std::string path = dir;
-    if (!path.empty() && path[path.size() - 1] != '/' && path[path.size() - 1] != '\\') {
-        path += "/";
-    }
-    path += "yoai.db";
-
-    if (sqlite3_open(path.c_str(), &self->impl_->db) != SQLITE_OK) {
-        if (err) {
-            *err = "open " + path + ": " +
-                   (self->impl_->db ? sqlite3_errmsg(self->impl_->db) : "out of memory");
-        }
-        delete self;
-        return 0;
-    }
-
-    sqlite3* db = self->impl_->db;
-
-    // WAL so a read never blocks the write that a tap just made, and a bounded
-    // busy timeout so a contended write reports itself instead of spinning.
-    // synchronous=NORMAL is the WAL-appropriate setting: a power loss can cost
-    // the last transactions, which here is one tap, and never the database.
-    if (!exec(db, "PRAGMA journal_mode=WAL;", err) ||
-        !exec(db, "PRAGMA synchronous=NORMAL;", err) ||
-        !exec(db, "PRAGMA busy_timeout=3000;", err)) {
-        delete self;
-        return 0;
-    }
-
-    if (!migrate(db, err)) {
-        delete self;
-        return 0;
-    }
-
-    platform::log_info("timeline opened: %s (schema v%d)", path.c_str(), schema_version(db));
-    return self;
 }
 
 namespace {
@@ -329,8 +184,8 @@ bool Timeline::switch_to(const std::string& state_id, std::string* err) {
         if (err) *err = "switch_to: state_id is required";
         return false;
     }
-    std::lock_guard<std::mutex> lock(impl_->mutex);
-    sqlite3* db = impl_->db;
+    std::lock_guard<std::mutex> lock(impl_->db->lock());
+    sqlite3* db = impl_->db->handle();
 
     if (!exec(db, "BEGIN IMMEDIATE;", err)) {
         return false;
@@ -398,8 +253,8 @@ bool Timeline::end_current(std::string* err) {
 }
 
 bool Timeline::end_at(long long at, std::string* err) {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
-    sqlite3* db = impl_->db;
+    std::lock_guard<std::mutex> lock(impl_->db->lock());
+    sqlite3* db = impl_->db->handle();
 
     Entry cur;
     bool  have = false;
@@ -443,8 +298,8 @@ bool Timeline::end_at(long long at, std::string* err) {
 }
 
 bool Timeline::undo(std::string* err) {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
-    sqlite3* db = impl_->db;
+    std::lock_guard<std::mutex> lock(impl_->db->lock());
+    sqlite3* db = impl_->db->handle();
 
     if (!exec(db, "BEGIN IMMEDIATE;", err)) {
         return false;
@@ -509,8 +364,8 @@ bool Timeline::note_add(const std::string& text, std::string* err) {
         if (err) *err = "note_add: text is required";
         return false;
     }
-    std::lock_guard<std::mutex> lock(impl_->mutex);
-    sqlite3* db = impl_->db;
+    std::lock_guard<std::mutex> lock(impl_->db->lock());
+    sqlite3* db = impl_->db->handle();
 
     Entry cur;
     bool  have = false;
@@ -536,8 +391,8 @@ bool Timeline::note_add(const std::string& text, std::string* err) {
 }
 
 bool Timeline::now(Now* out, std::string* err) {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
-    sqlite3* db = impl_->db;
+    std::lock_guard<std::mutex> lock(impl_->db->lock());
+    sqlite3* db = impl_->db->handle();
     *out = Now();
 
     if (!current_entry(db, &out->current, &out->has_current, err)) {
@@ -572,8 +427,8 @@ bool Timeline::recent(int hours, std::vector<Entry>* out, std::string* err) {
         if (err) *err = "recent: hours must be positive";
         return false;
     }
-    std::lock_guard<std::mutex> lock(impl_->mutex);
-    sqlite3* db = impl_->db;
+    std::lock_guard<std::mutex> lock(impl_->db->lock());
+    sqlite3* db = impl_->db->handle();
     out->clear();
 
     // Overlap, not containment: a stretch that began before the window and is
@@ -609,8 +464,8 @@ bool Timeline::recent(int hours, std::vector<Entry>* out, std::string* err) {
 }
 
 bool Timeline::day(int local_day, std::vector<Entry>* out, std::string* err) {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
-    sqlite3* db = impl_->db;
+    std::lock_guard<std::mutex> lock(impl_->db->lock());
+    sqlite3* db = impl_->db->handle();
     out->clear();
 
     // An entry touches a day when the day falls anywhere between its two end

@@ -1,4 +1,4 @@
-#include "platform/log.hpp"
+#include "utils/log.hpp"
 
 #include <atomic>
 #include <cctype>
@@ -26,7 +26,7 @@
 #include <windows.h>
 #endif
 
-namespace yoai { namespace platform {
+namespace yoai { namespace utils {
 
 namespace {
 

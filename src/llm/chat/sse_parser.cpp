@@ -1,4 +1,4 @@
-#include "llm/sse_parser.hpp"
+#include "llm/chat/sse_parser.hpp"
 
 #include <cstring>
 #include <string>

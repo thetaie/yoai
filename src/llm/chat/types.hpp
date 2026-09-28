@@ -8,7 +8,7 @@
 // abstract interface) and each concrete client all need these types and none of
 // them should have to include another client to get them.
 
-#include "llm/event.hpp"
+#include "llm/chat/event.hpp"
 
 #include <cstdint>
 #include <functional>
@@ -39,7 +39,7 @@ struct UserContext {
 // carries in its own Options struct.
 //
 // The distinction is load-bearing: the on-device client is cached per provider
-// and reused for every turn against that model (platform/c_api.cpp), so a
+// and reused for every turn against that model (yoai.cpp), so a
 // setting that belongs to one request cannot live on the client without leaking
 // into the next conversation.
 struct RequestOptions {

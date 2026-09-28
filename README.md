@@ -17,9 +17,12 @@ the same C ABI, and nothing above it had to learn about lanes.
 ```
 src/                  the core -- a static library plus a C ABI
   yoai.h                the whole public surface (~150 lines of contract)
-  llm/                  one streaming client per provider protocol
-  client/               HTTP + TLS
-  platform/             logging, and the C ABI's implementation
+  yoai.cpp              its implementation
+  llm/                  chat and embedding models, on device or remote
+  store/                yoai.db: the one connection, the timeline, the vectors
+  voice/                speech in and out
+  utils/                what is too small for a directory of its own:
+                        logging, HTTP + TLS, bundles, a memory benchmark
 cli/                  a desktop harness -- run the core without a device
 harmony/              the HarmonyOS app (ArkTS) + its NAPI bridge
 android/              a measurement bench (Compose) + its JNI bridge

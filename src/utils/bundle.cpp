@@ -1,6 +1,6 @@
-#include "platform/bundle.hpp"
+#include "utils/bundle.hpp"
 
-#include "platform/log.hpp"
+#include "utils/log.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -23,7 +23,7 @@
 #endif
 
 namespace yoai {
-namespace platform {
+namespace utils {
 namespace {
 
 const char  kMagic[8]   = {'B', 'C', 'B', 'U', 'N', 'D', 'L', '1'};
@@ -283,5 +283,5 @@ bool bundle_extract(const std::string& bundle_path, const std::string& dest_dir,
     return true;
 }
 
-}  // namespace platform
+}  // namespace utils
 }  // namespace yoai

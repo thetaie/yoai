@@ -181,4 +181,4 @@ git update-index --no-skip-worktree harmony/build-profile.json5
 Core logs go to hilog under the tag `bodyclock`, so they show up in DevEco's Log
 window beside the ArkTS ones. `nativeSetLogLevel('debug')` turns on the verbose
 ones. On desktop the same core logs to stderr instead — see
-`src/platform/log.cpp`.
+`src/utils/log.cpp`.

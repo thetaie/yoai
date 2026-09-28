@@ -219,7 +219,7 @@ void yoai_provider_clear(void);
 const char* yoai_providers(void);
 
 //------------------------------------------------------------------------------
-// On-device models (llama.cpp + GGUF)
+// On-device models (llama.cpp + GGUF, or MNN)
 //------------------------------------------------------------------------------
 //
 // A second kind of entry in the SAME registry as the remote providers above. An
@@ -229,14 +229,18 @@ const char* yoai_providers(void);
 // business, so a host that never adds a local model is unaffected by all of
 // this.
 //
+// Two engines can run one, and the path decides which: a directory holding
+// config.json is an MNN export and runs on MNN, anything else is taken to be a
+// GGUF and runs on llama.cpp. The host never names the engine.
+//
 // The weights are read from a path and mmapped, so `model_path` must be a real
 // filesystem path the process can open -- not a URI, not a file descriptor. On
 // HarmonyOS a file the user grants through the document picker satisfies that;
 // see harmony's LocalModelStore for the grant handling that keeps it true across
 // launches.
 
-// Whether this build has the engine compiled in: 1 if yes, 0 if it was built
-// without llama.cpp. When 0, everything below still exists and answers
+// Whether this build has an on-device engine compiled in: 1 if it has
+// llama.cpp, MNN or both, 0 if it has neither. When 0, everything below still exists and answers
 // truthfully -- yoai_local_set succeeds and the entry appears in the menu, but a
 // turn against it reports the absence as an "error" event. A host should call
 // this before offering an "add an on-device model" affordance at all.
@@ -249,14 +253,20 @@ int yoai_local_available(void);
 //                 yoai_provider_set. Shares one namespace with the remote
 //                 entries, so registering a local model under an id already
 //                 held by a remote one replaces it. Required.
-//   model_path    absolute path to a .gguf the process can open. Required. NOT
-//                 validated here -- the file is opened on the first turn (or by
-//                 yoai_local_load), so a path that has gone stale reports itself
-//                 as an "error" event rather than at registration time.
+//   model_path    absolute path to a .gguf, or to the directory of an MNN
+//                 export (the one holding config.json). Required. Only looked
+//                 at to choose the engine -- the model is opened on the first
+//                 turn (or by yoai_local_load), so a path that has gone stale
+//                 reports itself as an "error" event rather than at
+//                 registration time. A build without the engine the path needs
+//                 reports that the same way.
 //   options_json  optional JSON OBJECT of engine knobs; NULL or empty for the
 //                 defaults, which are tuned for a phone. Unknown members are
 //                 ignored, and a value that is not a parseable object is logged
-//                 and ignored rather than failing. Members, all optional:
+//                 and ignored rather than failing. MNN reads only "threads"
+//                 (applied at load), "predict" and "thinking"; it has no
+//                 grammar either, so a grammar passed to yoai_chat is ignored
+//                 on an MNN model, as on a remote one. Members, all optional:
 //                   "threads"        int   worker threads; <= 0 means all cores.
 //                                          Default 4 -- on a big.LITTLE phone
 //                                          the all-cores default is routinely
@@ -265,7 +275,7 @@ int yoai_local_available(void);
 //                                          Kirin 9020 (1+3+4), both prefill and
 //                                          decode stop improving at four, which
 //                                          is its performance-core count; see
-//                                          llm/local.hpp for the table.
+//                                          llm/chat/local.hpp for the table.
 //                   "contextMax"     int   ceiling for the context window; the
 //                                          turn takes the largest size that both
 //                                          the model supports and the device can
@@ -307,13 +317,14 @@ int yoai_local_load(const char* id);
 // storage between one setting and the next, which makes a sweep both slow and
 // unreliable: what is being compared then includes a cold page cache.
 //
-// Takes effect on the NEXT turn. Returns 0, or non-zero if `id` is unknown or
-// is not an on-device model.
+// Takes effect on the NEXT turn for a GGUF. An MNN model builds its runtime
+// with a thread count when it loads, so there it takes effect at the next load.
+// Returns 0, or non-zero if `id` is unknown or is not an on-device model.
 //
 // This exists for a specific measurement, and that measurement has been taken.
 // The claim it was added to settle -- that one core already saturates the
 // memory controller -- is false: decode rises 5.8 -> 12.6 tok/s from one thread
-// to four (see llm/local.hpp for the sweep), so one core reaches well under
+// to four (see llm/chat/local.hpp for the sweep), so one core reaches well under
 // half of what the chip gives up.
 //
 // **The other half of the question it was framed around was a false choice.**
@@ -1026,7 +1037,7 @@ const char* yoai_reader_last_error(void);
 //
 // One file in, a directory out, so a model that is twenty files can be copied to
 // a phone as one. Packed by design/pack-mnn-model.py; the format lives in
-// src/platform/bundle.hpp.
+// src/utils/bundle.hpp.
 //
 // This is here for the omni lane, whose model MNN resolves as a directory
 // relative to config.json -- but nothing in it is omni-specific, and it is

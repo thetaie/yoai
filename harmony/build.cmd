@@ -689,7 +689,7 @@ rem crash. rapidjson is header-only templates, so its member functions land in
 rem the object files of whoever includes it, as weak symbols. The whole app is
 rem one .so, the linker keeps exactly ONE definition of each, and this repo
 rem already carries a much newer rapidjson under prebuilt\<abi>\include for
-rem src/llm and src/platform. MNN's llm engine parses config.json with the 1.1.0
+rem src/llm and src/utils. MNN's llm engine parses config.json with the 1.1.0
 rem release it vendors.
 rem
 rem Two layouts, one symbol: the newer MemoryPoolAllocator keeps a SharedData*

@@ -25,7 +25,7 @@
 #include "voice/asr/sensevoice.hpp"
 
 #include "yoai.h"
-#include "platform/log.hpp"
+#include "utils/log.hpp"
 
 #include "wav.hpp"
 
@@ -247,7 +247,7 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[i], "-t") == 0 && i + 1 < argc) {
             threads = std::atoi(argv[++i]);
         } else if (std::strcmp(argv[i], "-v") == 0) {
-            yoai::platform::set_log_level("debug");
+            yoai::utils::set_log_level("debug");
         } else if (std::strcmp(argv[i], "--no-itn") == 0) {
             no_itn = true;
         } else if (std::strcmp(argv[i], "--abi") == 0) {

@@ -1,6 +1,6 @@
 #include "voice/omni/qwen25_omni.hpp"
 
-#include "platform/log.hpp"
+#include "utils/log.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -65,12 +65,12 @@ const char* const kAudioKey = "recording";
 // backtrace into the system log under the tag DfxFaultLogger, and the addresses
 // symbolize against the unstripped .so under entry/build.
 void log_model_dir(const std::string& dir) {
-    platform::log_info("omni: --- model directory %s", dir.c_str());
+    utils::log_info("omni: --- model directory %s", dir.c_str());
 
 #if !defined(_WIN32)
     DIR* d = opendir(dir.c_str());
     if (!d) {
-        platform::log_error("omni: cannot open the directory itself (errno %d)", errno);
+        utils::log_error("omni: cannot open the directory itself (errno %d)", errno);
         return;
     }
     int count = 0;
@@ -84,11 +84,11 @@ void log_model_dir(const std::string& dir) {
         const std::string path = dir + "/" + name;
         struct stat st;
         if (stat(path.c_str(), &st) != 0) {
-            platform::log_error("omni:   %-30s UNREADABLE (errno %d)", name.c_str(), errno);
+            utils::log_error("omni:   %-30s UNREADABLE (errno %d)", name.c_str(), errno);
             continue;
         }
         if (S_ISDIR(st.st_mode)) {
-            platform::log_info("omni:   %-30s <dir>", name.c_str());
+            utils::log_info("omni:   %-30s <dir>", name.c_str());
             continue;
         }
         // Opened as well as stat'ed: a file can be listed and sized and still
@@ -98,16 +98,16 @@ void log_model_dir(const std::string& dir) {
         if (f) {
             std::fclose(f);
         }
-        platform::log_info("omni:   %-30s %10lld bytes%s", name.c_str(),
+        utils::log_info("omni:   %-30s %10lld bytes%s", name.c_str(),
                            static_cast<long long>(st.st_size),
                            readable ? "" : "  NOT READABLE");
         ++count;
         total += static_cast<unsigned long long>(st.st_size);
     }
     closedir(d);
-    platform::log_info("omni: --- %d files, %llu bytes total", count, total);
+    utils::log_info("omni: --- %d files, %llu bytes total", count, total);
 #else
-    platform::log_info("omni: (directory listing is only built for the device)");
+    utils::log_info("omni: (directory listing is only built for the device)");
 #endif
 }
 
@@ -117,7 +117,7 @@ void log_model_dir(const std::string& dir) {
 void log_small_file(const std::string& path) {
     std::FILE* f = std::fopen(path.c_str(), "rb");
     if (!f) {
-        platform::log_error("omni: cannot read %s", path.c_str());
+        utils::log_error("omni: cannot read %s", path.c_str());
         return;
     }
     std::string text;
@@ -134,7 +134,7 @@ void log_small_file(const std::string& path) {
             text[i] = ' ';
         }
     }
-    platform::log_info("omni: %s = %s", path.c_str(), text.c_str());
+    utils::log_info("omni: %s = %s", path.c_str(), text.c_str());
 }
 
 // Wall clock, and the distinction is not pedantic here.
@@ -257,10 +257,10 @@ bool Omni::load(const std::string& model_dir) {
     log_small_file(config);
     log_small_file(model_dir_with_slash(model_dir) + "llm_config.json");
 
-    platform::log_info("omni: createLLM '%s'", config.c_str());
+    utils::log_info("omni: createLLM '%s'", config.c_str());
     m->llm.reset(MNN::Transformer::Llm::createLLM(config));
     if (!m->llm) {
-        platform::log_error("omni: cannot create an engine from '%s'", config.c_str());
+        utils::log_error("omni: cannot create an engine from '%s'", config.c_str());
         return false;
     }
 
@@ -296,15 +296,15 @@ bool Omni::load(const std::string& model_dir) {
     // If memory does turn out to be the problem, use_mmap is where to look
     // again, but with a measurement behind it this time.
     const std::string cache = model_dir_with_slash(model_dir) + "mnn-cache";
-    platform::log_info("omni: set_config, cache '%s'", cache.c_str());
+    utils::log_info("omni: set_config, cache '%s'", cache.c_str());
     m->llm->set_config("{\"tmp_path\":\"" + cache + "\"}");
-    platform::log_info("omni: config as MNN resolved it = %s",
+    utils::log_info("omni: config as MNN resolved it = %s",
                        m->llm->dump_config().c_str());
 
-    platform::log_info("omni: load() begin -- if this is the last line, it died inside MNN");
+    utils::log_info("omni: load() begin -- if this is the last line, it died inside MNN");
     const clk::time_point load_started = clk::now();
     if (!m->llm->load()) {
-        platform::log_error("omni: '%s' failed to load", config.c_str());
+        utils::log_error("omni: '%s' failed to load", config.c_str());
         m->llm.reset();
         return false;
     }
@@ -346,7 +346,7 @@ bool Omni::load(const std::string& model_dir) {
         const double have = static_cast<double>(m->produced) / 24000.0;
         if (m->blocks == 1) {
             m->first_block = n;
-            platform::log_info("omni: block 1 at %.2f s -- %.2f s of audio",
+            utils::log_info("omni: block 1 at %.2f s -- %.2f s of audio",
                                at, static_cast<double>(n) / 24000.0);
         } else {
             const double since_first =
@@ -355,7 +355,7 @@ bool Omni::load(const std::string& model_dir) {
                                     ? (have - static_cast<double>(m->first_block) / 24000.0) /
                                           since_first
                                     : 0.0;
-            platform::log_info("omni: block %d at %.2f s (+%.2f s) -- %.2f s of audio, "
+            utils::log_info("omni: block %d at %.2f s (+%.2f s) -- %.2f s of audio, "
                                "%.2f s in hand, talker at %.2fx real time",
                                m->blocks, at, gap, static_cast<double>(n) / 24000.0, have, rate);
         }
@@ -376,11 +376,11 @@ bool Omni::load(const std::string& model_dir) {
     // fine and a crash later, inside MNN, with the audio already recorded.
     const int talker_embeds = m->llm->getOutputIndex("talker_embeds");
     m->has_talker_embeds = talker_embeds >= 0;
-    platform::log_info("omni: output index of 'talker_embeds' = %d%s", talker_embeds,
+    utils::log_info("omni: output index of 'talker_embeds' = %d%s", talker_embeds,
                        m->has_talker_embeds ? "" : "  -- NO SPEECH POSSIBLE");
 
     m->loaded = true;
-    platform::log_info("omni: load() done in %.1f s, callback installed",
+    utils::log_info("omni: load() done in %.1f s, callback installed",
                        seconds_since(load_started));
     return true;
 }
@@ -388,14 +388,14 @@ bool Omni::load(const std::string& model_dir) {
 bool Omni::set_dit_steps(int steps) {
     Impl* m = impl_;
     if (!m->loaded || !m->llm) {
-        platform::log_warn("omni: set_dit_steps with no model loaded");
+        utils::log_warn("omni: set_dit_steps with no model loaded");
         return false;
     }
     // Below 2 would make MNN's loop run zero forwards and hand the vocoder the
     // initial noise, which is not a fast voice -- it is a broken one. Refused
     // here rather than discovered by listening.
     if (steps < 2) {
-        platform::log_warn("omni: dit_steps must be at least 2, got %d", steps);
+        utils::log_warn("omni: dit_steps must be at least 2, got %d", steps);
         return false;
     }
     char buf[64];
@@ -404,7 +404,7 @@ bool Omni::set_dit_steps(int steps) {
     // Logged rather than returned, because the number that matters is the one
     // the NEXT "talker produced" line was made with, and the two are read
     // together.
-    platform::log_info("omni: dit_steps -> %d (%d DiT forward(s) per chunk)",
+    utils::log_info("omni: dit_steps -> %d (%d DiT forward(s) per chunk)",
                        steps, steps - 1);
     return true;
 }
@@ -418,11 +418,11 @@ bool Omni::ask(const float* pcm, size_t n_samples, const std::string& prompt,
 
     Impl* m = impl_;
     if (!m->loaded || !m->llm) {
-        platform::log_error("omni: ask called with no model loaded");
+        utils::log_error("omni: ask called with no model loaded");
         return false;
     }
     if (!pcm || n_samples == 0 || prompt.empty()) {
-        platform::log_warn("omni: pcm, n_samples and prompt are all required");
+        utils::log_warn("omni: pcm, n_samples and prompt are all required");
         return false;
     }
 
@@ -435,7 +435,7 @@ bool Omni::ask(const float* pcm, size_t n_samples, const std::string& prompt,
     if (before == MNN::Transformer::LlmStatus::INTERNAL_ERROR ||
         before == MNN::Transformer::LlmStatus::TIMEOUT ||
         before == MNN::Transformer::LlmStatus::USER_CANCEL) {
-        platform::log_error("omni: engine stuck in %s -- load the model again",
+        utils::log_error("omni: engine stuck in %s -- load the model again",
                             status_name(before));
         return false;
     }
@@ -444,7 +444,7 @@ bool Omni::ask(const float* pcm, size_t n_samples, const std::string& prompt,
     if (seconds > max_seconds()) {
         // Refused, not attempted. Shorter input does not prevent the crash in
         // MNN's front end, but it makes it rarer; see max_seconds().
-        platform::log_error(
+        utils::log_error(
             "omni: %.1f s of audio exceeds the %.0f s cap -- "
             "chunk it before calling",
             seconds, max_seconds());
@@ -498,7 +498,7 @@ bool Omni::ask(const float* pcm, size_t n_samples, const std::string& prompt,
     out->text            = text.str();
     out->thinker_seconds = seconds_since(started);
     out->seconds         = out->thinker_seconds;
-    platform::log_info("omni: thinker %d prompt tokens -> %d generated in %.1f s, status %s",
+    utils::log_info("omni: thinker %d prompt tokens -> %d generated in %.1f s, status %s",
                        ctx->prompt_len, ctx->gen_seq_len, out->thinker_seconds,
                        status_name(ctx->status));
 
@@ -516,7 +516,7 @@ bool Omni::ask(const float* pcm, size_t n_samples, const std::string& prompt,
     // field is only filled on the file-path variant of audioProcess, and this
     // hands over a waveform from memory, so it reads 0.0 and printing it looked
     // like a bug in the front end rather than a field nobody set.
-    platform::log_info("omni: thinker split -- audio %.2f s, prefill %.2f s, decode %.2f s, "
+    utils::log_info("omni: thinker split -- audio %.2f s, prefill %.2f s, decode %.2f s, "
                        "sample %.2f s, for %.1f s of input audio",
                        ctx->audio_us / 1e6, ctx->prefill_us / 1e6, ctx->decode_us / 1e6,
                        ctx->sample_us / 1e6, seconds);
@@ -530,7 +530,7 @@ bool Omni::ask(const float* pcm, size_t n_samples, const std::string& prompt,
     // nothing. The model has to be loaded again, which is why that is what this
     // says. MNN's own reason is on hilog under the tag MNNJNI.
     if (ctx->gen_seq_len == 0) {
-        platform::log_error(
+        utils::log_error(
             "omni: the thinker generated nothing (status %s) -- see tag MNNJNI "
             "for MNN's reason. An error status is sticky: load the model again.",
             status_name(ctx->status));
@@ -558,7 +558,7 @@ bool Omni::ask(const float* pcm, size_t n_samples, const std::string& prompt,
     //     the same spot with hasEmbeds(), which is not reachable from here.
     const bool can_speak = sink && !m->aborted && m->has_talker_embeds && ctx->gen_seq_len >= 2;
     if (sink && !can_speak) {
-        platform::log_warn("omni: no speech -- talker_embeds %s, %d tokens generated",
+        utils::log_warn("omni: no speech -- talker_embeds %s, %d tokens generated",
                            m->has_talker_embeds ? "present" : "MISSING", ctx->gen_seq_len);
     }
     if (can_speak) {
@@ -581,7 +581,7 @@ bool Omni::ask(const float* pcm, size_t n_samples, const std::string& prompt,
             out->first_audio_seconds =
                 std::chrono::duration<double>(m->first_audio - started).count();
         }
-        platform::log_info("omni: talker produced %.2f s of speech in %.1f s (%.1fx real time)",
+        utils::log_info("omni: talker produced %.2f s of speech in %.1f s (%.1fx real time)",
                            out->speech_seconds, out->speech_elapsed,
                            out->speech_seconds > 0.0f
                                ? out->speech_elapsed / out->speech_seconds
@@ -589,7 +589,7 @@ bool Omni::ask(const float* pcm, size_t n_samples, const std::string& prompt,
         // The streaming half, and the one that decides whether the ratio above
         // matters. If the first block arrives early and the rest keeps ahead of
         // playback, nobody experiences 3.7x.
-        platform::log_info("omni: first audio at %.1f s in %d block(s); thinker %.1f s, "
+        utils::log_info("omni: first audio at %.1f s in %d block(s); thinker %.1f s, "
                            "whole exchange %.1f s",
                            out->first_audio_seconds, out->audio_blocks,
                            out->thinker_seconds, out->seconds);
@@ -608,7 +608,7 @@ bool Omni::ask(const float* pcm, size_t n_samples, const std::string& prompt,
             out->codec_tokens           = tctx->gen_seq_len;
             const double rest = out->speech_elapsed - out->talker_prefill_seconds -
                                 out->talker_decode_seconds - out->token2wav_seconds;
-            platform::log_info(
+            utils::log_info(
                 "omni: speech split -- prefill %.2f s, decode %.2f s (%d codec tokens), "
                 "token2wav %.2f s (DiT + vocoder), %.2f s elsewhere",
                 out->talker_prefill_seconds, out->talker_decode_seconds, out->codec_tokens,
@@ -617,7 +617,7 @@ bool Omni::ask(const float* pcm, size_t n_samples, const std::string& prompt,
             // Not a warning: a stock MNN is a supported build, it simply cannot
             // answer this. Said once per exchange so a sweep reading 0.00 knows
             // why rather than recording it as a measurement.
-            platform::log_info("omni: speech split unavailable -- this MNN has no "
+            utils::log_info("omni: speech split unavailable -- this MNN has no "
                                "getTalkerContext(); see third/patches");
         }
     }
@@ -642,7 +642,7 @@ Omni::~Omni() {}
 bool Omni::loaded() const { return false; }
 
 bool Omni::load(const std::string&) {
-    platform::log_error("omni: this build has no MNN engine compiled in");
+    utils::log_error("omni: this build has no MNN engine compiled in");
     return false;
 }
 

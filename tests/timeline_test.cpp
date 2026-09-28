@@ -17,9 +17,12 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
+using yoai::store::Db;
 using yoai::store::Timeline;
 using yoai::store::Entry;
 using yoai::store::Now;
@@ -61,16 +64,14 @@ long long test_now_ms() {
 // An `ended_at` of 0 seeds an entry that is still open. Only one such row can
 // exist at a time -- that is the point of the partial unique index -- so the
 // caller has to have closed whatever was open first.
-bool seed_entry(const std::string& dir, const char* state,
+//
+// Through the store's own connection, under its lock: a second connection to
+// the file is what store/db.hpp exists to prevent, fixtures included.
+bool seed_entry(Db& store, const char* state,
                 long long started_at, int started_tz,
                 long long ended_at, int ended_tz) {
-    sqlite3* db = 0;
-    if (sqlite3_open((dir + "/yoai.db").c_str(), &db) != SQLITE_OK) {
-        std::printf("FAIL  fixture: cannot open the database\n");
-        ++g_failures;
-        sqlite3_close(db);
-        return false;
-    }
+    std::lock_guard<std::mutex> lock(store.lock());
+    sqlite3* db = store.handle();
     sqlite3_stmt* st = 0;
     sqlite3_prepare_v2(db,
         "INSERT INTO entries(state_id, started_at, started_tz, ended_at, ended_tz)"
@@ -91,7 +92,6 @@ bool seed_entry(const std::string& dir, const char* state,
         ++g_failures;
     }
     sqlite3_finalize(st);
-    sqlite3_close(db);
     return ok;
 }
 
@@ -108,12 +108,13 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "usage: yoai-timeline-test <scratch-dir>\n");
         return 2;
     }
-    std::string err;
-    Timeline*   s = Timeline::open(argv[1], &err);
-    if (!s) {
+    std::string         err;
+    std::shared_ptr<Db> db = Db::open(Db::path_in(argv[1]), &err);
+    if (!db) {
         std::fprintf(stderr, "open failed: %s\n", err.c_str());
         return 1;
     }
+    Timeline* s = new Timeline(db);
 
     // --- a fresh store is idle, and that is not an error ----------------------
     Now n;
@@ -216,7 +217,7 @@ int main(int argc, char** argv) {
     //
     // Last night's sleep: 23:30 to 07:00, one stretch, one row.
     const int kTz = 480;   // +08:00 at both ends -- nobody moved
-    if (seed_entry(argv[1], "nap",
+    if (seed_entry(*db, "nap",
                    at_local(today_num - 1, 23, 30, kTz), kTz,
                    at_local(today_num, 7, 0, kTz), kTz)) {
         std::vector<Entry> last_night, this_morning;
@@ -240,7 +241,7 @@ int main(int argc, char** argv) {
     //
     // Leaves at 17:00 in San Francisco, lands at 15:00 in Beijing the next day.
     // The two endpoints are fourteen hours and two offsets apart.
-    if (seed_entry(argv[1], "commute",
+    if (seed_entry(*db, "commute",
                    at_local(today_num - 3, 17, 0, -420), -420,
                    at_local(today_num - 2, 15, 0, 480), 480)) {
         std::vector<Entry> dep, arr;
@@ -265,7 +266,7 @@ int main(int argc, char** argv) {
     }
 
     // --- a stretch nobody switched out of covers the days in between ----------
-    if (seed_entry(argv[1], "rest",
+    if (seed_entry(*db, "rest",
                    at_local(today_num - 30, 10, 0, kTz), kTz,
                    at_local(today_num - 26, 10, 0, kTz), kTz)) {
         for (int d = today_num - 30; d <= today_num - 26; ++d) {
@@ -286,7 +287,7 @@ int main(int argc, char** argv) {
     // Beijing 02:00 to Honolulu, eleven hours: the offset drops eighteen, so
     // the landing is on the previous calendar date. The entry's end day is less
     // than its start day, and it still has to be findable on both.
-    if (seed_entry(argv[1], "commute",
+    if (seed_entry(*db, "commute",
                    at_local(today_num - 10, 2, 0, 480), 480,
                    at_local(today_num - 11, 19, 0, -600), -600)) {
         std::vector<Entry> dep, arr;
@@ -316,7 +317,7 @@ int main(int argc, char** argv) {
     // with a start in the past.
     did(s->end_current(&err), err, "close whatever was open first");
     const long long began = test_now_ms() - 3 * 3600000LL;
-    if (seed_entry(argv[1], "work", began, kTz, 0, 0)) {
+    if (seed_entry(*db, "work", began, kTz, 0, 0)) {
         check(!s->end_at(began - 1000, &err), "an end before the start is refused");
         check(!s->end_at(test_now_ms() + 3600000LL, &err), "an end in the future is refused");
         did(s->now(&n, &err), err, "now() after the refused ends");

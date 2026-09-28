@@ -1,6 +1,6 @@
-﻿#include "llm/local.hpp"
+#include "llm/chat/local.hpp"
 
-#include "platform/log.hpp"
+#include "utils/log.hpp"
 
 #include <algorithm>
 #include <mutex>
@@ -20,26 +20,6 @@ namespace yoai { namespace llm {
 namespace {
 
 #ifdef YOAI_ONDEVICE_LLM
-
-/**
- * One-time llama.cpp startup, safe to call from anywhere.
- *
- * The log hook is the point: ggml reports every tensor at INFO, which on a device
- * buries everything else in the log window. Errors still go to stderr, where
- * platform/log.cpp's own sink is not appropriate -- these are llama.cpp's words,
- * not ours.
- */
-void ensure_backend() {
-    static std::once_flag once;
-    std::call_once(once, []() {
-        llama_log_set([](ggml_log_level level, const char* text, void*) {
-            if (level >= GGML_LOG_LEVEL_ERROR && text != nullptr) {
-                std::fputs(text, stderr);
-            }
-        }, nullptr);
-        llama_backend_init();
-    });
-}
 
 using clk = std::chrono::steady_clock;
 
@@ -127,6 +107,61 @@ bool emit_event(const EventHandler& on_event, EventType type, const std::string&
     e.content = content;
     return on_event ? on_event(e) : true;
 }
+
+#ifdef YOAI_ONDEVICE_LLM
+
+/**
+ * The end of a turn that completed: the usage event, and one log line.
+ *
+ * The engine has no wire protocol to carry token counts, so it reports them as
+ * the same CostStatistics event the remote lane ends with. That is what lets a
+ * host show one token counter instead of two. Not sent for a turn that failed
+ * or was cancelled: a partial count presented as a total is worse than none.
+ */
+void report_turn(const LocalOptions& opt, const LocalStats& st, const EventHandler& on_event) {
+    // The file name, not the path and not the host's id: "Qwen3-4B-Q4_K_M.gguf"
+    // is what the user recognizes, and it is what the remote lane reports here
+    // too -- the model, not the entry.
+    const std::size_t slash = opt.model_path.find_last_of("/\\");
+
+    Event e;
+    e.type               = EventType::CostStatistics;
+    e.cost.model         = slash == std::string::npos ? opt.model_path
+                                                      : opt.model_path.substr(slash + 1);
+    e.cost.input_tokens  = st.prompt_tokens;
+    e.cost.output_tokens = st.decoded_tokens;
+    e.cost.total_tokens  = st.prompt_tokens + st.decoded_tokens;
+    e.cost.total_cost    = 0.0;   // nobody was billed; the tokens still matter
+    if (on_event) {
+        on_event(e);
+    }
+
+    // threads and the two rates are on this line rather than derived by whoever
+    // reads the log: a sweep is compared across many of these, and pairing each
+    // one with a separate "threads ->" line breaks the moment another turn
+    // interleaves. st.n_threads is what the turn ACTUALLY ran with, after <= 0
+    // has been resolved to a core count.
+    yoai::utils::log_info(
+        "on-device turn: %d prompt (%d reused) + %d decoded tokens, ctx %d, "
+        "threads %d, load %.0fms prefill %.0fms (%.1f tok/s) "
+        "decode %.0fms (first %.0fms, then %.1f tok/s), %d msgs dropped",
+        st.prompt_tokens, st.reused_tokens, st.decoded_tokens, st.n_ctx,
+        st.n_threads, st.load_ms,
+        st.prefill_ms,
+        st.prefill_ms > 0
+            ? (st.prompt_tokens - st.reused_tokens) * 1000.0 / st.prefill_ms : 0.0,
+        st.decode_ms, st.first_token_ms,
+        // The rate AFTER the first token, which is the one that predicts a
+        // longer reply. Dividing the whole span by the whole count mixes in a
+        // per-turn cost that does not repeat, and on an eleven-token reply that
+        // cost is most of the span.
+        (st.decode_ms - st.first_token_ms) > 0 && st.decoded_tokens > 1
+            ? (st.decoded_tokens - 1) * 1000.0 / (st.decode_ms - st.first_token_ms)
+            : 0.0,
+        st.dropped_msgs);
+}
+
+#endif   // YOAI_ONDEVICE_LLM
 
 const char* const kThinkOpen  = "<think>";
 const char* const kThinkClose = "</think>";
@@ -239,7 +274,7 @@ struct LocalClient::Impl {
     llama_context*           ctx = nullptr;
     std::vector<llama_token> cached;
 
-    explicit Impl(LocalOptions o) : opt(std::move(o)) { ensure_backend(); }
+    explicit Impl(LocalOptions o) : opt(std::move(o)) {}
 
     ~Impl() {
         if (ctx != nullptr) {
@@ -278,10 +313,11 @@ struct LocalClient::Impl {
 
 bool LocalClient::available() { return true; }
 
-LocalClient::LocalClient(LocalOptions opt) : impl_(new Impl(std::move(opt))) {}
+LocalClient::LocalClient(LocalOptions opt)
+    : Chat(Engine::LlamaCpp), impl_(new Impl(std::move(opt))) {}
 LocalClient::~LocalClient() = default;
 
-void LocalClient::setThreads(int n) {
+void LocalClient::set_threads(int n) {
     std::lock_guard<std::mutex> lock(impl_->turn);   // never mid-turn
     impl_->opt.n_threads = n;
 }
@@ -379,7 +415,7 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
         }
         impl_->ctx = ctx;
     }
-    // Applied per turn rather than at creation, because setThreads() may have
+    // Applied per turn rather than at creation, because set_threads() may have
     // changed the count since, and a kept context would otherwise ignore it.
     llama_set_n_threads(ctx, n_threads, n_threads);
 
@@ -512,7 +548,7 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
         if (gr != nullptr) {
             llama_sampler_chain_add(smpl, gr);
         } else {
-            yoai::platform::log_warn(
+            yoai::utils::log_warn(
                 "on-device: grammar rejected by the parser, continuing unconstrained");
         }
     }
@@ -593,7 +629,7 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
     if (reuse > 0 &&
         !llama_memory_seq_rm(llama_get_memory(ctx), 0,
                              static_cast<llama_pos>(reuse), -1)) {
-        platform::log_info(
+        utils::log_info(
             "local: this memory will not rewind to %zu, prefilling the whole prompt", reuse);
         reuse = 0;
     }
@@ -690,6 +726,9 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
     // The cache is KEPT here. This is the normal end of a turn, not an error
     // path -- the KV holds the prompt and the reply, both of which the next
     // turn may share. Only the sampler was per-turn.
+    if (!aborted) {
+        report_turn(impl_->opt, impl_->stats, on_event);
+    }
     return !aborted;
 }
 
@@ -703,10 +742,11 @@ struct LocalClient::Impl {
 
 bool LocalClient::available() { return false; }
 
-LocalClient::LocalClient(LocalOptions opt) : impl_(new Impl(std::move(opt))) {}
+LocalClient::LocalClient(LocalOptions opt)
+    : Chat(Engine::LlamaCpp), impl_(new Impl(std::move(opt))) {}
 LocalClient::~LocalClient() = default;
 
-void LocalClient::setThreads(int) {}
+void LocalClient::set_threads(int) {}
 void LocalClient::forget() {}
 bool LocalClient::loaded() const { return false; }
 

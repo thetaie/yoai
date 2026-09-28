@@ -24,7 +24,7 @@
 #include <string>
 
 namespace yoai {
-namespace platform {
+namespace utils {
 
 struct MemoryBandwidth {
     int    threads  = 0;
@@ -46,5 +46,5 @@ struct MemoryBandwidth {
 // BLOCKS. Returns false only if the buffer could not be allocated.
 bool measure_memory_bandwidth(int threads, int mib, int passes, MemoryBandwidth* out);
 
-}  // namespace platform
+}  // namespace utils
 }  // namespace yoai

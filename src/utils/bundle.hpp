@@ -37,7 +37,7 @@
 #include <vector>
 
 namespace yoai {
-namespace platform {
+namespace utils {
 
 // Progress as extraction runs, so a host can show something during several
 // gigabytes of copying. `name` is the entry being written.
@@ -81,5 +81,5 @@ bool bundle_extract(const std::string& bundle_path,
                     BundleProgress on_progress,
                     void* user_data);
 
-}  // namespace platform
+}  // namespace utils
 }  // namespace yoai

@@ -20,15 +20,15 @@ A `vec0` virtual table: rows of fixed-length float vectors keyed by rowid, and
 a K-nearest-neighbor query over them in plain SQL. Search is brute force, which
 is the right trade at the scale of one person's memories: ten thousand
 1024-dimension vectors are about 40 MB to scan, a few milliseconds on a phone,
-and there is no index to build or keep in step. See `src/memory/` for the code
-that uses it.
+and there is no index to build or keep in step. See `src/store/vector_index`
+for the code that uses it.
 
 ## How it is built
 
 Compiled into the core as the `yoai_sqlite_vec` target in the root
 `CMakeLists.txt`, not loaded at runtime. `SQLITE_OMIT_LOAD_EXTENSION` stays on
 for SQLite; a connection gets the extension by calling `sqlite3_vec_init`
-directly (see `memory::enable_vectors`).
+directly (see `src/store/db.cpp`).
 
 The flags are on that target, each with its reason. Two things worth knowing
 before touching them:

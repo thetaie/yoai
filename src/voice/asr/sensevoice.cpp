@@ -1,7 +1,7 @@
 #include "voice/asr/sensevoice.hpp"
 
 #include "voice/asr/fbank/funasr.hpp"
-#include "platform/log.hpp"
+#include "utils/log.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -143,7 +143,7 @@ void assemble(Transcript* out) {
     out->text = trim(text);
 
     if (out->filtered_stray_capitals) {
-        platform::log_warn(
+        utils::log_warn(
             "sensevoice: dropped a run of isolated capital letters from the transcript; "
             "this model does that on some audio at every precision");
     }
@@ -222,11 +222,11 @@ struct SenseVoice::Impl {
         const int width = fbank.dim();
         ggml_tensor* embed = get("embed.weight");
         if (!embed) {
-            platform::log_error("sensevoice: model has no tensor 'embed.weight'");
+            utils::log_error("sensevoice: model has no tensor 'embed.weight'");
             return false;
         }
         if (embed->ne[0] != width) {
-            platform::log_error("sensevoice: embed.weight is %d wide, front end produces %d",
+            utils::log_error("sensevoice: embed.weight is %d wide, front end produces %d",
                                 static_cast<int>(embed->ne[0]), width);
             return false;
         }
@@ -234,7 +234,7 @@ struct SenseVoice::Impl {
         for (size_t i = 0; i < query_tokens.size(); ++i) {
             const int row = query_tokens[i];
             if (row < 0 || row >= static_cast<int>(embed->ne[1])) {
-                platform::log_error("sensevoice: query token %d is outside embed.weight", row);
+                utils::log_error("sensevoice: query token %d is outside embed.weight", row);
                 return false;
             }
             float* dst = &query_embed[i * width];
@@ -249,7 +249,7 @@ struct SenseVoice::Impl {
                     dst[j] = ggml_fp16_to_fp32(src[j]);
                 }
             } else {
-                platform::log_error("sensevoice: embed.weight is %s, expected F32 or F16",
+                utils::log_error("sensevoice: embed.weight is %s, expected F32 or F16",
                                     ggml_type_name(embed->type));
                 return false;
             }
@@ -267,7 +267,7 @@ struct SenseVoice::Impl {
     ggml_tensor* need(const std::string& name, bool* ok) const {
         ggml_tensor* t = get(name);
         if (!t) {
-            platform::log_error("sensevoice: model has no tensor '%s'", name.c_str());
+            utils::log_error("sensevoice: model has no tensor '%s'", name.c_str());
             *ok = false;
         }
         return t;
@@ -375,11 +375,11 @@ void SenseVoice::set_threads(int n) {
 bool SenseVoice::set_inverse_text_normalization(bool on) {
     Impl* m = impl_;
     if (!m->weights) {
-        platform::log_error("sensevoice: set_inverse_text_normalization before a model is loaded");
+        utils::log_error("sensevoice: set_inverse_text_normalization before a model is loaded");
         return false;
     }
     if (m->itn_slot < 0) {
-        platform::log_warn("sensevoice: this model carries no text-normalization query slot");
+        utils::log_warn("sensevoice: this model carries no text-normalization query slot");
         return false;
     }
     const int want = on ? kQueryWithItn : kQueryWoItn;
@@ -413,7 +413,7 @@ bool SenseVoice::load(const std::string& gguf_path) {
     params.ctx      = &m->weights;
     gguf_context* gguf = gguf_init_from_file(gguf_path.c_str(), params);
     if (!gguf) {
-        platform::log_error("sensevoice: cannot read '%s'", gguf_path.c_str());
+        utils::log_error("sensevoice: cannot read '%s'", gguf_path.c_str());
         return false;
     }
 
@@ -460,7 +460,7 @@ bool SenseVoice::load(const std::string& gguf_path) {
     gguf_free(gguf);
 
     if (m->vocab.empty()) {
-        platform::log_error("sensevoice: '%s' carries no sv.vocab, so it cannot produce text",
+        utils::log_error("sensevoice: '%s' carries no sv.vocab, so it cannot produce text",
                             gguf_path.c_str());
         ggml_free(m->weights);
         m->weights = nullptr;
@@ -493,7 +493,7 @@ bool SenseVoice::load(const std::string& gguf_path) {
                             ggml_graph_overhead_custom(kGraphNodes, false) + (1u << 20));
     }
 
-    platform::log_info("sensevoice: loaded %s (%d blocks + %d tp, vocab %d)",
+    utils::log_info("sensevoice: loaded %s (%d blocks + %d tp, vocab %d)",
                        gguf_path.c_str(), m->cfg.num_blocks, m->cfg.tp_blocks,
                        static_cast<int>(m->vocab.size()));
 
@@ -515,7 +515,7 @@ bool SenseVoice::load(const std::string& gguf_path) {
             std::snprintf(buf, sizeof(buf), "%s%d", i ? " " : "", m->query_tokens[i]);
             ids += buf;
         }
-        platform::log_debug("sensevoice: query token ids are [%s]", ids.c_str());
+        utils::log_debug("sensevoice: query token ids are [%s]", ids.c_str());
     }
     return true;
 }
@@ -528,14 +528,14 @@ bool SenseVoice::transcribe(const float* pcm, size_t n_samples, Transcript* out)
 
     Impl* m = impl_;
     if (!m->weights) {
-        platform::log_error("sensevoice: transcribe called with no model loaded");
+        utils::log_error("sensevoice: transcribe called with no model loaded");
         return false;
     }
 
     int frames = 0;
     std::vector<float> features = m->fbank.compute(pcm, n_samples, &frames);
     if (frames <= 0) {
-        platform::log_warn("sensevoice: %zu samples is shorter than one analysis window",
+        utils::log_warn("sensevoice: %zu samples is shorter than one analysis window",
                            n_samples);
         return false;
     }
@@ -584,7 +584,7 @@ bool SenseVoice::transcribe(const float* pcm, size_t n_samples, Transcript* out)
     cp.no_alloc   = true;
     ggml_context* ctx = ggml_init(cp);
     if (!ctx) {
-        platform::log_error("sensevoice: could not create the graph context");
+        utils::log_error("sensevoice: could not create the graph context");
         return false;
     }
 
@@ -625,7 +625,7 @@ bool SenseVoice::transcribe(const float* pcm, size_t n_samples, Transcript* out)
     ggml_cgraph* graph = ggml_new_graph_custom(ctx, kGraphNodes, false);
     ggml_build_forward_expand(graph, logits);
     if (!ggml_gallocr_alloc_graph(m->alloc, graph)) {
-        platform::log_error("sensevoice: could not allocate the compute graph");
+        utils::log_error("sensevoice: could not allocate the compute graph");
         ggml_free(ctx);
         return false;
     }
@@ -633,7 +633,7 @@ bool SenseVoice::transcribe(const float* pcm, size_t n_samples, Transcript* out)
     ggml_backend_tensor_set(x, &input[0], 0, ggml_nbytes(x));
     ggml_backend_cpu_set_n_threads(m->backend, m->threads);
     if (ggml_backend_graph_compute(m->backend, graph) != GGML_STATUS_SUCCESS) {
-        platform::log_error("sensevoice: the encoder failed to run");
+        utils::log_error("sensevoice: the encoder failed to run");
         ggml_free(ctx);
         return false;
     }
@@ -677,7 +677,7 @@ bool SenseVoice::transcribe(const float* pcm, size_t n_samples, Transcript* out)
 
 // The lane compiles out to a truthful stub rather than disappearing, so a host
 // links the same symbols either way and asks available() before offering voice
-// input at all. Same shape as the on-device LLM lane in src/llm/local.cpp.
+// input at all. Same shape as the on-device LLM lane in src/llm/chat/local.cpp.
 
 struct SenseVoice::Impl {
     int unused;
@@ -694,7 +694,7 @@ void SenseVoice::set_threads(int) {}
 bool SenseVoice::set_inverse_text_normalization(bool) { return false; }
 
 bool SenseVoice::load(const std::string&) {
-    platform::log_error("sensevoice: this build has no recognition engine compiled in");
+    utils::log_error("sensevoice: this build has no recognition engine compiled in");
     return false;
 }
 

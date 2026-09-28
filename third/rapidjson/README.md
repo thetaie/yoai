@@ -30,8 +30,8 @@ different layout from this one's — measured as a SIGSEGV in
 `MemoryPoolAllocator::Malloc` on MNN's first JSON parse.
 
 So when the omni lane is on, the root `CMakeLists.txt` puts MNN's include
-directory `BEFORE` this one, and the core's two JSON files (`src/llm/openai_chat.cpp`,
-`src/platform/c_api.cpp`) compile against MNN's copy instead. A new file that
+directory `BEFORE` this one, and the core's two JSON files (`src/llm/chat/openai.cpp`,
+`src/yoai.cpp`) compile against MNN's copy instead. A new file that
 includes RapidJSON has to be in the same target, or the crash comes back.
 
 ## License

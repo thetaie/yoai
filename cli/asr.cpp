@@ -17,7 +17,7 @@
 // file is a transcript of slightly different audio than a device would hand
 // over.
 
-#include "platform/log.hpp"
+#include "utils/log.hpp"
 #include "voice/asr/sensevoice.hpp"
 #include "wav.hpp"
 
@@ -121,7 +121,7 @@ int main(int argc, char** argv) {
         usage();
         return 2;
     }
-    yoai::platform::set_log_level(o.debug ? "debug" : "warn");
+    yoai::utils::set_log_level(o.debug ? "debug" : "warn");
 
     if (!yoai::voice::SenseVoice::available()) {
         std::fprintf(stderr,

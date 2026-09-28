@@ -1,7 +1,8 @@
 #pragma once
 
-#include "llm/event.hpp"
-#include "llm/types.hpp"   // for ChatMessage + EventHandler
+#include "llm/chat/chat.hpp"
+#include "llm/chat/event.hpp"
+#include "llm/chat/types.hpp"   // for ChatMessage + EventHandler
 
 #include <cstddef>
 #include <functional>
@@ -97,7 +98,10 @@ struct OpenAIChatOptions {
 // OpenAIChatClient
 //------------------------------------------------------------------------------
 
-class OpenAIChatClient {
+// A remote Chat (llm/chat/chat.hpp). It holds nothing but its options, so one
+// instance can serve concurrent turns, and the Backend half has nothing to do:
+// no weights to load, no threads to set and no conversation state to forget.
+class OpenAIChatClient : public Chat {
 public:
     explicit OpenAIChatClient(OpenAIChatOptions opt);
 
@@ -108,7 +112,12 @@ public:
                  const std::string& system_prompt,
                  const EventHandler& on_event,
                  const UserContext& user = UserContext(),
-                 const RequestOptions& req = RequestOptions());
+                 const RequestOptions& req = RequestOptions()) override;
+
+    bool load(std::string&) override { return true; }
+    bool loaded() const override { return true; }
+    void set_threads(int) override {}
+    void forget() override {}
 
     const OpenAIChatOptions& options() const { return opt_; }
 
