@@ -17,6 +17,12 @@
 # the shebang, and the kernel then looks for an interpreter that does not exist.
 *.sh text eol=lf
 
+# The patches in third/patches are applied with `git apply` to checkouts whose
+# sources are LF. Checked out CRLF, by core.autocrlf=true on a fresh clone,
+# every context line carries a \r the tree does not have, and the patch no
+# longer fits.
+*.patch text eol=lf
+
 # The vendored SQLite amalgamation is generated upstream code that is never
 # edited here, and sqlite3.c alone is 270k lines. Keeping it out of diffs and
 # language stats stops one dependency bump from burying an actual review.
