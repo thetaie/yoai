@@ -8,6 +8,7 @@
 #include <cmath>
 #include <deque>
 #include <condition_variable>
+#include <cstring>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -47,7 +48,7 @@ double seconds_since(clk::time_point start) {
 //      10 ms gate is a click, and a fade is not.
 //
 // The shaper streams: it drops leading silence as it arrives, holds a trailing
-// run of quiet in case more speech follows it, and keeps 20 ms of speech back so
+// run of quiet in case more speech follows it, and keeps 80 ms of speech back so
 // there is something to fade if the piece turns out to end hot. Nothing is
 // delayed while the voice is actually speaking.
 //
@@ -73,7 +74,19 @@ const double kFloorDbfs    = -55.0;
 const double kJoinPause = 0.30;
 
 // Speech held back, so a piece that ends hot has something to fade.
-const double kEdgeSeconds = 0.020;
+//
+// 80 ms, not the 20 it was. CustomVoice ends most short utterances with the
+// last vowel still at about -45 dBFS -- 16 takes in 20, the same with the whole
+// text up front, and a longer eos hold barely moved it -- and a 20 ms fade of
+// that was still heard as the voice being cut off. 80 and 150 ms raised-cosine
+// fades were listened to against it, and 80 was enough. Holding it back delays
+// what goes out by 60 ms more, which nobody hears while the voice is talking.
+const double kEdgeSeconds = 0.080;
+
+// Silence after the very end of a passage, so a player that stops on the last
+// sample does not stop on the fade. Only at the end: a join never gets
+// synthesized silence, see the note above the class.
+const double kEndSilence = 0.200;
 
 // How little queued audio counts as about to run out, for the pacer.
 //
@@ -100,13 +113,19 @@ bool above_floor(const float* f, std::size_t n) {
     return rms > std::pow(10.0, kFloorDbfs / 20.0);
 }
 
-// Linear to zero over the whole buffer. Short enough that it is heard as the
-// sound stopping rather than as a fade.
+// The gain of a raised-cosine ramp from 1 to 0 at step i of n. It starts flat,
+// so it is heard as the voice trailing off rather than as the level being
+// turned down.
+double fade_gain(std::size_t i, std::size_t n) {
+    const double pi = 3.14159265358979323846;
+    return 0.5 * (1.0 + std::cos(pi * static_cast<double>(i + 1) / static_cast<double>(n)));
+}
+
+// To zero over the whole buffer.
 void fade_out(std::vector<float>* v) {
     const std::size_t n = v->size();
     for (std::size_t i = 0; i < n; ++i) {
-        (*v)[i] = static_cast<float>((*v)[i] *
-                                     (1.0 - static_cast<double>(i + 1) / static_cast<double>(n)));
+        (*v)[i] = static_cast<float>((*v)[i] * fade_gain(i, n));
     }
 }
 
@@ -117,6 +136,7 @@ public:
         : frame_(static_cast<std::size_t>(kFrameSeconds * rate)),
           edge_(static_cast<std::size_t>(kEdgeSeconds * rate)),
           join_(static_cast<std::size_t>(kJoinPause * rate)),
+          end_silence_(static_cast<std::size_t>(kEndSilence * rate)),
           head_done_(false),
           lead_budget_(0) {
         if (frame_ == 0) {
@@ -196,9 +216,10 @@ public:
             // milliseconds of its own ramp -- enough to be classified as quiet
             // and to make `quiet_` non-empty -- so on the take that prompted
             // all this the fade never fired. On an ending that was already
-            // released this is 20 ms of room tone faded, which is nothing; on
+            // released this is 80 ms of room tone faded, which is nothing; on
             // one cut mid-vowel it is the difference between a gate and a fade.
             fade_tail(out, edge_);
+            out->insert(out->end(), end_silence_, 0.0f);
         }
         head_done_ = false;
     }
@@ -219,8 +240,7 @@ private:
             n = total;
         }
         for (std::size_t i = 0; i < n; ++i) {
-            const double g = 1.0 - static_cast<double>(i + 1) / static_cast<double>(n);
-            (*out)[total - n + i] = static_cast<float>((*out)[total - n + i] * g);
+            (*out)[total - n + i] = static_cast<float>((*out)[total - n + i] * fade_gain(i, n));
         }
     }
 
@@ -239,6 +259,7 @@ private:
     std::size_t frame_;
     std::size_t edge_;
     std::size_t join_;
+    std::size_t end_silence_;
     bool        head_done_;
     std::size_t lead_budget_;   // leading quiet the next join still owes
     std::vector<float> carry_;   // samples not yet a whole frame
@@ -261,6 +282,8 @@ struct Reader::Impl {
     long long          seed;
     int                threads;
     QttsSampling       sampling;
+    bool               streaming_text;
+    int                eos_hold;
 
     // One sentence's worth of work. `pcm` holds what has been generated and not
     // yet handed to the sink; the emitter swaps it out rather than copying.
@@ -289,6 +312,13 @@ struct Reader::Impl {
     // emitter that has run out of work waits instead of finishing -- which is
     // the whole difference between reading a passage and reading a stream.
     bool                    closed;
+    // The whole-reply mode (Reader::set_whole_reply): the spoken text as it
+    // is fed, how much of it the one generation has pulled, and whether
+    // finish() has said there is no more. Guarded by `mu`.
+    bool                    whole;
+    std::string             pull_text;
+    std::size_t             pull_taken;
+    bool                    pull_closed;
     std::size_t             held;        // samples buffered and not yet emitted
     std::size_t             held_peak;
     std::size_t             emitted;     // samples handed to the sink
@@ -319,8 +349,9 @@ struct Reader::Impl {
     double                   first_audio;
     double                   starved;
 
-    Impl() : seed(23), threads(0), next_job(0), next_emit(0),
+    Impl() : seed(23), threads(0), streaming_text(false), eos_hold(0), next_job(0), next_emit(0),
              aborted(false), failed(false), closed(false),
+             whole(false), pull_taken(0), pull_closed(false),
              held(0), held_peak(0), emitted(0),
              playhead(0.0), playing(false),
              sink(0), sink_user(0), running(false),
@@ -353,6 +384,8 @@ struct Reader::Impl {
             engines[k]->set_speaker(speaker);
             engines[k]->set_seed(seed);
             engines[k]->set_sampling(sampling);
+            engines[k]->set_streaming_text(streaming_text);
+            engines[k]->set_eos_hold(eos_hold);
             engines[k]->set_streaming(true);   // the chunk path is what ordering runs on
         }
     }
@@ -448,6 +481,56 @@ struct Reader::Impl {
             }
             cv.notify_all();
         }
+    }
+
+    // The whole-reply mode's text source, on the engine's compute worker:
+    // blocks until feed() has added something the engine has not had, or
+    // finish() has closed the text. A stopped read stops the engine too.
+    static int pull_source(char* buf, int cap, void* user_data) {
+        Impl* m = static_cast<Impl*>(user_data);
+        std::unique_lock<std::mutex> lock(m->mu);
+        m->cv.wait(lock, [m] {
+            return m->aborted || m->failed || m->pull_taken < m->pull_text.size() || m->pull_closed;
+        });
+        if (m->aborted || m->failed) {
+            return -1;
+        }
+        const std::size_t left = m->pull_text.size() - m->pull_taken;
+        if (left == 0) {
+            return 0;   // closed, and all of it handed over
+        }
+        const std::size_t n = std::min(left, static_cast<std::size_t>(cap));
+        std::memcpy(buf, m->pull_text.data() + m->pull_taken, n);
+        m->pull_taken += n;
+        return static_cast<int>(n);
+    }
+
+    // The whole-reply mode's one worker: the reply as a single generation on
+    // the first engine, into piece 0, which the emitter drains as it grows.
+    void run_whole(bool want_audio) {
+        ChunkCtx ctx;
+        ctx.impl = this;
+        ctx.job  = 0;
+        QttsResult r;
+        const bool ok = engines[0]->say_pulled(std::string(), &Impl::pull_source, this,
+                                               want_audio ? &Impl::on_chunk : 0,
+                                               want_audio ? &ctx : 0, &r);
+        std::lock_guard<std::mutex> lock(mu);
+        pieces[0].done = true;
+        // A reply with nothing speakable in it -- a code block, say -- ends
+        // the text before any arrives, which the engine refuses. That is an
+        // empty reading, not a failure.
+        const bool nothing = pull_closed && pull_text.empty();
+        if (!ok && !aborted && !nothing) {
+            failed = true;
+            if (error.empty()) {
+                error = engines[0]->last_error();
+            }
+        }
+        if (!want_audio) {
+            emitted += static_cast<std::size_t>(r.speech_seconds * Qtts::sample_rate());
+        }
+        cv.notify_all();
     }
 
     // Whether the piece just finished was the last one there will ever be.
@@ -794,6 +877,20 @@ const QttsSampling& Reader::sampling() const {
     return impl_->sampling;
 }
 
+void Reader::set_streaming_text(bool on) {
+    impl_->streaming_text = on;
+    for (std::size_t k = 0; k < impl_->engines.size(); ++k) {
+        impl_->engines[k]->set_streaming_text(on);
+    }
+}
+
+void Reader::set_eos_hold(int frames) {
+    impl_->eos_hold = frames;
+    for (std::size_t k = 0; k < impl_->engines.size(); ++k) {
+        impl_->engines[k]->set_eos_hold(frames);
+    }
+}
+
 void Reader::set_threads(int n) {
     impl_->threads = n;
 }
@@ -804,6 +901,10 @@ void Reader::set_split(const SplitOptions& opt) {
 
 const SplitOptions& Reader::split() const {
     return impl_->split;
+}
+
+void Reader::set_whole_reply(bool on) {
+    impl_->whole = on;
 }
 
 const std::string& Reader::last_error() const {
@@ -879,6 +980,9 @@ bool Reader::begin(ReaderAudioSink sink, void* user_data) {
     m->aborted     = false;
     m->failed      = false;
     m->closed      = false;
+    m->pull_text.clear();
+    m->pull_taken  = 0;
+    m->pull_closed = false;
     m->held        = 0;
     m->held_peak   = 0;
     m->emitted     = 0;
@@ -889,20 +993,29 @@ bool Reader::begin(ReaderAudioSink sink, void* user_data) {
     m->started     = clk::now();
     m->running     = true;
 
-    // Every engine gets a worker, not one per piece: on a stream the piece
-    // count is not known yet, and a worker with nothing to do waits.
     const bool want_audio = (sink != 0);
-    m->pool.reserve(m->engines.size());
-    for (std::size_t k = 0; k < m->engines.size(); ++k) {
-        m->pool.push_back(std::thread(&Impl::run_worker, m, k, want_audio));
+    if (m->whole) {
+        // One piece for the whole reply, generated by one worker as the text
+        // comes. next_job past it, so nothing else claims it.
+        m->pieces.push_back(Impl::Piece());
+        m->next_job = 1;
+        m->pool.push_back(std::thread(&Impl::run_whole, m, want_audio));
+    } else {
+        // Every engine gets a worker, not one per piece: on a stream the piece
+        // count is not known yet, and a worker with nothing to do waits.
+        m->pool.reserve(m->engines.size());
+        for (std::size_t k = 0; k < m->engines.size(); ++k) {
+            m->pool.push_back(std::thread(&Impl::run_worker, m, k, want_audio));
+        }
     }
     if (want_audio) {
         // On its own thread, because begin() returns and there is no caller
         // left to run it on.
         m->emitter = std::thread(&Impl::stream_emitter, m);
         // Only with audio, and only when later pieces are allowed to wait:
-        // without a listener there is no playhead to pace against.
-        if (m->split.later_min_chars > 0) {
+        // without a listener there is no playhead to pace against. Nothing is
+        // cut in the whole-reply mode, so there is nothing to pace.
+        if (!m->whole && m->split.later_min_chars > 0) {
             m->pacer = std::thread(&Impl::run_pacer, m);
         }
     }
@@ -922,6 +1035,16 @@ bool Reader::feed(const std::string& delta) {
         }
     }
     std::lock_guard<std::mutex> text(m->text_mu);
+    if (m->whole) {
+        // Cleaned, not cut: the one generation takes the text as it comes.
+        const std::string spoken = m->speakable.feed(delta);
+        if (!spoken.empty()) {
+            std::lock_guard<std::mutex> lock(m->mu);
+            m->pull_text += spoken;
+            m->cv.notify_all();
+        }
+        return true;
+    }
     m->dispatch(m->stream.feed(m->speakable.feed(delta)), false);
     return true;
 }
@@ -936,7 +1059,18 @@ bool Reader::finish(ReaderResult* out) {
         return false;
     }
 
-    {
+    if (m->whole) {
+        // Whatever the cleaner still held, and the end of the text.
+        std::lock_guard<std::mutex> text(m->text_mu);
+        const std::string tail = m->speakable.finish();
+        std::lock_guard<std::mutex> lock(m->mu);
+        m->pull_text += tail;
+        m->pull_closed = true;
+        m->cv.notify_all();
+        // The exact text the engine was given; see the note in dispatch().
+        utils::log_info("reader: whole reply, %d char(s): %s",
+                        static_cast<int>(count_chars(m->pull_text)), m->pull_text.c_str());
+    } else {
         // Whatever the cleaner still held, then the cutter's remainder, as one
         // closing batch so the tail rule sees the true last piece.
         std::lock_guard<std::mutex> text(m->text_mu);

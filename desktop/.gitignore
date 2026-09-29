@@ -7,6 +7,6 @@ node_modules
 node_modules/.tmp
 
 # The cross-built SDKs and their build trees. Outside build/ on purpose -- see
-# the note at the top of build.cmd -- so the root .gitignore's `build` does not
+# the note above SDK in build.py -- so the root .gitignore's `build` does not
 # reach them.
 sdk

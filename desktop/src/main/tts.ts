@@ -24,12 +24,22 @@
  * page owns playback, because only the page has an AudioContext.
  */
 import { existsSync } from 'node:fs'
-import type { TtsStatus } from '../shared/api'
+import type { TtsStatus, VoiceMode } from '../shared/api'
 import { core } from './core'
 import { dataFile, readJson, writeJson } from './jsonfile'
 
 interface Stored {
+  /** The Base talker, which voiceMode 'base' reads with. */
   talkerPath: string
+  /** The CustomVoice talker, which voiceMode 'custom' reads with. */
+  customTalkerPath: string
+  /**
+   * Which of the two talkers the voice comes from. 'base' clones a reference
+   * recording; 'custom' uses a speaker built into the model and can be asked
+   * for a style. Both are offered: the built-in speakers sound better today,
+   * and a recorded voice is the only way to have one's own.
+   */
+  voiceMode: VoiceMode
   tokenizerPath: string
   /** The written voice. See DEFAULT_VOICE. */
   voice: string
@@ -64,16 +74,22 @@ const DEFAULT_VOICE = 'clear, natural pace, close to the microphone'
  * how, but neither fixes the draw -- so leaving the seed alone is why the test
  * button and a spoken reply did not sound like the same person.
  *
- * 23 because it is the one design/voice.md's seed sweep was listened to and
- * kept: "节奏感很好，语速、停顿都有变化". The seed does not only pick a draw, it
- * picks a delivery -- the same sentence came back at 16.88 s, 12.00 s and
- * 10.88 s on three unpinned runs, a 55% spread in how fast it talks.
+ * Pinning is the point; which value is not, mostly. Every piece opens on the
+ * same prompt, so a seed's first draws land alike across texts and set the
+ * tone of what follows -- the one part of a delivery a seed carries from one
+ * text to the next. 101 because it is the seed with rhythm: over three passages
+ * at four talker temperatures from 0.9 to 1.3, it had the widest pace swing
+ * between pieces in 6 of the 12 and was in the top two of four seeds in 10,
+ * and by ear it was the one preferred at 1.3 (see DEFAULT_TEMPERATURE in
+ * reader.ts).
  */
-const DEFAULT_SEED = 23
+const DEFAULT_SEED = 101
 
 const FILE = 'tts.json'
 const EMPTY: Stored = {
   talkerPath: '',
+  customTalkerPath: '',
+  voiceMode: 'base',
   tokenizerPath: '',
   voice: DEFAULT_VOICE,
   autoSpeak: false,
@@ -95,6 +111,8 @@ function read(): Stored {
         : ''
   return {
     talkerPath: typeof s.talkerPath === 'string' ? s.talkerPath : '',
+    customTalkerPath: typeof s.customTalkerPath === 'string' ? s.customTalkerPath : '',
+    voiceMode: s.voiceMode === 'custom' ? 'custom' : 'base',
     tokenizerPath: tokenizer,
     voice,
     autoSpeak: s.autoSpeak === true,
@@ -107,7 +125,7 @@ function write(s: Stored): void {
   writeJson(dataFile(FILE), s)
 }
 
-/** True when this build has the engine at all (`build.cmd qtts` turns it on). */
+/** True when this build has the engine at all (`build.py qtts` turns it on). */
 /**
  * The two model files, for a lane that needs the same pair.
  *
@@ -117,7 +135,17 @@ function write(s: Stored): void {
  */
 export function paths(): { talkerPath: string; tokenizerPath: string } {
   const s = read()
-  return { talkerPath: s.talkerPath, tokenizerPath: s.tokenizerPath }
+  return {
+    talkerPath: s.voiceMode === 'custom' ? s.customTalkerPath : s.talkerPath,
+    tokenizerPath: s.tokenizerPath
+  }
+}
+
+/** Base or CustomVoice. The caller reloads the voice: its talker has changed. */
+export function setVoiceMode(mode: VoiceMode): void {
+  const s = read()
+  s.voiceMode = mode === 'custom' ? 'custom' : 'base'
+  write(s)
 }
 
 /** The voice, by the same three routes, for the same reason as paths(). */
@@ -169,7 +197,9 @@ export function status(): TtsStatus {
       available: false,
       loaded: false,
       modelType: '',
+      voiceMode: s.voiceMode,
       talkerPath: s.talkerPath,
+      customTalkerPath: s.customTalkerPath,
       tokenizerPath: s.tokenizerPath,
       voice: s.voice,
       autoSpeak: s.autoSpeak,
@@ -183,7 +213,9 @@ export function status(): TtsStatus {
     available: true,
     loaded: core().nativeTtsLoaded() === 1,
     modelType: core().nativeTtsModelType(),
+    voiceMode: s.voiceMode,
     talkerPath: s.talkerPath,
+    customTalkerPath: s.customTalkerPath,
     tokenizerPath: s.tokenizerPath,
     voice: s.voice,
     autoSpeak: s.autoSpeak,
@@ -204,10 +236,12 @@ export function status(): TtsStatus {
  * something else is the kind of disagreement that shows up later as a voice
  * nobody asked for.
  */
-export function setPath(which: 'talker' | 'tokenizer', path: string): void {
+export function setPath(which: 'talker' | 'customTalker' | 'tokenizer', path: string): void {
   const s = read()
   if (which === 'talker') {
     s.talkerPath = path
+  } else if (which === 'customTalker') {
+    s.customTalkerPath = path
   } else {
     s.tokenizerPath = path
   }
@@ -227,7 +261,7 @@ export function setPath(which: 'talker' | 'tokenizer', path: string): void {
  */
 export function load(): Promise<string> {
   if (!available()) {
-    return Promise.resolve('this build has no speech output -- rebuild with `build.cmd qtts`')
+    return Promise.resolve('this build has no speech output -- rebuild with `python build.py qtts`')
   }
   const s = read()
   if (s.talkerPath.length === 0 || s.tokenizerPath.length === 0) {

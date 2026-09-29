@@ -2,7 +2,7 @@
   "name": "yoai",
   "version-string": "0.1.0",
   "builtin-baseline": "d015e31e90838a4c9dfa3eed45979bc70d9357fc",
-  "$comment": "The one list of the core's dependencies, and every lane installs from it: the desktop builds through the vcpkg CMake toolchain, harmony/ and android/ through vcpkg install in manifest mode. zlib is named although curl pulls it in, because the mobile triplets link everything static and the final link needs it on its own.",
+  "$comment": "The one list of the core's dependencies, and every lane installs from it: the desktop builds through the vcpkg CMake toolchain, harmony/ and android/ through vcpkg install in manifest mode. zlib is named although curl pulls it in, because the mobile triplets link everything static and the final link needs it on its own. The server feature is for src/server/ alone, which no mobile lane builds; the root build.py turns it on with `server`.",
   "dependencies": [
     {
       "name": "curl",
@@ -10,5 +10,11 @@
     },
     "openssl",
     "zlib"
-  ]
+  ],
+  "features": {
+    "server": {
+      "description": "The WebSocket speech server, src/server/",
+      "dependencies": ["libwebsockets"]
+    }
+  }
 }

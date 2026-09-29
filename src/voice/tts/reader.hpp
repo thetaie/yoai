@@ -369,6 +369,15 @@ public:
     void set_sampling(const QttsSampling& sampling);
     const QttsSampling& sampling() const;
 
+    // The text layout each piece is generated with; see
+    // Qtts::set_streaming_text. Off by default. Applied to every engine, and
+    // takes effect on the next read().
+    void set_streaming_text(bool on);
+
+    // See Qtts::set_eos_hold. 0 by default. Applied to every engine, and
+    // takes effect on the next read().
+    void set_eos_hold(int frames);
+
     // Worker threads per engine, for the NEXT load(). <= 0 leaves upstream's
     // heuristic alone.
     //
@@ -382,6 +391,19 @@ public:
     // Where the cuts fall. Takes effect on the next read().
     void set_split(const SplitOptions& opt);
     const SplitOptions& split() const;
+
+    // Read the reply as ONE generation instead of cutting it into pieces: the
+    // text goes to the first engine as feed() delivers it, cleaned but not
+    // cut, and the talker reads it a token a frame (Qtts::say_pulled). No
+    // seams, and the pace moves across the reply the way a whole take's does
+    // instead of restarting at every piece. The writer has to keep ahead of
+    // the talker, 12.5 tokens a second, or the audio comes out slower than it
+    // plays; the on-device Qwen3.5-2B writes about 21 while this reads.
+    //
+    // Off by default, so the cutting above stays what a reply gets unless a
+    // host asks. Needs qwentts-streaming-text.patch; without it every read
+    // fails with the engine's message. Takes effect on the next begin().
+    void set_whole_reply(bool on);
 
     // Read the whole passage. BLOCKS until the last sample has been emitted.
     //

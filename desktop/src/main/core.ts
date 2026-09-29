@@ -91,6 +91,8 @@ export interface YoaiNative {
   nativeReaderLoaded(): number
   nativeReaderUnload(): void
   nativeReaderModelType(): string
+  /** The named speakers of a custom_voice talker, as a JSON array; `[]` otherwise. */
+  nativeReaderSpeakers(): string
   nativeReaderSetVoice(instruct: string): void
   nativeReaderSetSpeaker(name: string): void
   /**
@@ -111,6 +113,14 @@ export interface YoaiNative {
   nativeReaderSetLaterSplit(minChars: number, maxChars: number): void
   /** The first piece ends at a full stop from this many characters on. 0 turns it off. */
   nativeReaderSetFirstStopChars(chars: number): void
+  /** The talker's sampling temperature. Below 0 restores the default, 0.9. */
+  nativeReaderSetTemperature(temperature: number): void
+  /** The talker reads each piece's text one token per frame rather than all up front. */
+  nativeReaderSetStreamingText(on: boolean): void
+  /** Frames generated past the talker's first stop code. 0 stops at once. */
+  nativeReaderSetEosHold(frames: number): void
+  /** One generation per reply, fed as it is written, instead of pieces. */
+  nativeReaderSetWholeReply(on: boolean): void
   /** A comma ends a piece once min_chars is reached. Off by default. */
   nativeReaderSetClauseCuts(on: boolean): void
   nativeReaderSetThreads(threads: number): void

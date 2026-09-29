@@ -11,7 +11,7 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
  * src/main along with it.
  *
  * The addon is NOT built here. It is C++ with a CMake build of its own
- * (native/), driven by build.cmd / build.sh, and bundling a .node is not
+ * (native/), driven by build.py, and bundling a .node is not
  * something a JavaScript bundler should be asked to have an opinion about.
  */
 const shared = resolve(__dirname, 'src/shared')

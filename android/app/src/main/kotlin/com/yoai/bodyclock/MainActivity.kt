@@ -129,7 +129,7 @@ private fun DevicePanel(state: MeasureViewModel.UiState) = Panel("Device") {
         }
     )
     Text(
-        "A lane reads off when its SDK was not built. See android/build.cmd.",
+        "A lane reads off when its SDK was not built. See android/build.py.",
         style = MaterialTheme.typography.bodySmall,
     )
 }

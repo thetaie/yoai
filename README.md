@@ -76,23 +76,27 @@ which is why the ABI stays this small.
 ### Desktop (to exercise the core)
 
 Needs CMake, a C++11 compiler, and libcurl / OpenSSL; RapidJSON, SQLite and
-sqlite-vec are vendored in `third/`. `build.sh` takes the two libraries from vcpkg when a
-checkout is there and from the system's own packages when it is not — `apt
-install libcurl4-openssl-dev libssl-dev`, or `brew install openssl@3`.
-`build.cmd` wants vcpkg, which is where a Windows machine gets both anyway.
+sqlite-vec are vendored in `third/`. On macOS and Linux the build takes the two
+libraries from vcpkg when a checkout is there and from the system's own
+packages when it is not — `apt install libcurl4-openssl-dev libssl-dev`, or
+`brew install openssl@3`. On Windows it wants vcpkg, which is where a Windows
+machine gets both anyway.
 
 ```
-build.cmd            # Windows
-./build.sh           # macOS / Linux
+python build.py      # python3 on macOS / Linux
 ```
+
+Every build script is Python 3.8 or newer, standard library only, and the same
+file on every platform.
 
 `--help` lists the options: `asr` for speech recognition, `llama` for the
 on-device engine (chat and embedding on a GGUF), `tts` for speech output, and
-`clean` to start over. They combine: `build.cmd clean asr llama tts`.
+`clean` to start over. They combine: `python build.py clean asr llama tts`.
 
 Paths that differ per machine -- Visual Studio, vcpkg, the llama.cpp checkout
 -- go in `.env` at the root, which git ignores and every C/C++ build script
-reads (root, `harmony/`, `desktop/`, `third/sync`) through `_load-env.*`. Copy
+reads (root, `harmony/`, `desktop/`, `android/`, `third/sync.py`) by the
+rules in the root `build.py`. Copy
 [.env.example](.env.example); it lists every `YOAI_*` setting.
 
 Then talk to a real provider without a phone in the loop:
@@ -148,16 +152,13 @@ Cross-compile the native halves once, then repackage as you go:
 
 ```
 cd harmony
-build.cmd           # Windows        -- dependencies, on-device engine, the app
-build.cmd hap       #                -- just repackage, every run after that
-
-./build.sh          # macOS / Linux
-./build.sh hap
+python build.py       # dependencies, on-device engine, the app
+python build.py hap   # just repackage, every run after that
 ```
 
 The bare command expects a llama.cpp checkout beside the repo (see below). For
 the app without the on-device engine, name the other two targets:
-`build.cmd deps hap`.
+`python build.py deps hap`.
 
 `hap` drives the same hvigor build DevEco does — same tasks, same signing — and
 drops an installable `entry-default-signed.hap` under
@@ -175,12 +176,11 @@ llama.cpp:
 ```
 git clone --depth 1 https://github.com/ggml-org/llama.cpp ../llama.cpp
 cd harmony
-build.cmd             # Windows       -- or `build.cmd llama` for just the engine
-./build.sh            # macOS / Linux
+python build.py       # or `python build.py llama` for just the engine
 ```
 
 It costs about 4.3 MiB in `libyoai.so`, a ~200 MB checkout, and a few minutes of
-cross-compile. `build.cmd deps hap` builds the app without it.
+cross-compile. `python build.py deps hap` builds the app without it.
 
 The checkout goes beside the repo (`YOAI_LLAMA_SRC` moves it) and is never updated
 for you: this build wants a source you can pin and re-measure against, not one
@@ -205,12 +205,12 @@ than about the engines.
 
 ```
 cd android
-./build.sh          # deps, the on-device engine, the APK -- the first run
-./build.sh apk      # every run after that
+python build.py       # deps, the on-device engine, the APK -- the first run
+python build.py apk   # every run after that
 ```
 
-`build.cmd` is the same thing on Windows. Lanes turn on the same way they do on
-HarmonyOS: `./build.sh qtts` for speech out, `./build.sh vulkan` to also build
+Lanes turn on the same way they do on HarmonyOS: `python build.py qtts` for
+speech out, `python build.py vulkan` to also build
 ggml's Vulkan backend for Adreno — which is the one lane HarmonyOS could not
 measure, having killed the process by policy before it could be timed.
 
@@ -229,14 +229,13 @@ the core; this is the same core with a window on it.
 
 ```
 cd desktop
-build.cmd            # Windows
-./build.sh           # macOS / Linux
+python build.py
 ```
 
 That builds the Node-API addon and the Electron bundles; `npm run dev` after
 that is the loop while writing UI. The on-device lane is off by default for the
-same reason it is everywhere else and turns on the same way: `build.cmd clean
-llama`, with a llama.cpp checkout beside the repo.
+same reason it is everywhere else and turns on the same way: `python build.py
+clean llama`, with a llama.cpp checkout beside the repo.
 
 One directory rather than an `electron/` and a `web/`, and
 [desktop/README.md](desktop/README.md) argues it: a browser cannot mmap a GGUF

@@ -232,6 +232,7 @@ void apply_local_options(const char* options_json, LocalOptions* opt) {
     }
 
     opt->n_threads       = json_int(doc, "threads",       opt->n_threads);
+    opt->n_gpu_layers    = json_int(doc, "gpuLayers",     opt->n_gpu_layers);
     opt->n_ctx_max       = json_int(doc, "contextMax",    opt->n_ctx_max);
     opt->n_predict       = json_int(doc, "predict",       opt->n_predict);
     opt->n_reply_reserve = json_int(doc, "replyReserve",  opt->n_reply_reserve);
@@ -1685,6 +1686,12 @@ std::string& reader_model_type() {
     return buf;
 }
 
+// Per thread for the reason tts_speakers_buffer() gives.
+std::string& reader_speakers_buffer() {
+    static thread_local std::string buf;
+    return buf;
+}
+
 struct ReaderSinkBridge {
     yoai_reader_audio_handler handler;
     void*                          user_data;
@@ -1757,6 +1764,22 @@ extern "C" const char* yoai_reader_model_type(void) {
     std::lock_guard<std::mutex> guard(reader_mutex());
     reader_model_type() = reader().model_type();
     return reader_model_type().c_str();
+}
+
+extern "C" const char* yoai_reader_speakers(void) {
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    const std::vector<std::string> names = reader().speakers();
+
+    rapidjson::StringBuffer buf;
+    rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+    w.StartArray();
+    for (size_t i = 0; i < names.size(); ++i) {
+        w.String(names[i].data(), static_cast<rapidjson::SizeType>(names[i].size()));
+    }
+    w.EndArray();
+
+    reader_speakers_buffer().assign(buf.GetString(), buf.GetSize());
+    return reader_speakers_buffer().c_str();
 }
 
 extern "C" void yoai_reader_set_voice(const char* instruct) {
@@ -1865,6 +1888,29 @@ extern "C" void yoai_reader_set_clause_cuts(int on) {
 extern "C" void yoai_reader_set_threads(int threads) {
     std::lock_guard<std::mutex> guard(reader_mutex());
     reader().set_threads(threads);
+}
+
+extern "C" void yoai_reader_set_temperature(float temperature) {
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    // The rest of the sampler as it is; only the talker's temperature moves.
+    yoai::voice::QttsSampling s = reader().sampling();
+    s.temperature = temperature < 0.0f ? yoai::voice::QttsSampling().temperature : temperature;
+    reader().set_sampling(s);
+}
+
+extern "C" void yoai_reader_set_streaming_text(int on) {
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    reader().set_streaming_text(on != 0);
+}
+
+extern "C" void yoai_reader_set_eos_hold(int frames) {
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    reader().set_eos_hold(frames);
+}
+
+extern "C" void yoai_reader_set_whole_reply(int on) {
+    std::lock_guard<std::mutex> guard(reader_mutex());
+    reader().set_whole_reply(on != 0);
 }
 
 extern "C" int yoai_reader_begin(yoai_reader_audio_handler on_audio,

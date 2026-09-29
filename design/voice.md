@@ -14,9 +14,9 @@ this app's own lanes or the engines' own CLIs — nothing is quoted from a model
 card or a benchmark someone else ran.
 
 **Which build produced a number is part of the number**, and the engines here
-are other people's checkouts that move under us. [third/manifest.txt](../third/manifest.txt)
+are other people's checkouts that move under us. [third/manifest.json](../third/manifest.json)
 pins the commit of each one and [third/patches/](../third/patches/) carries
-what we change in them; `third/sync.cmd check` says whether the trees on a
+what we change in them; `python third/sync.py check` says whether the trees on a
 machine still match. Figures taken before a pin moved are labeled where the
 move mattered — see the two ggml symbol tables further down, which are the
 first case where it did.
@@ -47,6 +47,8 @@ because no single model does both halves at a price this phone will pay.
 | llama.cpp + a GGUF | | ✓ | | 1.28 GB |
 | Qwen3-TTS, on qwentts.cpp | | | ✓ | 1.4 GB |
 | the platform's own TTS | | | ✓ | — |
+
+### The phone
 
 Measured on the phone, by what each one does:
 
@@ -98,7 +100,85 @@ continuously, so it belongs beside Qwen3-TTS's *sustained* 3.52, not its fast
 second inference framework, on having to think before it can speak, and on
 having no way to ask for a voice.
 
-### On the PC
+### The PC
+
+**What runs where on the desktop today**: recognition, SenseVoice-Small `q8`,
+on the CPU; the language model, llama.cpp with Qwen3.5-2B or -4B `Q4_K_M`, on
+the CPU at four threads; speech out, Qwen3-TTS 1.7B Base `Q4_K_M` anchored by a
+speaker vector, on the integrated GPU through Vulkan, reading each reply as one
+generation that takes the text as it is written. The iGPU shares the CPU's
+memory (`uma: 1`), so the two halves are not independent even on different
+processors — the language model's rows below have a column for that.
+
+**Below 1 is a threshold rather than a slope.** A stream needs a pre-buffer of
+`duration × (RTF − 1)` before playback can start without running dry: 132 s for
+a minute of audio on the phone, 8 s on the PC's CPU, and **nothing at all on its
+GPU**. That is the line between prepared playback and speaking as you go, and
+the PC is the first machine here on the far side of it.
+
+#### CPU
+
+Core Ultra 9 185H. **Every CPU figure here carries about ±15%** — the laptop
+throttles; see the note under the older figures.
+
+**Speech out, Qwen3-TTS.** One passage, one seed, two passes per cell;
+milliseconds per frame is the comparable column, as below. The Base rows were
+taken on 2026-09-29 through `tests/tts_pull.cpp`, seed 101, talker temperature
+1.3, the streaming text layout, a 2-frame eos hold — the desktop's settings —
+and the last run had all three models in it, so those share a thermal state.
+Milliseconds per frame on these rows is RTF × 80.
+
+| model | quant | backend | ms/frame | RTF | |
+| --- | --- | --- | --- | --- | --- |
+| 1.7B Base, mode A | `Q4_K_M` | CPU, 11 threads | 76–91 | 0.95–1.14 | two sessions; 1.10–1.14 in the run with the two 0.6B rows |
+| 0.6B Base, mode A | `Q4_K_M` | CPU, 11 threads | 69–72 | 0.87–0.90 | the only CPU cell under 1 by a margin, and a thin one; **sounded fine** by ear, two passages, one seed |
+| 0.6B Base, mode A | `Q8_0` | CPU, 11 threads | 90–92 | 1.13–1.15 | slower than the 1.7B at `Q4` |
+| 1.7B VoiceDesign | `Q4_K_M` | CPU, 11 threads | 78.8 | 0.95–1.07 | |
+| 1.7B VoiceDesign | `Q8_0` | CPU, 11 threads | 98.3 | 1.23–1.29 | |
+| 0.6B CustomVoice | `Q4_K_M` | CPU, 11 threads | 67.9 | 0.86 | |
+
+Older figures, kept for the shape and not the values:
+
+| engine and model | backend | measured | |
+| --- | --- | --- | --- |
+| Qwen3-TTS Base, free-running | llama.cpp `libmtmd`, CPU | RTF 1.41 | changes speaker between texts |
+| Qwen3-TTS Base, cloned in context | qwentts.cpp, CPU | RTF 1.97 | stable voice, good prosody |
+| Qwen3-TTS VoiceDesign | qwentts.cpp, CPU | RTF 1.16 | **does not reproduce** |
+| recognition, text | — | not measured on this machine then; **measured since**, below | |
+| a server CPU, a discrete GPU | — | **not measured at all** | |
+
+**Those three are from an earlier session and read about 21% fast.** The same
+host, passage and checkpoint that recorded 1.16 has since measured 1.40 three
+times over, with all three stages moved together — a clock difference, not a
+configuration one. **Every CPU figure on this machine carries about ±15%**: the
+1.7B `Q4` cell above read 1.131 and 1.137 on one day and 0.948 and 1.067 on
+another. The GPU cells repeat inside 1%. A server would not wander like this,
+but nothing here can say by how much.
+
+**Recognition**, SenseVoice-Small `q8`, four threads: about **RTF 0.05** — 0.41 s
+for an 8.8-second clip, 1.79 s for 32 s. See
+[It is built, and it matches the reference](#it-is-built-and-it-matches-the-reference).
+
+**Text, llama.cpp**, four threads, weights on the CPU (`-ngl 0`; the build
+links a Vulkan ggml, as the app's does). `llama-bench` at pin `335b21f`, and the
+app's own turn log for the last column. Tokens a second:
+
+| model | prefill, 32 | prefill, 256 | decode, alone | decode, TTS on the iGPU | decode, in the app |
+| --- | --- | --- | --- | --- | --- |
+| Qwen3.5-2B `Q4_K_M` | — | — | **28.6** | **21.9** | **20.0–21.9**, reading or not |
+| Qwen3.5-4B `Q4_K_M` | 33.0 | 80.5 | 11.0–11.4 | 7.0 | 4.0–8.1 |
+| Qwen2.5-Omni thinker, MNN `llm_demo` | 80.7 | — | 19.8 | — | retired |
+
+- **The TTS on the iGPU costs the CPU's model a quarter to two fifths** of its
+  decode, through the shared memory bus: 28.6 to 21.9 for the 2B, 11.4 to 7.0
+  for the 4B. The speech is barely touched by it (RTF 0.59–0.63).
+- **The 4B decodes slower in the app than on the bench** with nothing else
+  running — 5.7–6.7 against 11.4. The 2B shows no such gap. Unexplained.
+- **12.5 tokens a second is the line for reading a reply as it is written**
+  (the Vulkan section below): one text token per frame, at playback's 12.5
+  frames a second. The 2B clears it with speech running; the 4B does not.
+
+#### Vulkan, on the Arc iGPU
 
 **This is the deployment matrix**: one passage, one seed, two passes per cell.
 Milliseconds per frame is the comparable column — a frame is 80 ms of audio, and
@@ -107,14 +187,13 @@ not directly against each other.
 
 | model | quant | backend | ms/frame | RTF | |
 | --- | --- | --- | --- | --- | --- |
-| **1.7B VoiceDesign** | **`Q8_0`** | **Arc iGPU, Vulkan, MMVQ off** | **71.0** | **0.90** | **the one to deploy** — below 1, and the richest prosody |
+| **1.7B Base, mode A** | **`Q4_K_M`** | **Arc iGPU, Vulkan, MMVQ off** | 46–47 | **0.57–0.59** | **what the desktop reads with** — a speaker vector, no context cost |
+| 1.7B CustomVoice | `Q4_K_M` | Arc iGPU, Vulkan, MMVQ off | — | 0.57 | a named speaker; drifts in register between pieces |
+| 1.7B VoiceDesign | `Q8_0` | Arc iGPU, Vulkan, MMVQ off | 71.0 | 0.90 | the pick while VoiceDesign was the voice — below 1, the richest prosody; superseded by Base, see below |
 | 1.7B VoiceDesign | `Q4_K_M` | Arc iGPU, Vulkan, MMVQ off | 46.1 | 0.63 | 35% cheaper, audibly flatter |
 | 1.7B VoiceDesign | `Q8_0` | Arc iGPU, Vulkan | 78.3 | 0.80–1.00 | slight nasality |
 | 1.7B VoiceDesign | `Q4_K_M` | Arc iGPU, Vulkan | 44.8 | 0.57–0.58 | first audio 196 ms; mechanical pauses |
-| 1.7B VoiceDesign | `Q4_K_M` | CPU, 11 threads | 78.8 | 0.95–1.07 | |
-| 1.7B VoiceDesign | `Q8_0` | CPU, 11 threads | 98.3 | 1.23–1.29 | |
 | 0.6B CustomVoice | `Q4_K_M` | Arc iGPU, Vulkan, MMVQ off | 36.2 | 0.44–0.46 | cheapest by far, and **not deployable** — see below |
-| 0.6B CustomVoice | `Q4_K_M` | CPU, 11 threads | 67.9 | 0.86 | |
 | 0.6B CustomVoice | `Q8_0` | either | — | — | not downloaded |
 
 Where the GPU wins, and where it does not, per frame. **One codec chunk
@@ -132,7 +211,7 @@ of this table compared across that boundary without noticing:
 both quantizations and at both model sizes — which is what it should do, being
 the same file each time, and which the chunking confound had been hiding.
 
-#### One kernel switch, and it is not a trade
+##### One kernel switch, and it is not a trade
 
 **`GGML_VK_DISABLE_MMVQ=1`.** MMVQ is ggml's quantized mat-vec path — a
 performance optimization — and on this Intel driver turning it off made the
@@ -162,7 +241,14 @@ the CPU of the three, and is the one that sounds right. **Agreeing with a
 reference on a number is not the same as being correct**, and there was no
 reason to think it would be.
 
-#### And `Q8_0` is the one to deploy
+##### And `Q8_0` is the one to deploy — for VoiceDesign, and superseded
+
+**Superseded for reading replies.** The desktop now reads with 1.7B **Base**
+`Q4_K_M`, anchored by a speaker vector:
+[Base with one vector](#base-with-one-vector-what-steers-the-voice-and-what-does-not)
+has why Base, and it is about holding one voice across pieces, not about speed.
+`Q8_0` against `Q4_K_M` was judged on VoiceDesign below and has not been judged
+again on Base.
 
 With MMVQ off on both, judged on the same seed: `Q4` is audibly flatter — less
 variation in pace, less variation in the pauses — where `Q8`'s only remark was
@@ -210,29 +296,70 @@ Three more things follow for a server, and two of them were surprises:
   real.** So the 0.6B is off the table for serving despite being 42% cheaper a
   frame, and for a firmer reason than speed.
 
-Older figures, kept for the shape and not the values:
+##### The language model on the iGPU as well
 
-| engine and model | backend | measured | |
+Qwen3.5-4B `Q4_K_M`, `-ngl 99`, four threads, same bench:
+
+| | CPU | Arc iGPU | |
 | --- | --- | --- | --- |
-| Qwen3-TTS Base, free-running | llama.cpp `libmtmd`, CPU | RTF 1.41 | changes speaker between texts |
-| Qwen3-TTS Base, cloned in context | qwentts.cpp, CPU | RTF 1.97 | stable voice, good prosody |
-| Qwen3-TTS VoiceDesign | qwentts.cpp, CPU | RTF 1.16 | **does not reproduce** |
-| recognition, text | — | **not measured on this machine** | |
-| a server CPU, a discrete GPU | — | **not measured at all** | |
+| prefill, 32 tokens | 33.0 | 88.2 | 2.7× |
+| prefill, 256 tokens | 80.5 | 170.0 | 2.1× |
+| decode | 11.0 | 18.1 | 1.65× |
 
-**Those three are from an earlier session and read about 21% fast.** The same
-host, passage and checkpoint that recorded 1.16 has since measured 1.40 three
-times over, with all three stages moved together — a clock difference, not a
-configuration one. **Every CPU figure on this machine carries about ±15%**: the
-1.7B `Q4` cell above read 1.131 and 1.137 on one day and 0.948 and 1.067 on
-another. The GPU cells repeat inside 1%. A server would not wander like this,
-but nothing here can say by how much.
+**And then the speech has to share the GPU**, which is what rules it out. The
+same passage through the `qwen-tts` CLI while the bench decoded on the iGPU:
 
-**Below 1 is a threshold rather than a slope.** A stream needs a pre-buffer of
-`duration × (RTF − 1)` before playback can start without running dry: 132 s for
-a minute of audio on the phone, 8 s on the PC's CPU, and **nothing at all on its
-GPU**. That is the line between prepared playback and speaking as you go, and
-the PC is the first machine here on the far side of it.
+| | TTS alone | TTS with the LLM on the iGPU |
+| --- | --- | --- |
+| talker, ms a frame | 18.4 | **50.6** |
+| RTF | ~0.6 warm | **1.64** |
+
+Slower than playback, so the language model stays on the CPU. The first "alone"
+run read RTF 1.00 and was a cold start — the first Vulkan synthesis of a process
+compiles its shaders — which is why the warm figure is quoted instead.
+
+##### Reading a reply as it is written
+
+`Reader::set_whole_reply`: one generation per reply, the text pulled into the
+talker as the model writes it (qwentts-streaming-text.patch). **The talker reads
+one text token per frame until the text runs out**, and a frame whose token has
+not been written waits for it, so the writer has to stay above 12.5 tokens a
+second or the audio comes out slower than it plays. The voice's own pace does
+not enter: the talker's reading runs ahead of its speaking — 54 tokens read by
+frame 54, about 21 characters spoken by then — and only the frames after the
+text runs out are free.
+
+With a simulated writer, `tests/tts_pull.cpp` on the iGPU, a player that waits
+for half a second of audio and then plays at real time. Seconds from the
+writer's first character; about 1.4 characters a token in these passages:
+
+| writer | ≈ tokens a second | playback starts | starved |
+| --- | --- | --- | --- |
+| 29 characters a second | 21 | 0.78–1.11 | 0 |
+| 21 characters a second | 15 | 0.98–1.52 | 0 |
+| 14 characters a second | 10 | 1.36–2.26 | 1.16–1.24 |
+
+The same text given whole starts at 0.39–0.40, but only once it exists: at 29
+characters a second these passages take 2.7 and 3.4 s to write. On the CPU the
+pulled audio matched the whole-text audio sample for sample; on the GPU it
+does not, since the text is projected a chunk at a time and a matmul of another
+shape rounds differently.
+
+**In the app**, first audio from the message being sent, which includes the
+language model's prefill. `starved` is the reader's own count, for a player
+that starts at the first sample; the desktop's primes 0.6 s first.
+
+| model | reading | decode while reading | first audio | starved |
+| --- | --- | --- | --- | --- |
+| Qwen3.5-2B | in pieces | 20.5–21.1 | 0.89–1.20 | 0.24–0.32 |
+| Qwen3.5-2B | **whole reply** | 20.0–21.9 | **0.44–1.15** | 0–0.31 |
+| Qwen3.5-4B | in pieces | 4.0–8.1 | 1.17–2.73 | 0.20–0.33 |
+| Qwen3.5-4B | whole reply | 5.7–6.5 | 1.10–2.05 | **0.38–2.11** |
+
+A 157-character reply, 33.6 s of speech, was one generation at RTF 0.62. What
+first audio still waits for is the second pre-tokenizer chunk: the talker's
+first frame needs the token after the first chunk, and in Chinese a chunk runs
+to the next punctuation — 0.25 to 0.57 s of `TextWait` before anything plays.
 
 ### What none of this covers
 
@@ -1171,7 +1298,7 @@ are not the analysis boundaries; see the segmentation section.
 
 `src/voice/` now carries the port: `fbank.*` for the front end and `sensevoice.*`
 for the encoder, behind `-DYOAI_ASR=ON`, linking the ggml archives and not
-libllama. `build.cmd asr` (or `./build.sh asr`) assembles a desktop ggml SDK and
+libllama. `build.py asr` assembles a desktop ggml SDK and
 turns the lane on; `yoai-sensevoice-test` exercises it.
 
 The front end is a separate file for a reason: it is arithmetic with one right
@@ -2610,7 +2737,7 @@ see "The GPU runs, and the platform kills it" below.
 ### On the phone: RTF 2.1 for half a minute, then 3.5 — half a laptop's clock
 
 qwentts.cpp cross-compiles for HarmonyOS and the lane is wired end to end —
-[harmony/build.cmd](../harmony/build.cmd) `qtts` assembling
+[harmony/build.py](../harmony/build.py) `qtts` assembling
 `harmony/prebuilt/qtts-sdk/<abi>/`, `src/voice/qtts.*` behind a
 `yoai_tts_*` C ABI, NAPI bindings, and `/tts` to drive it.
 
@@ -3082,7 +3209,7 @@ most 0.27 GB a frame in 73.5 ms, under 4 GB/s against a chip measured at 24.4 �
 which is the profile a GPU helps. So ggml's Vulkan backend was cross-compiled
 for OHOS and linked in.
 
-**It builds and it runs.** `harmony/build.cmd <abi> vulkan` assembles it, the
+**It builds and it runs.** `harmony/build.py <abi> vulkan` assembles it, the
 driver initialises (`<HM_GPU> # Device init`), ggml selects it, and the engine
 reports `[Load] Talker backend: Vulkan0`. Four build obstacles, all in the
 toolchain and none in the model:
@@ -3121,7 +3248,7 @@ there is no partial offload to fall back to either.
 **What stays**: the build path, because it is one command and the next driver or
 the next ggml may behave differently, and because the finding is about a policy
 rather than about arithmetic. **What does not**: the SDK ships CPU-only, which
-is what `harmony/build.cmd <abi> qtts` assembles.
+is what `harmony/build.py <abi> qtts` assembles.
 
 **What was not reached**: whether the GPU would be faster at all. The codec is a
 convolutional decoder with 21 conv contexts and it is 45% of the bill; if
@@ -3201,7 +3328,7 @@ added `GGML_SOURCE_DIR` on 2026-09-21, which points its build at any ggml tree,
 llama.cpp's included. The measurement above says that direction works — 134 of
 134, nothing missing — which makes it the fix rather than a tidy-up.
 
-**Done on the desktop lane, and it links.** `desktop/build.cmd qtts` now
+**Done on the desktop lane, and it links.** `desktop/build.py qtts` now
 compiles llama.cpp's ggml inside the qwentts build, with `GGML_VULKAN=ON`, and
 the resulting archive set carries `ggml_dsv4_hc_pre_gated` for libllama and
 `ggml_backend_vk_reg` for the GPU path, satisfying both libraries from one
@@ -3216,9 +3343,9 @@ is noise — five unfused ops in the stage that is 45% of the bill and was
 already the floor.
 
 **The phone lane had the same breakage, and now has the same fix.**
-`harmony/build.cmd qtts` passes `GGML_SOURCE_DIR` too, cross-compiles clean,
+`harmony/build.py qtts` passes `GGML_SOURCE_DIR` too, cross-compiles clean,
 and the HAP builds and signs — so libllama.a and libqwen-core.a link against
-one ggml on the device as well. `android/build.sh` is changed to match. Two
+one ggml on the device as well. `android/build.py` is changed to match. Two
 things came with it: llama.cpp's affinity patch is now *applied by the script*
 rather than by hand, which is how it came to be recorded at all, and `qtts`
 needs a llama.cpp checkout whether or not `llama` is being built.
@@ -3488,7 +3615,7 @@ shallow-clones ggml master rather than pinning it — here that was **0.24.0 /
 `campplus.onnx` for the frontend. **PC only — nothing was run on the phone.**
 Cross-lingual mode, pinned seed, 11 threads, which is this file's PC CPU
 protocol. Reference: qwentts.cpp's own `freeman.wav`, 17.26 s, and a 6.0 s head
-cut of it. Not in [third/manifest.txt](../third/manifest.txt): no lane builds
+cut of it. Not in [third/manifest.json](../third/manifest.json): no lane builds
 it, and the checkout was a scratch one.
 
 | reference | audio | generate | RTF |
@@ -3622,7 +3749,7 @@ Parakeet, Granite Speech, Whisper, Conformer.
 ## The port exists; multimodal is not in it
 
 This repo already cross-compiles llama.cpp for HarmonyOS —
-[harmony/build.cmd](../harmony/build.cmd) `llama`, assembling
+[harmony/build.py](../harmony/build.py) `llama`, assembling
 `harmony/prebuilt/llama-sdk/<abi>/`. It defaults to
 `-march=armv8.6-a+i8mm+bf16+dotprod+fp16`, which is not a guess: a cross build
 with no `-march` lands on baseline `armv8-a`, because CMake's feature probes

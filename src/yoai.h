@@ -956,6 +956,11 @@ void yoai_reader_unload(void);
 // What the loaded talker is: "voice_design", "base" or "custom_voice".
 const char* yoai_reader_model_type(void);
 
+// The named speakers the loaded talker carries, as a JSON array of strings:
+// `[]` unless it is a custom_voice checkpoint. Valid until this thread's next
+// call. See yoai_tts_speakers.
+const char* yoai_reader_speakers(void);
+
 // The voice, by the same three routes the lane above documents: a written
 // instruct, a named speaker, or -- only on a `base` checkpoint -- a recording
 // reduced to a speaker embedding.
@@ -1044,6 +1049,44 @@ void yoai_reader_set_later_split(int min_chars, int max_chars);
 // out clipped alone -- joined to what follows. Applies to an urgent piece as
 // well (see yoai_reader_set_later_split), for the same reason.
 void yoai_reader_set_first_stop_chars(int chars);
+
+// The talker's sampling temperature: the sampler for the first codebook, which
+// carries what is said and its rhythm. Takes effect on the next piece. Below 0
+// restores the engine's default, 0.9; exactly 0 is argmax.
+//
+// Higher reads with more varied pace and phrasing, and past some point it
+// breaks -- words dropped or run on, a piece in another register. One passage
+// on four seeds read cleanly up to 1.3; that is a first listen, not a limit. The
+// acoustic stack's temperature is left alone: narrowing it was measured and did
+// not help (src/voice/tts/qwen3_tts.hpp).
+void yoai_reader_set_temperature(float temperature);
+
+// How each piece's text reaches the talker. 0 (the default): all of it in the
+// prompt before the first frame. 1: only its first token, the rest added one
+// per generated frame -- upstream's non_streaming_mode=False, which its own
+// voice clone defaults to. Listened to on three passages whole: no sentence
+// louder than its neighbours, which the default layout had; endings cut mid
+// vowel instead, which yoai_reader_set_eos_hold answers. Needs
+// qwentts-streaming-text.patch, and is ignored without it. Next piece on.
+void yoai_reader_set_streaming_text(int on);
+
+// Frames the talker keeps generating after it first picks its stop code; 0
+// (the default) stops at once. 2 (160 ms) let all three measured endings
+// decay to silence instead of stopping mid vowel, and 4 sounded no different.
+// At three times the hold past the first stop the piece ends regardless: held
+// on, the talker once went 62 frames more, five seconds of coughing. Ended that
+// way, what it made after the hold is dropped, not played -- heard once as a
+// faint noise. Needs the same patch. Next piece on.
+void yoai_reader_set_eos_hold(int frames);
+
+// 1 reads a reply as ONE generation that takes the text as it is written, 0
+// (the default) cuts it into pieces as before. See Reader::set_whole_reply:
+// no seams, the pace moves across the reply, and the writer must stay above
+// 12.5 tokens a second -- the rate the talker reads at -- or playback runs
+// dry. Measured on the desktop's GPU with a simulated writer: at about 21 and
+// 15 tokens a second, nothing ran dry behind a half-second buffer; at 10, 1.2
+// s did. Needs qwentts-streaming-text.patch. From the next yoai_reader_begin.
+void yoai_reader_set_whole_reply(int on);
 
 // Worker threads per engine for the NEXT load. <= 0 leaves the engine's choice.
 void yoai_reader_set_threads(int threads);

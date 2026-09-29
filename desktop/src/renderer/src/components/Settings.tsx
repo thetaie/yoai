@@ -157,7 +157,13 @@ export function Settings({
     void followVoice()
   }, [])
 
-  const pickTts = async (which: 'talker' | 'tokenizer'): Promise<void> => {
+  const setVoiceMode = async (mode: 'base' | 'custom'): Promise<void> => {
+    await window.yoai.tts.setVoiceMode(mode)
+    await refreshTts()
+    void followVoice()
+  }
+
+  const pickTts = async (which: 'talker' | 'customTalker' | 'tokenizer'): Promise<void> => {
     const picked = await window.yoai.tts.pickModel(which)
     if (picked !== null) {
       await refreshTts()
@@ -187,8 +193,8 @@ export function Settings({
   }
 
   const setSeed = async (raw: string): Promise<void> => {
-    const n = Number.parseInt(raw, 10)
-    await window.yoai.tts.setSeed(Number.isFinite(n) ? n : 7)
+    // Not a number goes over as NaN, and the main process puts its default in.
+    await window.yoai.tts.setSeed(Number.parseInt(raw, 10))
     await refreshTts()
   }
 
@@ -225,7 +231,12 @@ export function Settings({
     await refreshOmni()
   }
 
-  const setReader = async (patch: { enabled?: boolean; minChars?: number }): Promise<void> => {
+  const setReader = async (patch: {
+    enabled?: boolean
+    minChars?: number
+    temperature?: number
+    style?: '' | 'calm' | 'caring' | 'cheerful' | 'sorry'
+  }): Promise<void> => {
     setReaderStatus(await window.yoai.reader.set(patch))
   }
 
@@ -340,7 +351,6 @@ export function Settings({
           {/*------------------------------------------------------------------*/}
           <section className="section">
             <h3>{S.settingsModels}</h3>
-            <p>{S.settingsIntro}</p>
             <div className="card">
               {models.length === 0 ? (
                 <div className="row">
@@ -392,6 +402,9 @@ export function Settings({
           {/*------------------------------------------------------------------*/}
           <section className="section">
             <h3>{S.settingsAdd}</h3>
+            {/* Here rather than above the list: a key is what adding a remote
+                model asks for, and a local model has none. */}
+            <p>{S.settingsIntro}</p>
             {!addOpen ? (
               <div className="row" style={{ padding: 0 }}>
                 <span className="row-label">
@@ -513,8 +526,8 @@ export function Settings({
               </div>
             ) : (
               <p className="field-note" data-tone="danger">
-                这个版本没有编译本机推理引擎。用 <code>desktop/build.cmd llama</code>
-                （或 <code>./build.sh llama</code>）重新构建 addon 即可打开这条车道。
+                这个版本没有编译本机推理引擎。用 <code>python desktop/build.py llama</code>
+                重新构建 addon 即可打开这条车道。
               </p>
             )}
           </section>
@@ -548,13 +561,36 @@ export function Settings({
               </p>
             ) : (
               <>
+                <div className="field">
+                  <label>{S.settingsTtsMode}</label>
+                  <div className="row" style={{ gap: 16 }}>
+                    {(['base', 'custom'] as const).map((mode) => (
+                      <label key={mode} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input
+                          type="radio"
+                          name="voiceMode"
+                          checked={(ttsStatus?.voiceMode ?? 'base') === mode}
+                          onChange={() => void setVoiceMode(mode)}
+                        />
+                        {mode === 'base' ? S.settingsTtsModeBase : S.settingsTtsModeCustom}
+                      </label>
+                    ))}
+                  </div>
+                  <span className="field-note">{S.settingsTtsModeNote}</span>
+                </div>
                 <div className="card">
                   {[
-                    {
-                      which: 'talker' as const,
-                      label: S.settingsTtsTalker,
-                      path: ttsStatus?.talkerPath ?? ''
-                    },
+                    ttsStatus?.voiceMode === 'custom'
+                      ? {
+                          which: 'customTalker' as const,
+                          label: S.settingsTtsTalkerCustom,
+                          path: ttsStatus?.customTalkerPath ?? ''
+                        }
+                      : {
+                          which: 'talker' as const,
+                          label: S.settingsTtsTalker,
+                          path: ttsStatus?.talkerPath ?? ''
+                        },
                     {
                       which: 'tokenizer' as const,
                       label: S.settingsTtsTokenizer,
@@ -573,6 +609,7 @@ export function Settings({
                       </button>
                     </div>
                   ))}
+                  {ttsStatus?.voiceMode !== 'custom' && (
                   <div className="row">
                     <span className="row-label">
                       {S.settingsReaderRef}
@@ -613,7 +650,57 @@ export function Settings({
                       {refBusy ? S.settingsReaderRefBusy : S.settingsReaderRefPick}
                     </button>
                   </div>
+                  )}
                 </div>
+                {ttsStatus?.voiceMode === 'custom' && readerStatus !== null && (
+                  <>
+                    <div className="field" style={{ marginTop: 12 }}>
+                      <label htmlFor="ttsSpeaker">{S.settingsTtsSpeaker}</label>
+                      <select
+                        id="ttsSpeaker"
+                        className="control"
+                        disabled={readerStatus.speakers.length === 0}
+                        value={
+                          readerStatus.speakers.includes(ttsStatus.speaker)
+                            ? ttsStatus.speaker
+                            : readerStatus.speakers.includes('serena')
+                              ? 'serena'
+                              : (readerStatus.speakers[0] ?? '')
+                        }
+                        onChange={(e) =>
+                          void window.yoai.tts.setSpeaker(e.target.value).then(refreshTts)
+                        }
+                      >
+                        {readerStatus.speakers.map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="field-note">{S.settingsTtsSpeakerNote}</span>
+                    </div>
+                    <div className="field" style={{ marginTop: 12 }}>
+                      <label htmlFor="ttsStyle">{S.settingsTtsStyle}</label>
+                      <select
+                        id="ttsStyle"
+                        className="control"
+                        value={readerStatus.style}
+                        onChange={(e) =>
+                          void setReader({
+                            style: e.target.value as '' | 'calm' | 'caring' | 'cheerful' | 'sorry'
+                          })
+                        }
+                      >
+                        <option value="">{S.settingsTtsStyleNone}</option>
+                        <option value="calm">{S.settingsTtsStyleCalm}</option>
+                        <option value="caring">{S.settingsTtsStyleCaring}</option>
+                        <option value="cheerful">{S.settingsTtsStyleCheerful}</option>
+                        <option value="sorry">{S.settingsTtsStyleSorry}</option>
+                      </select>
+                      <span className="field-note">{S.settingsTtsStyleNote}</span>
+                    </div>
+                  </>
+                )}
                 {recording && (
                   <VoiceRecorder
                     onUsed={() => {
@@ -623,7 +710,9 @@ export function Settings({
                     onClose={() => setRecording(false)}
                   />
                 )}
-                <span className="field-note">{S.settingsReaderRefNote}</span>
+                {ttsStatus?.voiceMode !== 'custom' && (
+                  <span className="field-note">{S.settingsReaderRefNote}</span>
+                )}
 
                 {/* No 载入 button: the voice loads by itself once both files are
                     picked, and this line says how that went. */}
@@ -637,7 +726,9 @@ export function Settings({
                       <span className="field-note" data-tone="danger">
                         {readerStatus.note}
                       </span>
-                    ) : (ttsStatus?.talkerPath ?? '').length === 0 ||
+                    ) : ((ttsStatus?.voiceMode === 'custom'
+                        ? ttsStatus?.customTalkerPath
+                        : ttsStatus?.talkerPath) ?? '').length === 0 ||
                       (ttsStatus?.tokenizerPath ?? '').length === 0 ? (
                       <span className="field-note">{S.settingsTtsPickBoth}</span>
                     ) : (
@@ -702,6 +793,23 @@ export function Settings({
                       onBlur={(e) => void setSeed(e.target.value)}
                     />
                     <span className="field-note">{S.settingsTtsSeedNote}</span>
+                  </div>
+                )}
+
+                {readerStatus !== null && (
+                  <div className="field" style={{ marginTop: 12 }}>
+                    <label htmlFor="ttsTemperature">{S.settingsTtsTemperature}</label>
+                    <input
+                      id="ttsTemperature"
+                      className="control"
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max="2"
+                      defaultValue={readerStatus.temperature}
+                      onBlur={(e) => void setReader({ temperature: Number.parseFloat(e.target.value) })}
+                    />
+                    <span className="field-note">{S.settingsTtsTemperatureNote}</span>
                   </div>
                 )}
               </>

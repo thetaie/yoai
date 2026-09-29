@@ -9,6 +9,7 @@ from a shell.
 | `yoai-cli` | Chats with any OpenAI-compatible provider through the C ABI, the same path a host app uses | [main.cpp](main.cpp) |
 | `yoai-asr` | Transcribes WAV files with the on-device SenseVoice model | [asr.cpp](asr.cpp) |
 | `yoai-llama` | Chats with a GGUF, or embeds text with one, on llama.cpp | [llama.cpp](llama.cpp) |
+| `yoai-server` | Serves speech over a WebSocket: text in as it is written, audio out as it is made. Built with `python build.py tts server`; see [src/server/README.md](../src/server/README.md) | [server.cpp](server.cpp) |
 
 ## Building
 
@@ -16,8 +17,7 @@ The tools are targets of the root CMake project, so they have no build script
 of their own. The root script builds the core plus these tools into `build/`:
 
 ```
-build.cmd              # Windows
-./build.sh             # macOS / Linux
+python build.py        # python3 on macOS / Linux
 ```
 
 `--help` lists the options.
@@ -28,8 +28,7 @@ from a llama.cpp checkout (by default one next to this repo; set
 `YOAI_LLAMA_SRC` in `.env` otherwise -- see [.env.example](../.env.example)):
 
 ```
-build.cmd asr
-./build.sh asr
+python build.py asr
 ```
 
 `yoai-llama` is always built too, and needs the on-device engine to do
@@ -37,8 +36,7 @@ anything. `llama` builds libllama from the same checkout, on the same ggml --
 longer than `asr`, since it is the whole engine:
 
 ```
-build.cmd llama
-./build.sh llama
+python build.py llama
 ```
 
 `tts` compiles speech output (Qwen3-TTS) into the core the same way, without
@@ -49,14 +47,13 @@ otherwise builds for the CPU, with a warning. No tool here drives it yet;
 `yoai-reader-test` with a talker and a codec GGUF reads a passage aloud.
 
 ```
-build.cmd tts
-./build.sh tts
+python build.py tts
 ```
 
 CMake caches which of these are on, so adding `asr`, `llama` or `tts` to a
 `build/` that was configured without it does nothing. The script notices,
-stops, and tells you to run `build.cmd clean asr` (or `clean llama`, `clean
-tts`) instead. They combine: `build.cmd clean asr llama tts`.
+stops, and tells you to run `python build.py clean asr` (or `clean llama`,
+`clean tts`) instead. They combine: `python build.py clean asr llama tts`.
 
 ## yoai-cli
 

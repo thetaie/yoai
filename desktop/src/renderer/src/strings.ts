@@ -64,8 +64,23 @@ export const S = {
   settingsTts: '语音输出',
   settingsTtsIntro:
     'Qwen3-TTS 在本机朗读回答，不联网。要两个 GGUF：base talker 写出音频码，12 Hz tokenizer 解成采样。两个都选好后自动载入。',
-  settingsTtsUnavailable: '这个版本没有编译语音输出。用 `build.cmd qtts` 重新构建。',
-  settingsTtsTalker: 'Talker 模型（base）',
+  settingsTtsUnavailable: '这个版本没有编译语音输出。用 `python desktop/build.py qtts` 重新构建。',
+  settingsTtsTalker: 'Talker 模型（Base）',
+  settingsTtsTalkerCustom: 'Talker 模型（CustomVoice）',
+  settingsTtsMode: '音色来源',
+  settingsTtsModeBase: '克隆音色（Base）',
+  settingsTtsModeCustom: '内置说话人（CustomVoice）',
+  settingsTtsModeNote:
+    '克隆音色用一段参考录音，可以换成自己的声音；内置说话人用模型自带的音色，目前听感更好，还能选朗读风格。两种模式各用各的 talker 模型，切换后自动重新载入。',
+  settingsTtsSpeaker: '说话人',
+  settingsTtsSpeakerNote: '模型自带的说话人，载入后可选。',
+  settingsTtsStyle: '朗读风格',
+  settingsTtsStyleNone: '不指定',
+  settingsTtsStyleCalm: '平静',
+  settingsTtsStyleCaring: '关切',
+  settingsTtsStyleCheerful: '轻快开心',
+  settingsTtsStyleSorry: '歉意',
+  settingsTtsStyleNote: '随每次回复一起交给模型的一句简短描述，从下一次回复开始生效。',
   settingsTtsTokenizer: 'Tokenizer 模型',
   settingsTtsPick: '选择 GGUF 文件',
   settingsTtsNotPicked: '未选择',
@@ -74,7 +89,10 @@ export const S = {
   settingsTtsLoaded: '已载入',
   settingsTtsSeed: '采样种子',
   settingsTtsSeedNote:
-    '固定种子，同样的文字每次合成结果完全一致。填 -1 则每段重新抽，前后段的语气会不一样。',
+    '默认 101，节奏感较强。固定种子，同样的文字每次合成结果完全一致；换一个种子，整体读法会随之改变。填 -1 则每段重新抽，前后段的语气会不一样。',
+  settingsTtsTemperature: '语调变化（采样温度）',
+  settingsTtsTemperatureNote:
+    '默认 1.3（模型自身默认 0.9）。调高后语速和语调更多变，读起来不那么像念稿；调得太高会漏字、念错或跑调。改动从下一段开始生效。',
   settingsTtsTest: '试听',
   settingsTtsTestText: '你好，我是 YoAI。这是本机合成的语音。',
   ttsSpeak: '朗读',
@@ -86,7 +104,7 @@ export const S = {
   settingsOmni: '端到端语音（omni）',
   settingsOmniIntro:
     '一个模型听、想、说，中间没有文字。开启后发消息走 omni，不再走「模型 + 语音输出」那条链。代价很大：3.8 GB 权重、第二套推理框架，本机实测合成比实时慢 3.1 倍。',
-  settingsOmniUnavailable: '这个版本没有编译 omni。用 `build.cmd clean mnn` 重新构建。',
+  settingsOmniUnavailable: '这个版本没有编译 omni。用 `python desktop/build.py clean mnn` 重新构建。',
   settingsOmniDir: '模型目录',
   settingsOmniPick: '选择目录',
   settingsOmniNotPicked: '未选择',
@@ -145,7 +163,7 @@ export const S = {
   recordTooShort: '太短了，至少录 10 秒。',
   recordClipped: '声音过载（削波），离麦克风远一点再录一遍。',
   settingsReaderRefNote:
-    '可选 .wav 录音（单声道、16 位、24 kHz；实测用过 17 秒和 22 秒的录音）或 .spk 向量。录音首次使用时提取一次，约需数秒，之后直接读缓存；.spk 须与模型尺寸一致（1.7B 为 2048 维，0.6B 为 1024 维）。默认读取 speaker/01_female。回复分段合成，每一段都锚到同一个音色上，否则段与段之间会换音区——实测十六段里有一段低了五个半音。',
+    '可选 .wav 录音（单声道、16 位、24 kHz；实测用过 17 秒和 22 秒的录音）或 .spk 向量。录音首次使用时提取一次，约需数秒，之后直接读缓存；.spk 须与模型尺寸一致（1.7B 为 2048 维，0.6B 为 1024 维）。默认读取 speaker/01_female。',
   settingsReaderMin: '攒够多少字再开口',
   settingsReaderMinNote:
     '0 表示用默认的 12。这个数决定的不是引擎快慢（出声都在 0.2 秒左右），而是大模型要先写多少字——本机模型实测 3.7 到 9.1 tok/s，36 个字就要等 6.4 秒。调大更自然（实测 30 比 12 好听），调小出声更早。',

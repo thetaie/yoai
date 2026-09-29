@@ -45,8 +45,10 @@ const PRIME_SECONDS = 0.6
  * drains whatever is in hand and then waits, which is what fifteen underruns of
  * 1.8-4.5 s each were. The ratio itself is the gap.
  *
- * So a producer slower than real time is not streamed at all. Its audio is
- * gathered until flush(), then played end to end: later, but in one piece.
+ * So a producer slower than real time is not streamed. Its audio is gathered,
+ * and judged again as each block arrives: once it is ahead it streams from
+ * there, and one that never gets ahead is played end to end at flush() --
+ * later, but in one piece.
  *
  * Measured rather than configured, because the one number that decides is the
  * one this machine is actually managing right now -- the same model at the same
@@ -402,7 +404,7 @@ export function createPlayer(): Player {
       pending.push(pcm)
       pendingSeconds += seconds
 
-      if (verdict === 'hold' || pendingSeconds < primeSeconds) {
+      if (pendingSeconds < primeSeconds) {
         return
       }
       const rate = producerRate()
@@ -412,13 +414,24 @@ export function createPlayer(): Player {
         // the middle of a word.
         return
       }
-      verdict = rate >= REALTIME_MARGIN ? 'stream' : 'hold'
-      console.log(
-        `[audio] producer at ${rate.toFixed(2)}x real time -> ` +
-          (verdict === 'stream'
-            ? `playing now, ${pendingSeconds.toFixed(2)} s in hand`
-            : 'slower than playback, holding until the whole reply is in')
-      )
+      // Judged again on every block while holding, not once: a producer can
+      // start slow and then outrun playback. A reply read as one generation
+      // does exactly that -- its first frames wait on the language model's
+      // text, one token a frame, and once the text is ahead it runs at the
+      // engine's own pace -- and a verdict frozen on its first half second
+      // held the whole reply back until it was finished. A producer that is
+      // slower than playback throughout, omni's Talker, never crosses and
+      // is held as before.
+      const next = rate >= REALTIME_MARGIN ? 'stream' : 'hold'
+      if (next !== verdict) {
+        console.log(
+          `[audio] producer at ${rate.toFixed(2)}x real time -> ` +
+            (next === 'stream'
+              ? `playing now, ${pendingSeconds.toFixed(2)} s in hand`
+              : 'slower than playback, holding for now')
+        )
+      }
+      verdict = next
       if (verdict === 'stream') {
         begin()
       }

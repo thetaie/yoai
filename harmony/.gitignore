@@ -14,7 +14,7 @@ oh_modules/
 **/build
 /.hvigor
 .cxx
-# Prebuilt native artifacts, from three targets of build.cmd / build.sh: <abi>/
+# Prebuilt native artifacts, from targets of build.py: <abi>/
 # for the core's vcpkg dependencies (`deps`), llama-sdk/<abi>/ for the on-device
 # engine (`llama`), and mnn-sdk/<abi>/ for the MNN evaluation lane (`mnn`).
 # Hundreds of MB, and reproducible from vcpkg.json and a checkout of llama.cpp

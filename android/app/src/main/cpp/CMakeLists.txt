@@ -10,7 +10,7 @@ project(yoai_jni)
 # to be kept out of commits.
 #
 # The core's third-party dependencies come prebuilt from android/prebuilt/<abi>/
-# -- run android/build.cmd (or .sh) once per ABI before building the app, or
+# -- run android/build.py once per ABI before building the app, or
 # configuring fails on the first find_package.
 
 set(CMAKE_CXX_STANDARD 11)
@@ -35,7 +35,7 @@ set(YOAI_PREBUILT "${YOAI_PREBUILT_ROOT}/${ANDROID_ABI}")
 if(NOT EXISTS "${YOAI_PREBUILT}/lib")
     message(FATAL_ERROR
         "No prebuilt dependencies for ${ANDROID_ABI} at ${YOAI_PREBUILT}.\n"
-        "Run android/build.cmd ${ANDROID_ABI} deps (or ./build.sh ${ANDROID_ABI} deps) first.")
+        "Run python android/build.py ${ANDROID_ABI} deps first.")
 endif()
 
 # find_package() inside the core resolves against the prebuilt tree.

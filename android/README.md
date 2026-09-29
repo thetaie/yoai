@@ -71,15 +71,13 @@ cheapest defence is never hiding the object a figure came from.
 
 ```
 cd android
-./build.sh                # deps, the LLM engine, the APK -- the first run
-./build.sh apk            # every run after that
-./build.sh qtts           # add speech out
-./build.sh vulkan         # add speech out with ggml's Vulkan backend, for Adreno
+python build.py          # deps, the LLM engine, the APK -- the first run
+python build.py apk      # every run after that
+python build.py qtts     # add speech out
+python build.py vulkan   # add speech out with ggml's Vulkan backend, for Adreno
 ```
 
-`build.cmd` is the same thing on Windows; it is a wrapper rather than a second
-copy, because unlike the HarmonyOS lane nothing here needs native batch — the
-NDK, vcpkg and the Gradle wrapper behave the same on all three platforms.
+The same script on every platform (`python3` on macOS/Linux).
 
 **A lane is on when its SDK exists.** `prebuilt/llama-sdk/<abi>/` turns on the
 on-device LLM and recognition together; `prebuilt/qtts-sdk/<abi>/` turns on
@@ -95,14 +93,14 @@ A cross build with no `-march` lands on baseline `armv8-a`, because CMake's
 feature probes compile **and run** a test binary and cannot run one for the
 phone. design/voice.md measures that costing 2.9x prefill and 2.2x decode.
 
-So `build.sh` asserts a feature set, and its default is the Kirin's:
+So `build.py` asserts a feature set, and its default is the Kirin's:
 `armv8.6-a+i8mm+bf16+dotprod+fp16`. A current Qualcomm core is armv9.2-a and has
 more. **The Device panel is how the assertion gets checked** — it prints what
 the chip reports, and `sve2` showing up there against a build that never asked
 for it is a lever nobody has pulled yet.
 
 ```
-./build.sh llama arch=armv9.2-a+i8mm+bf16+dotprod+fp16+sve2
+python build.py llama arch=armv9.2-a+i8mm+bf16+dotprod+fp16+sve2
 ```
 
 Keep the default when the point is comparing against the Kirin figures, and

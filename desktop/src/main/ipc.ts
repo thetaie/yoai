@@ -243,7 +243,7 @@ export function registerHandlers(): void {
 
   handle<[], TtsStatus>(CHANNELS.ttsStatus, () => tts.status())
 
-  handle<['talker' | 'tokenizer'], PickedModel | null>(CHANNELS.ttsPickModel, async (which) => {
+  handle<['talker' | 'customTalker' | 'tokenizer'], PickedModel | null>(CHANNELS.ttsPickModel, async (which) => {
     // Validated rather than trusted: this value chooses which stored path gets
     // overwritten, and the renderer is a web page.
     //
@@ -253,13 +253,18 @@ export function registerHandlers(): void {
     // the TALKER slot, and the engine failed two steps later with "talker GGUF
     // has wrong architecture". Falling back to a member of the enum makes a
     // protocol mismatch indistinguishable from a choice.
-    if (which !== 'talker' && which !== 'tokenizer') {
+    if (which !== 'talker' && which !== 'customTalker' && which !== 'tokenizer') {
       throw new Error(`unknown model slot '${String(which)}'`)
     }
     const slot = which
     const win = BrowserWindow.getFocusedWindow()
     const opts = {
-      title: slot === 'talker' ? 'Pick the talker model' : 'Pick the tokenizer model',
+      title:
+        slot === 'talker'
+          ? 'Pick the Base talker model'
+          : slot === 'customTalker'
+            ? 'Pick the CustomVoice talker model'
+            : 'Pick the tokenizer model',
       properties: ['openFile' as const],
       filters: [
         { name: 'GGUF models', extensions: ['gguf'] },
@@ -293,7 +298,25 @@ export function registerHandlers(): void {
   handle<[], void>(CHANNELS.ttsCancel, () => tts.cancel())
   handle<[string], void>(CHANNELS.ttsSetVoice, (text) => tts.setVoice(String(text ?? '')))
   handle<[boolean], void>(CHANNELS.ttsSetAutoSpeak, (on) => tts.setAutoSpeak(on === true))
-  handle<[string], void>(CHANNELS.ttsSetSpeaker, (name) => tts.setSpeaker(String(name ?? '')))
+  handle<[string], void>(CHANNELS.ttsSetSpeaker, (name) => {
+    tts.setSpeaker(String(name ?? ''))
+    reader.applyVoice()   // the reader is what speaks now; from its next reply
+  })
+  handle<[string], void>(CHANNELS.ttsSetVoiceMode, (mode) => {
+    // Validated like the model slot: it picks which talker gets loaded.
+    if (mode !== 'base' && mode !== 'custom') {
+      throw new Error(`unknown voice mode '${String(mode)}'`)
+    }
+    tts.setVoiceMode(mode)
+    // The other talker: what is loaded is the wrong one now.
+    reader.unload()
+    void reader.autoLoadVoice().then((reason) => {
+      if (reason.length > 0) {
+        console.error(`[yoai] the voice would not load: ${reason}`)
+      }
+      models.warmActive()
+    })
+  })
   handle<[number], void>(CHANNELS.ttsSetSeed, (seed) => {
     tts.setSeed(Number(seed))
     reader.applySeed()
@@ -406,14 +429,19 @@ export function registerHandlers(): void {
   handle<[], string>(CHANNELS.readerLoad, () => reader.load())
   handle<[], void>(CHANNELS.readerUnload, () => reader.unload())
 
-  handle<[{ enabled?: boolean; minChars?: number }], ReaderStatus>(CHANNELS.readerSet, (patch) => {
-    if (typeof patch?.enabled === 'boolean') {
-      reader.setEnabled(patch.enabled)
-      models.warmActive()   // reading adds the spoken-style paragraph, or drops it
+  handle<[{ enabled?: boolean; minChars?: number; temperature?: number; style?: string }], ReaderStatus>(
+    CHANNELS.readerSet,
+    (patch) => {
+      if (typeof patch?.enabled === 'boolean') {
+        reader.setEnabled(patch.enabled)
+        models.warmActive()   // reading adds the spoken-style paragraph, or drops it
+      }
+      if (typeof patch?.minChars === 'number') reader.setMinChars(patch.minChars)
+      if (typeof patch?.temperature === 'number') reader.setTemperature(patch.temperature)
+      if (typeof patch?.style === 'string') reader.setStyle(patch.style)
+      return reader.status()
     }
-    if (typeof patch?.minChars === 'number') reader.setMinChars(patch.minChars)
-    return reader.status()
-  })
+  )
 
   handle<[], string | null>(CHANNELS.readerPickReference, async () => {
     const win = BrowserWindow.getFocusedWindow()

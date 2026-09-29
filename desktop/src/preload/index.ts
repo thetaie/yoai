@@ -92,7 +92,7 @@ const api: YoaiApi = {
 
   tts: {
     status: () => ipcRenderer.invoke(CHANNELS.ttsStatus) as Promise<TtsStatus>,
-    pickModel: (which: 'talker' | 'tokenizer') =>
+    pickModel: (which: 'talker' | 'customTalker' | 'tokenizer') =>
       ipcRenderer.invoke(CHANNELS.ttsPickModel, which) as Promise<PickedModel | null>,
     load: () => ipcRenderer.invoke(CHANNELS.ttsLoad) as Promise<string>,
     unload: () => ipcRenderer.invoke(CHANNELS.ttsUnload) as Promise<void>,
@@ -100,6 +100,7 @@ const api: YoaiApi = {
     setAutoSpeak: (on: boolean) =>
       ipcRenderer.invoke(CHANNELS.ttsSetAutoSpeak, on) as Promise<void>,
     setSpeaker: (name: string) => ipcRenderer.invoke(CHANNELS.ttsSetSpeaker, name) as Promise<void>,
+    setVoiceMode: (mode) => ipcRenderer.invoke(CHANNELS.ttsSetVoiceMode, mode) as Promise<void>,
     setSeed: (seed: number) => ipcRenderer.invoke(CHANNELS.ttsSetSeed, seed) as Promise<void>,
     say: (text: string) => ipcRenderer.invoke(CHANNELS.ttsSay, text) as Promise<boolean>,
     cancel: () => ipcRenderer.invoke(CHANNELS.ttsCancel) as Promise<void>,

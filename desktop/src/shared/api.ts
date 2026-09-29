@@ -62,6 +62,7 @@ export const CHANNELS = {
   ttsSetAutoSpeak: 'tts:setAutoSpeak',
   ttsSetSpeaker: 'tts:setSpeaker',
   ttsSetSeed: 'tts:setSeed',
+  ttsSetVoiceMode: 'tts:setVoiceMode',
   ttsSay: 'tts:say',
   ttsCancel: 'tts:cancel',
   /** Main -> renderer: PCM chunks and the terminal event. */
@@ -102,14 +103,22 @@ export interface PickedModel {
 
 /** What speech output can do right now, and why not when it cannot. */
 export interface TtsStatus {
-  /** False on a build without the qtts lane -- `build.cmd qtts` turns it on. */
+  /** False on a build without the qtts lane -- `build.py qtts` turns it on. */
   available: boolean
   /** Whether the two GGUFs are resident. Loading takes seconds. */
   loaded: boolean
   /** "base" | "custom_voice" | "voice_design" | '' when nothing is loaded. */
   modelType: string
+  /**
+   * Where the voice comes from: 'base', a reference recording through a Base
+   * talker, or 'custom', a speaker built into a CustomVoice talker, which
+   * also takes a style (ReaderStatus.style). Each has its own talker file.
+   */
+  voiceMode: VoiceMode
   /** The stored paths, '' when the user has not picked them yet. */
   talkerPath: string
+  /** The CustomVoice talker, for voiceMode 'custom'. */
+  customTalkerPath: string
   tokenizerPath: string
   /**
    * The voice, described in English. On a voice_design checkpoint this is not a
@@ -175,7 +184,7 @@ export interface ChatSettings {
 
 /** What the end-to-end lane can do right now. */
 export interface OmniStatus {
-  /** False on a build without the MNN lane -- `build.cmd clean mnn` turns it on. */
+  /** False on a build without the MNN lane -- `build.py clean mnn` turns it on. */
   available: boolean
   loaded: boolean
   /** The model DIRECTORY, not a file: MNN models are a folder of graphs. */
@@ -210,6 +219,15 @@ export interface ModelLoadState {
   reason: string
 }
 
+/** Which talker, and so which kind of voice; see TtsStatus.voiceMode. */
+export type VoiceMode = 'base' | 'custom'
+
+/**
+ * How a CustomVoice talker is asked to read: '' for no instruction, or one of
+ * a few short presets. The wording of each is in main/reader.ts.
+ */
+export type ReaderStyle = '' | 'calm' | 'caring' | 'cheerful' | 'sorry'
+
 /** What the reading lane can do right now. */
 export interface ReaderStatus {
   available: boolean
@@ -233,8 +251,14 @@ export interface ReaderStatus {
   note: string
   /** 0 means the core's measured default of 30. */
   minChars: number
+  /** The talker's sampling temperature: higher reads with more varied pace. */
+  temperature: number
   /** Read every reply aloud as it is written, without being asked. */
   enabled: boolean
+  /** The named speakers of a CustomVoice talker; [] on any other. */
+  speakers: string[]
+  /** The style a CustomVoice talker reads in. */
+  style: ReaderStyle
 }
 
 /** One event from a reply being read as it is written. Audio is 24 kHz mono. */
@@ -324,8 +348,10 @@ export interface YoaiApi {
    */
   tts: {
     status(): Promise<TtsStatus>
-    /** Pick one of the two GGUFs. `which` says which slot it fills. */
-    pickModel(which: 'talker' | 'tokenizer'): Promise<PickedModel | null>
+    /** Pick a GGUF. `which` says which slot it fills. */
+    pickModel(which: 'talker' | 'customTalker' | 'tokenizer'): Promise<PickedModel | null>
+    /** Base or CustomVoice; the voice is reloaded with the other talker. */
+    setVoiceMode(mode: VoiceMode): Promise<void>
     /** Read both models. Resolves to '' on success, or to the reason. */
     load(): Promise<string>
     unload(): Promise<void>
@@ -373,7 +399,12 @@ export interface YoaiApi {
     status(): Promise<ReaderStatus>
     load(): Promise<string>
     unload(): Promise<void>
-    set(patch: { enabled?: boolean; minChars?: number }): Promise<ReaderStatus>
+    set(patch: {
+      enabled?: boolean
+      minChars?: number
+      temperature?: number
+      style?: ReaderStyle
+    }): Promise<ReaderStatus>
     /**
      * Pick a reference voice, a .wav or a .spk, and use it at once. null when
      * the dialog was dismissed, else '' or why the voice could not be used. A

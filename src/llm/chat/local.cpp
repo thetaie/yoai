@@ -27,6 +27,18 @@ double ms_since(clk::time_point t) {
     return std::chrono::duration<double, std::milli>(clk::now() - t).count();
 }
 
+// What goes after the template's opening of the reply to say whether the
+// model reasons first: "<think>\n" to let it, the block already closed to not,
+// and nothing when `thinking` < 0 or the model's own template does not speak
+// this protocol -- appending <think> to anything else would be prompt noise.
+std::string think_suffix(llama_model* model, int thinking) {
+    const char* tmpl = llama_model_chat_template(model, /*name=*/nullptr);
+    if (thinking < 0 || tmpl == nullptr || std::strstr(tmpl, "<think>") == nullptr) {
+        return std::string();
+    }
+    return thinking > 0 ? "<think>\n" : "<think>\n\n</think>\n\n";
+}
+
 /**
  * Build the prompt for one turn.
  *
@@ -58,6 +70,7 @@ std::string build_prompt(llama_model*                    model,
     }
 
     const char* tmpl = llama_model_chat_template(model, /*name=*/nullptr);
+
     if (tmpl != nullptr) {
         std::vector<llama_chat_message> lc;
         lc.reserve(msgs.size());
@@ -78,12 +91,7 @@ std::string build_prompt(llama_model*                    model,
                 std::string out(buf.data(), static_cast<std::size_t>(need));
                 // The built-in CHATML form emits neither branch of the template's
                 // `enable_thinking` conditional, so state the choice ourselves.
-                // Only for a model whose own template speaks this protocol --
-                // appending <think> to anything else would just be prompt noise.
-                if (thinking >= 0 && std::strstr(tmpl, "<think>") != nullptr) {
-                    out += (thinking > 0) ? "<think>\n" : "<think>\n\n</think>\n\n";
-                }
-                return out;
+                return out + think_suffix(model, thinking);
             }
         }
     }
@@ -110,6 +118,20 @@ bool tokenize_prompt(const llama_vocab* vocab, const std::string& text,
     out->resize(static_cast<std::size_t>(n));
     return llama_tokenize(vocab, text.c_str(), static_cast<int>(text.size()),
                           out->data(), n, true, true) >= 0;
+}
+
+// The same without a BOS or any other token the vocabulary adds at the front:
+// for a piece of a prompt, whose tokens are compared against the whole's tail.
+bool tokenize_prompt_raw(const llama_vocab* vocab, const std::string& text,
+                         std::vector<llama_token>* out) {
+    const int n = -llama_tokenize(vocab, text.c_str(), static_cast<int>(text.size()),
+                                  nullptr, 0, /*add_special=*/false, /*parse_special=*/true);
+    if (n <= 0) {
+        return false;
+    }
+    out->resize(static_cast<std::size_t>(n));
+    return llama_tokenize(vocab, text.c_str(), static_cast<int>(text.size()),
+                          out->data(), n, false, true) >= 0;
 }
 
 #endif   // YOAI_ONDEVICE_LLM
@@ -287,6 +309,25 @@ struct LocalClient::Impl {
     llama_context*           ctx = nullptr;
     std::vector<llama_token> cached;
 
+    /**
+     * A snapshot of the sequence at the end of the last turn's prompt, before
+     * its think suffix, and the tokens it holds.
+     *
+     * For a memory that cannot be rewound (Qwen3.5 is hybrid). The empty think
+     * block that turns reasoning off sits in the KV ahead of each reply, and
+     * the template renders a past reply without it, so the next prompt parts
+     * from `cached` exactly there -- and a memory that cannot drop the tail
+     * used to prefill the whole conversation again every turn: 3.2 s for 229
+     * tokens. Restoring this puts it back at that point instead, so only the
+     * reply and the new message are prefilled.
+     *
+     * Writing the block into past replies was tried first, and makes the next
+     * prompt match the cache exactly -- and Qwen3.5-2B, shown a history no
+     * template produces, answered with a stray </think> in the middle.
+     */
+    std::vector<llama_token> ckpt_tokens;
+    std::vector<uint8_t>     ckpt_state;
+
     explicit Impl(LocalOptions o) : opt(std::move(o)) {}
 
     ~Impl() {
@@ -301,6 +342,8 @@ struct LocalClient::Impl {
     /** Forget the prefix. Cheap, and the correct response to any doubt. */
     void drop_cache() {
         cached.clear();
+        ckpt_tokens.clear();
+        ckpt_state.clear();
         if (ctx != nullptr) {
             llama_memory_seq_rm(llama_get_memory(ctx), 0, 0, -1);
         }
@@ -717,18 +760,69 @@ bool LocalClient::ainvoke(const std::vector<ChatMessage>& messages,
     if (reuse > 0 &&
         !llama_memory_seq_rm(llama_get_memory(ctx), 0,
                              static_cast<llama_pos>(reuse), -1)) {
-        utils::log_info(
-            "local: this memory will not rewind to %zu, prefilling the whole prompt", reuse);
-        reuse = 0;
+        // The memory will not drop a tail. If the last prompt's snapshot is a
+        // prefix of this one, go back to it rather than to nothing -- see
+        // Impl::ckpt_state for why a conversation lands exactly there.
+        const std::vector<llama_token>& ck = impl_->ckpt_tokens;
+        const bool usable = !ck.empty() && ck.size() <= reuse &&
+                            std::equal(ck.begin(), ck.end(), tokens.begin());
+        llama_memory_seq_rm(llama_get_memory(ctx), 0, -1, -1);
+        if (usable && llama_state_seq_set_data(ctx, impl_->ckpt_state.data(),
+                                               impl_->ckpt_state.size(), 0) > 0) {
+            utils::log_info("local: this memory will not rewind to %zu; restored the snapshot at %zu",
+                            reuse, ck.size());
+            reuse = ck.size();
+        } else {
+            utils::log_info(
+                "local: this memory will not rewind to %zu, prefilling the whole prompt", reuse);
+            reuse = 0;
+        }
     }
     if (reuse == 0) {
         // The whole sequence, which llama.h promises never fails.
         llama_memory_seq_rm(llama_get_memory(ctx), 0, -1, -1);
     }
 
+    // Where this prompt ends before its think suffix: the point the next turn's
+    // prompt will part from the KV at. Only when the suffix is really the tail
+    // of the tokens -- it is special tokens and newlines, so it tokenizes
+    // cleanly on its own -- and only when there is prompt left to prefill up
+    // to it.
+    std::size_t ckpt_at = 0;
+    {
+        const std::string suffix = think_suffix(model, impl_->opt.thinking);
+        std::vector<llama_token> tail;
+        if (!suffix.empty() && tokenize_prompt_raw(vocab, suffix, &tail) &&
+            tail.size() < tokens.size() &&
+            std::equal(tail.begin(), tail.end(), tokens.end() - static_cast<std::ptrdiff_t>(tail.size()))) {
+            ckpt_at = tokens.size() - tail.size();
+        }
+    }
+
     clk::time_point t0 = clk::now();
-    llama_batch batch = llama_batch_get_one(tokens.data() + reuse,
-                                            static_cast<int>(tokens.size() - reuse));
+    // In two batches when a snapshot is due: up to the suffix, save, then the
+    // rest. The first batch's logits go unused; only the last token's matter.
+    std::size_t at = reuse;
+    if (ckpt_at > reuse) {
+        llama_batch head = llama_batch_get_one(tokens.data() + at, static_cast<int>(ckpt_at - at));
+        if (llama_decode(ctx, head) != 0) {
+            llama_sampler_free(smpl);
+            impl_->drop_cache();
+            emit_event(on_event, EventType::Error, "prefill failed");
+            return false;
+        }
+        at = ckpt_at;
+        const std::size_t n = llama_state_seq_get_size(ctx, 0);
+        impl_->ckpt_state.resize(n);
+        if (n > 0 && llama_state_seq_get_data(ctx, impl_->ckpt_state.data(), n, 0) == n) {
+            impl_->ckpt_tokens.assign(tokens.begin(), tokens.begin() + static_cast<std::ptrdiff_t>(ckpt_at));
+        } else {
+            impl_->ckpt_tokens.clear();
+            impl_->ckpt_state.clear();
+        }
+    }
+    llama_batch batch = llama_batch_get_one(tokens.data() + at,
+                                            static_cast<int>(tokens.size() - at));
     if (llama_decode(ctx, batch) != 0) {
         llama_sampler_free(smpl);
         impl_->drop_cache();

@@ -3,7 +3,7 @@
   "buildOption": {
     // Native module (src/main/cpp): the NAPI bridge plus yoai_core.
     // Device only. Each ABI needs its own cross-compiled dependency tree under
-    // harmony/prebuilt/<abi> -- run `build.cmd <abi>` (or ./build.sh <abi>)
+    // harmony/prebuilt/<abi> -- run `python build.py <abi>`
     // first. Add "x86_64" here (and run the script for it) to also target the emulator.
     "externalNativeOptions": {
       "path": "./src/main/cpp/CMakeLists.txt",

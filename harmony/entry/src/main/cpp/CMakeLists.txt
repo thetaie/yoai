@@ -5,7 +5,7 @@ project(yoai_napi)
 # yoai_core, pulled in by add_subdirectory on the repo root.
 #
 # The core's third-party dependencies come prebuilt from harmony/prebuilt/<abi>/
-# -- run harmony/build.cmd (or .sh) once per ABI before building the app, or
+# -- run harmony/build.py once per ABI before building the app, or
 # configuring fails on the first find_package.
 
 set(CMAKE_CXX_STANDARD 11)
@@ -27,7 +27,7 @@ set(YOAI_PREBUILT      "${YOAI_PREBUILT_ROOT}/${OHOS_ARCH}")
 if(NOT EXISTS "${YOAI_PREBUILT}/lib")
     message(FATAL_ERROR
         "No prebuilt dependencies for ${OHOS_ARCH} at ${YOAI_PREBUILT}.\n"
-        "Run harmony/build.cmd ${OHOS_ARCH} (or ./build.sh ${OHOS_ARCH}) first.")
+        "Run python harmony/build.py ${OHOS_ARCH} first.")
 endif()
 
 # find_package() inside the core resolves against the prebuilt tree.
@@ -48,7 +48,7 @@ set(YOAI_BUILD_CLI OFF CACHE BOOL "" FORCE)
 #
 # The SDK is discovered exactly like the prebuilt tree above -- by repo-relative
 # path, under the same prebuilt/ parent, at prebuilt/llama-sdk/<abi>, where
-# `harmony/build.cmd <abi> llama` (or .sh) assembles it. So BUILDING IT IS
+# `harmony/build.py <abi> llama` assembles it. So BUILDING IT IS
 # TURNING THE LANE ON: there is no machine-local absolute path to paste into the
 # tracked build-profile.json5 and then have to keep out of commits.
 #
@@ -96,7 +96,7 @@ endif()
 
 # The omni lane, and it is opt-in twice over: the SDK has to exist AND the
 # capability has to be wanted. Unlike llama, whose presence is the switch, this
-# one stays off unless harmony/build.cmd mnn has been run -- it is 3.8 GB of
+# one stays off unless harmony/build.py mnn has been run -- it is 3.8 GB of
 # weights and a second quantization story bought for one capability whose cost
 # has not been measured on a phone. See design/voice.md.
 # Retired. src/voice/omni.cpp moved to src/voice/attic/ and is in no target, so
@@ -118,7 +118,7 @@ set(YOAI_MNN OFF CACHE BOOL "" FORCE)
 # endif()
 
 # Speech output, the third engine, discovered exactly like llama: the SDK's
-# presence is the switch, and `harmony/build.cmd <abi> qtts` is what creates it.
+# presence is the switch, and `harmony/build.py <abi> qtts` is what creates it.
 #
 # It also decides WHICH ggml the library links, because it ships one of its own
 # and the root CMakeLists refuses to link two. That is settled there, not here.

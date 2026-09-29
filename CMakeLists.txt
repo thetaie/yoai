@@ -3,8 +3,10 @@ project(yoai C CXX)
 
 # The YoAI core: a static library plus a C ABI (src/yoai.h), built to be linked
 # INTO a host app -- the HarmonyOS native module today, an Android one next --
-# rather than run as a process. There is no server here and no port to bind: the
-# host owns storage and settings and reaches the core through the C ABI.
+# rather than run as a process. The core binds no port: the host owns storage
+# and settings and reaches the core through the C ABI. The one exception is
+# opt-in and outside the core -- src/server/, speech over a WebSocket, behind
+# YOAI_SERVER.
 #
 # A desktop CLI (cli/) links the same library, so the core can be exercised on a
 # workstation without a device in the loop. It is a test harness, not a product.
@@ -357,7 +359,7 @@ endif()
 # by the same script, so nothing is given up for it.
 #
 # **That is no longer true, and the pins say so.** Both checkouts moved on
-# 2026-09-21 (see third/manifest.txt), and re-measuring at llama 335b21f against
+# 2026-09-21 (see third/manifest.json), and re-measuring at llama 335b21f against
 # qwentts's ggml e2568d7 inverts it: qwen-core needs its 134 and llama's ggml is
 # now missing NONE, while libllama needs 288 and qwentts's ggml is missing ONE,
 # ggml_dsv4_hc_pre_gated. Whichever copy is kept, one symbol is unmet; only the
@@ -371,7 +373,7 @@ endif()
 # crash, because C symbols are strong -- a genuine collision is a
 # duplicate-definition error, not a silent wrong-layout read.
 #
-# On HarmonyOS nobody sets these variables by hand: `harmony/build.cmd <abi>
+# On HarmonyOS nobody sets these variables by hand: `harmony/build.py <abi>
 # llama` and `... qtts` assemble the SDKs under harmony/prebuilt/ and the app's
 # CMakeLists finds them there. Building an SDK IS turning its lane on.
 
@@ -497,7 +499,7 @@ endmacro()
 # would come back undefined.
 #
 # OFF by default like the others. QTTS_DIR points at an SDK dir shaped like the
-# llama one: include/ + lib/. harmony/build.cmd qtts assembles it at
+# llama one: include/ + lib/. harmony/build.py qtts assembles it at
 # harmony/prebuilt/qtts-sdk/<abi>.
 option(YOAI_QTTS "Build speech output (qwentts.cpp + Qwen3-TTS)" OFF)
 
@@ -574,7 +576,7 @@ if(YOAI_ONDEVICE_LLM)
             "The llama.cpp SDK at ${LLAMA_CPP_DIR} is older than this repo needs: its "
             "llama_sampler_init_penalties has no n_vocab parameter, so src/llm/chat/local.cpp "
             "will not compile against it.\n"
-            "Update the llama.cpp checkout and re-run harmony/build.cmd <abi> llama (or .sh) "
+            "Update the llama.cpp checkout and re-run harmony/build.py <abi> llama "
             "with `clean`, so the cached SDK is discarded rather than reused.")
     endif()
     unset(_llama_h)
@@ -653,7 +655,7 @@ endif()
 # before turning it on.
 #
 # MNN_DIR points at an SDK dir shaped like the llama one: include/ + lib/.
-# harmony/build.cmd mnn assembles it at harmony/prebuilt/mnn-sdk/<abi>.
+# harmony/build.py mnn assembles it at harmony/prebuilt/mnn-sdk/<abi>.
 option(YOAI_MNN "Build the MNN engine: omni speech output and chat" OFF)
 
 if(YOAI_MNN)
@@ -669,7 +671,7 @@ if(YOAI_MNN)
         message(FATAL_ERROR
             "no rapidjson under ${MNN_DIR}/include. The MNN SDK must ship the "
             "rapidjson libMNN was compiled with -- two versions in one .so "
-            "crash on the first JSON parse. Re-run harmony/build.cmd mnn.")
+            "crash on the first JSON parse. Re-run harmony/build.py mnn.")
     endif()
 
     unset(MNN_LIB CACHE)
@@ -742,6 +744,44 @@ if(YOAI_MNN)
     target_link_libraries(yoai_core PUBLIC "${MNN_LIB}")
 
     message(STATUS "yoai_core: MNN (omni, chat) ON -> ${MNN_LIB}")
+endif()
+
+#-------------------------------------------------------------------------------
+# yoai_server -- the core behind a WebSocket
+#-------------------------------------------------------------------------------
+
+# Text in, speech out, over a WebSocket: src/server/, a library of its own so
+# that a container's entry point and cli/server.cpp link the same thing. Not in
+# yoai_core, which goes into apps that serve nothing.
+#
+# OFF by default, since it is the one target that needs libwebsockets. vcpkg
+# installs it through the manifest's `server` feature, which `build.py server`
+# turns on with the option; elsewhere a distro's libwebsockets-dev does.
+option(YOAI_SERVER "Build the WebSocket speech server (src/server/)" OFF)
+
+if(YOAI_SERVER)
+    find_package(libwebsockets CONFIG REQUIRED)
+    # The shared library where there is one -- the only one a dynamic vcpkg
+    # triplet builds -- and the static one otherwise.
+    if(TARGET websockets_shared)
+        set(_yoai_lws websockets_shared)
+    elseif(TARGET websockets)
+        set(_yoai_lws websockets)
+    else()
+        message(FATAL_ERROR "libwebsockets was found but exports neither websockets_shared "
+                            "nor websockets.")
+    endif()
+
+    add_library(yoai_server STATIC src/server/tts_server.cpp)
+    target_link_libraries(yoai_server PUBLIC yoai_core PRIVATE ${_yoai_lws})
+    target_include_directories(yoai_server PRIVATE ${LIBWEBSOCKETS_INCLUDE_DIRS})
+    # tts_server.cpp includes rapidjson, and with the MNN lane on that has to
+    # be MNN's copy for the reason given at the MNN section above.
+    if(YOAI_MNN)
+        target_include_directories(yoai_server BEFORE PRIVATE "${MNN_DIR}/include")
+    endif()
+
+    message(STATUS "yoai_server: ON -> ${_yoai_lws}")
 endif()
 
 #-------------------------------------------------------------------------------
@@ -824,4 +864,25 @@ if(YOAI_BUILD_CLI)
     # aloud and simply did not say everything.
     add_executable(yoai-reader-test tests/reader_test.cpp)
     target_link_libraries(yoai-reader-test PRIVATE yoai_core)
+
+    # One passage at several talker temperatures and seeds, written out to be
+    # listened to. Needs the engine to do anything; builds everywhere.
+    add_executable(yoai-tts-sweep tests/tts_sweep.cpp)
+    target_link_libraries(yoai-tts-sweep PRIVATE yoai_core)
+
+    # A passage read while it is still being "written" at a fixed rate,
+    # against the same passage given whole: the audio must match, and the
+    # playback it would feed must not run dry.
+    add_executable(yoai-tts-pull tests/tts_pull.cpp)
+    target_link_libraries(yoai-tts-pull PRIVATE yoai_core)
+
+    # The speech server from the command line. shell32 for the same reason as
+    # yoai-llama.
+    if(YOAI_SERVER)
+        add_executable(yoai-server cli/server.cpp)
+        target_link_libraries(yoai-server PRIVATE yoai_server)
+        if(WIN32)
+            target_link_libraries(yoai-server PRIVATE shell32)
+        endif()
+    endif()
 endif()

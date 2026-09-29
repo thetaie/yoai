@@ -52,7 +52,7 @@ export const nativeProviderClear: () => void;
 export const nativeProviders: () => string;
 
 /**
- * Whether this .so was built with llama.cpp (harmony/build.cmd llama assembled an
+ * Whether this .so was built with llama.cpp (harmony/build.py llama assembled an
  * SDK before the HAP was compiled).
  *
  * False is a supported state, not a failure: the app runs, and everything below

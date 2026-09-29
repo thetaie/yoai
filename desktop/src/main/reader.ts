@@ -21,7 +21,7 @@ import { app } from 'electron'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ReaderStatus } from '../shared/api'
+import type { ReaderStatus, ReaderStyle } from '../shared/api'
 import { core } from './core'
 import { dataFile, readJson, writeJson } from './jsonfile'
 import { paths as ttsPaths, voiceSettings } from './tts'
@@ -59,7 +59,48 @@ interface Stored {
    * 0 means DEFAULT_MIN_CHARS below, not the core's own default -- see there.
    */
   minChars: number
+
+  /** The talker's sampling temperature; see DEFAULT_TEMPERATURE. */
+  temperature: number
+
+  /** How a CustomVoice talker is asked to read; see STYLES. */
+  style: ReaderStyle
 }
+
+/**
+ * The styles a CustomVoice talker can be asked for, and the instruction each
+ * one sends. Few and short on purpose: the instruction sits in the prompt
+ * ahead of the text, and a handful of fixed ones cost almost nothing to add.
+ *
+ * Listened to on two replies and two seeds, read whole with the streaming text
+ * layout: the four were told apart and the speaker stayed the same person.
+ * 关切 read slowest every time; the others were heard rather than measured,
+ * since their pitch and pace moved about as much between seeds as between
+ * styles. 开心 drew a giggle at both ends on one seed of two, and stays --
+ * with seed 101 it did not.
+ */
+const STYLES: Record<Exclude<ReaderStyle, ''>, string> = {
+  calm: '语气平静。',
+  caring: '语气关切，温柔。',
+  cheerful: '语气轻快，开心。',
+  sorry: '语气抱歉，诚恳。'
+}
+
+/** The speaker a CustomVoice talker uses when none has been picked. */
+const DEFAULT_SPEAKER = 'serena'
+
+/**
+ * The talker's temperature when none has been chosen: 1.3, above the engine's
+ * own 0.9.
+ *
+ * Higher reads with more varied pace and phrasing, and past some point it
+ * breaks. Three passages on four seeds at 0.9, 1.1, 1.2 and 1.3: no take ran
+ * long or short of its text (time per character within 15% of the median),
+ * and 1.3 with seed 101 (DEFAULT_SEED in tts.ts) was preferred by ear. Its
+ * one fault heard: a sentence starting a little louder than its neighbours,
+ * inside one piece, which 0.9 to 1.2 did not show.
+ */
+const DEFAULT_TEMPERATURE = 1.3
 
 /**
  * The cut this lane uses when nothing has been chosen, which is finer than the
@@ -113,8 +154,42 @@ const LATER_MAX_CHARS = 80
  */
 const FIRST_STOP_CHARS = 6
 
+/**
+ * The talker reads each piece's text one token per frame, not all of it before
+ * the first frame: upstream's own default for a cloned voice. Listened to on
+ * three passages against the other layout, it had no sentence louder than its
+ * neighbours. Its endings stopped mid vowel instead, three seeds of three on one
+ * passage, and EOS_HOLD_FRAMES is the fix for that: two more frames (160 ms)
+ * after the talker first chooses to stop let every ending decay to silence, and
+ * four sounded no different. The engine ends a piece at three times the hold
+ * past that first stop regardless, since once, held on, it coughed for five
+ * seconds, and drops what it made past the hold, heard once as a faint noise.
+ * Both need qwentts-streaming-text.patch in the addon's speech SDK; without it
+ * the engine ignores them.
+ */
+const STREAMING_TEXT = true
+const EOS_HOLD_FRAMES = 2
+
+/**
+ * A reply read as ONE generation that takes the text as the model writes it,
+ * instead of being cut into pieces that each start from the top: no seams, and
+ * the pace moves across the reply the way a whole take's does. The writer has
+ * to stay ahead of the talker, which reads 12.5 tokens a second; the on-device
+ * Qwen3.5-2B wrote 21 while speech was being generated, and a simulated writer
+ * at 21 and 15 ran nothing dry behind a half-second buffer. The 4B, at 7 while
+ * speech runs, would not keep up -- false puts the pieces back, and the split
+ * settings below are still applied so that works at once.
+ */
+const WHOLE_REPLY = true
+
 const FILE = 'reader.json'
-const EMPTY: Stored = { enabled: true, reference: '', minChars: 0 }
+const EMPTY: Stored = {
+  enabled: true,
+  reference: '',
+  minChars: 0,
+  temperature: DEFAULT_TEMPERATURE,
+  style: ''
+}
 
 function read(): Stored {
   const s = readJson<Stored>(dataFile(FILE), EMPTY)
@@ -122,7 +197,10 @@ function read(): Stored {
     // On unless turned off.
     enabled: s.enabled !== false,
     reference: typeof s.reference === 'string' ? s.reference : '',
-    minChars: typeof s.minChars === 'number' ? s.minChars : 0
+    minChars: typeof s.minChars === 'number' ? s.minChars : 0,
+    temperature:
+      typeof s.temperature === 'number' && s.temperature >= 0 ? s.temperature : DEFAULT_TEMPERATURE,
+    style: typeof s.style === 'string' && s.style in STYLES ? s.style : ''
   }
 }
 
@@ -314,9 +392,59 @@ export function status(): ReaderStatus {
     reference: s.reference,
     note: loadNote,
     minChars: s.minChars,
-    enabled: s.enabled
+    temperature: s.temperature,
+    enabled: s.enabled,
+    speakers: ok ? speakerNames() : [],
+    style: s.style
   }
   return lastStatus
+}
+
+/** The named speakers of the loaded talker; [] unless it is CustomVoice. */
+function speakerNames(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(core().nativeReaderSpeakers())
+    return Array.isArray(parsed) ? parsed.map(String) : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * The speaker and the style, on a CustomVoice talker; on any other, neither --
+ * the engine refuses both there, and would keep one left from an earlier model.
+ * Called after every load and whenever either is changed.
+ */
+export function applyVoice(): void {
+  if (!available() || core().nativeReaderLoaded() !== 1) {
+    return
+  }
+  if (core().nativeReaderModelType() !== 'custom_voice') {
+    core().nativeReaderSetSpeaker('')
+    core().nativeReaderSetVoice('')
+    return
+  }
+  // The stored name if this talker has it, else the default, else its first:
+  // a CustomVoice talker will not read without one.
+  const names = speakerNames()
+  const chosen = voiceSettings().speaker
+  const speaker = names.includes(chosen)
+    ? chosen
+    : names.includes(DEFAULT_SPEAKER)
+      ? DEFAULT_SPEAKER
+      : (names[0] ?? '')
+  core().nativeReaderSetSpeaker(speaker)
+  const style = read().style
+  core().nativeReaderSetVoice(style === '' ? '' : STYLES[style])
+}
+
+/** Saved, and handed to a loaded CustomVoice talker from the next reply on. */
+export function setStyle(style: string): void {
+  const s = read()
+  s.style = style in STYLES ? (style as ReaderStyle) : ''
+  write(s)
+  lastStatus = null
+  applyVoice()
 }
 
 export function setEnabled(on: boolean): void {
@@ -331,6 +459,17 @@ export function setMinChars(n: number): void {
   s.minChars = Number.isFinite(n) && n > 0 ? Math.trunc(n) : 0
   write(s)
   lastStatus = null
+}
+
+/** Saved, and handed to the loaded engine at once: it applies from the next piece. */
+export function setTemperature(t: number): void {
+  const s = read()
+  s.temperature = Number.isFinite(t) && t >= 0 ? Math.min(t, 2) : DEFAULT_TEMPERATURE
+  write(s)
+  lastStatus = null
+  if (available() && core().nativeReaderLoaded() === 1) {
+    core().nativeReaderSetTemperature(s.temperature)
+  }
 }
 
 /**
@@ -379,10 +518,12 @@ export function load(): Promise<string> {
       }
 
       // Everything the voice depends on, after the load because the .spk is
-      // chosen by the talker's width, which only a loaded engine knows. No
-      // instruct and no named speaker: a Base checkpoint takes neither.
+      // chosen by the talker's width and the speaker from the talker's own
+      // list, which only a loaded engine knows. applyVoice() sends a speaker
+      // and a style to CustomVoice and clears both on Base, which takes neither.
       const s = read()
       core().nativeReaderSetSeed(voiceSettings().seed)
+      core().nativeReaderSetTemperature(s.temperature)
       // Always, so 0 means this lane's default rather than the core's.
       core().nativeReaderSetSplit(
         s.minChars > 0 ? s.minChars : DEFAULT_MIN_CHARS,
@@ -391,12 +532,16 @@ export function load(): Promise<string> {
       )
       core().nativeReaderSetLaterSplit(LATER_MIN_CHARS, LATER_MAX_CHARS)
       core().nativeReaderSetFirstStopChars(FIRST_STOP_CHARS)
+      core().nativeReaderSetStreamingText(STREAMING_TEXT)
+      core().nativeReaderSetEosHold(EOS_HOLD_FRAMES)
+      core().nativeReaderSetWholeReply(WHOLE_REPLY)
+      applyVoice()
       // The setting that decides whether this lane speaks while the model is
       // still writing. Without it a comma is only a fallback at max_chars, and
       // a reply whose one full stop is at the end cannot be started at all.
       core().nativeReaderSetClauseCuts(true)
-      // The reference voice, on a Base checkpoint only; autoLoadVoice()
-      // refuses the other two. Not fatal: the lane reads without an anchor, it
+      // The reference voice, on a Base checkpoint only -- applyReference() does
+      // nothing on CustomVoice. Not fatal: the lane reads without an anchor, it
       // just drifts more. Reported so a missing file does not look like nothing.
       void applyReference().then((why) => {
         resolve(why.length > 0 ? `loaded, but the reference voice failed: ${why}` : '')
@@ -426,12 +571,14 @@ let loadNote = ''
  * written, a message's 🔊 and the settings screen's test all come here. Having
  * to press 载入 every run was a step that existed only to be forgotten.
  *
- * **Base checkpoints only.** Every piece is its own generation, and only a Base
- * checkpoint takes the reference voice that keeps them in one register; the
- * other two drift -- one piece in sixteen came out five semitones low on
- * custom_voice. VoiceDesign is a way to MAKE a reference voice, not to talk.
- * Anything else is unloaded again and said so, rather than read in a voice
- * that wanders.
+ * **Base or CustomVoice.** Base was the only one while replies were read in
+ * pieces: each piece is its own generation, only Base takes the reference
+ * voice that keeps them in one register, and CustomVoice drifted -- one piece
+ * in sixteen came out five semitones low. Read as one generation
+ * (WHOLE_REPLY), there are no pieces to drift apart, and CustomVoice's
+ * built-in speakers and its styles are offered beside Base's recorded voice.
+ * VoiceDesign is a way to MAKE a reference voice, not to talk, and is
+ * unloaded again and said so.
  *
  * Loaded whether or not replies are read automatically, since 🔊 needs it
  * either way. For the log -- nothing waits on this.
@@ -446,8 +593,8 @@ export async function autoLoadVoice(): Promise<string> {
   }
   loadNote = ''
   let reason = await load()
-  if (core().nativeReaderLoaded() === 1 && core().nativeReaderModelType() !== 'base') {
-    reason = `needs a base model; this talker is ${core().nativeReaderModelType()}`
+  if (core().nativeReaderLoaded() === 1 && core().nativeReaderModelType() === 'voice_design') {
+    reason = 'needs a Base or CustomVoice talker; this one is voice_design'
     unload()
   }
   loadNote = reason

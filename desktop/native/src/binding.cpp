@@ -451,7 +451,7 @@ napi_value NativeChatCancelAll(napi_env env, napi_callback_info /*info*/) {
 //
 // No #ifdef, and that is the header's doing rather than an omission: the
 // yoai_tts_* entry points are compiled unconditionally and stub out when
-// the qtts lane is off, so a `build.cmd llama` addon still exports all of this
+// the qtts lane is off, so a `build.py llama` addon still exports all of this
 // and answers nativeTtsAvailable() with 0. The UI asks that question instead of
 // discovering a missing symbol.
 //
@@ -811,6 +811,11 @@ napi_value NativeReaderModelType(napi_env env, napi_callback_info /*info*/) {
     return Utf8(env, yoai_reader_model_type());
 }
 
+// nativeReaderSpeakers(): string, a JSON array.
+napi_value NativeReaderSpeakers(napi_env env, napi_callback_info /*info*/) {
+    return Utf8(env, yoai_reader_speakers());
+}
+
 napi_value NativeReaderSetVoice(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value argv[1] = {nullptr};
@@ -927,6 +932,50 @@ napi_value NativeReaderSetLaterSplit(napi_env env, napi_callback_info info) {
     if (argc >= 1) napi_get_value_int32(env, argv[0], &a);
     if (argc >= 2) napi_get_value_int32(env, argv[1], &b);
     yoai_reader_set_later_split(a, b);
+    return nullptr;
+}
+
+// nativeReaderSetTemperature(temperature): void. Below 0 restores the default.
+napi_value NativeReaderSetTemperature(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    double t = -1.0;
+    if (argc >= 1) napi_get_value_double(env, argv[0], &t);
+    yoai_reader_set_temperature(static_cast<float>(t));
+    return nullptr;
+}
+
+// nativeReaderSetStreamingText(on): void.
+napi_value NativeReaderSetStreamingText(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    bool on = false;
+    if (argc >= 1) napi_get_value_bool(env, argv[0], &on);
+    yoai_reader_set_streaming_text(on ? 1 : 0);
+    return nullptr;
+}
+
+// nativeReaderSetWholeReply(on): void.
+napi_value NativeReaderSetWholeReply(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    bool on = false;
+    if (argc >= 1) napi_get_value_bool(env, argv[0], &on);
+    yoai_reader_set_whole_reply(on ? 1 : 0);
+    return nullptr;
+}
+
+// nativeReaderSetEosHold(frames): void. 0 stops at the first stop code.
+napi_value NativeReaderSetEosHold(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    std::int32_t n = 0;
+    if (argc >= 1) napi_get_value_int32(env, argv[0], &n);
+    yoai_reader_set_eos_hold(n);
     return nullptr;
 }
 
@@ -1249,6 +1298,7 @@ NAPI_MODULE_INIT() {
         {"nativeReaderLoaded", nullptr, NativeReaderLoaded, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderUnload", nullptr, NativeReaderUnload, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderModelType", nullptr, NativeReaderModelType, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSpeakers", nullptr, NativeReaderSpeakers, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderSetVoice", nullptr, NativeReaderSetVoice, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderSetSpeaker", nullptr, NativeReaderSetSpeaker, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderSetReferenceVoice", nullptr, NativeReaderSetReferenceVoice, nullptr, nullptr, nullptr, napi_default, nullptr},
@@ -1259,6 +1309,10 @@ NAPI_MODULE_INIT() {
         {"nativeReaderSetSplit", nullptr, NativeReaderSetSplit, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderSetLaterSplit", nullptr, NativeReaderSetLaterSplit, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderSetFirstStopChars", nullptr, NativeReaderSetFirstStopChars, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetTemperature", nullptr, NativeReaderSetTemperature, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetStreamingText", nullptr, NativeReaderSetStreamingText, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetEosHold", nullptr, NativeReaderSetEosHold, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetWholeReply", nullptr, NativeReaderSetWholeReply, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderSetClauseCuts", nullptr, NativeReaderSetClauseCuts, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderSetThreads", nullptr, NativeReaderSetThreads, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderBegin", nullptr, NativeReaderBegin, nullptr, nullptr, nullptr, napi_default, nullptr},

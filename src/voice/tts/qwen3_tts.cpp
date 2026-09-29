@@ -617,6 +617,11 @@ struct Qtts::Impl {
     QttsSampling sampling;
     int         threads;    // 0 leaves its thread heuristic alone
     bool        streaming;
+    bool        streaming_text;  // the text layout, not the audio: see the setter
+    int         eos_hold_frames;
+    // Set for the length of one say_pulled(), and 0 otherwise.
+    Qtts::TextSource pull;
+    void*            pull_user;
     LevelTrace  level;
 
     // Per-call streaming state. Written from the compute worker and read after
@@ -632,7 +637,7 @@ struct Qtts::Impl {
 
     Impl()
         : ctx(0), hidden(0), seed(-1), top_k(0), threads(0), streaming(true),
-          sink(0), sink_user(0),
+          streaming_text(false), eos_hold_frames(0), pull(0), pull_user(0), sink(0), sink_user(0),
           first_audio(0.0), chunks(0), produced(0), aborted(false) {}
 
     // Runs on qwentts.cpp's compute worker. Must not re-enter the qwen API and
@@ -1012,6 +1017,14 @@ void Qtts::set_top_k(int top_k) {
     impl_->top_k = top_k;
 }
 
+void Qtts::set_streaming_text(bool on) {
+    impl_->streaming_text = on;
+}
+
+void Qtts::set_eos_hold(int frames) {
+    impl_->eos_hold_frames = frames > 0 ? frames : 0;
+}
+
 void Qtts::set_sampling(const QttsSampling& sampling) {
     impl_->sampling = sampling;
 }
@@ -1036,6 +1049,19 @@ const std::string& Qtts::last_error() const {
     return impl_->error;
 }
 
+bool Qtts::say_pulled(const std::string& start, TextSource source, void* source_user,
+                      QttsAudioSink sink, void* user_data, QttsResult* out) {
+    if (!source) {
+        return say(start, sink, user_data, out);
+    }
+    impl_->pull      = source;
+    impl_->pull_user = source_user;
+    const bool ok    = say(start, sink, user_data, out);
+    impl_->pull      = 0;
+    impl_->pull_user = 0;
+    return ok;
+}
+
 bool Qtts::say(const std::string& text, QttsAudioSink sink, void* user_data, QttsResult* out) {
     Impl* m = impl_;
     m->error.clear();
@@ -1046,10 +1072,17 @@ bool Qtts::say(const std::string& text, QttsAudioSink sink, void* user_data, Qtt
         m->error = "no model loaded";
         return false;
     }
-    if (text.empty()) {
+    if (text.empty() && !m->pull) {
         m->error = "nothing to say";
         return false;
     }
+#ifndef QWEN_TTS_TEXT_PULL
+    if (m->pull) {
+        m->error = "this build's qwentts.cpp cannot take text as it is written "
+                   "(qwentts-streaming-text.patch)";
+        return false;
+    }
+#endif
 
     m->sink        = sink;
     m->sink_user   = user_data;
@@ -1101,6 +1134,19 @@ bool Qtts::say(const std::string& text, QttsAudioSink sink, void* user_data, Qtt
     }
 
     p.seed = static_cast<int64_t>(m->seed);
+#ifdef QWEN_TTS_STREAMING_TEXT
+    p.streaming_text = m->streaming_text ? 1 : 0;
+#endif
+#ifdef QWEN_TTS_EOS_HOLD
+    p.eos_hold_frames = m->eos_hold_frames;
+#endif
+#ifdef QWEN_TTS_TEXT_PULL
+    if (m->pull) {
+        p.text_pull           = m->pull;
+        p.text_pull_user_data = m->pull_user;
+        p.streaming_text      = 1;   // the only layout that reads text as it comes
+    }
+#endif
 
     // Both stacks, every field. qt_tts_default_params has already seeded `p`
     // from sampling-defaults.h and QttsSampling's own defaults are the same
@@ -1282,6 +1328,10 @@ void Qtts::set_seed(long long) {}
 
 void Qtts::set_top_k(int) {}
 
+void Qtts::set_streaming_text(bool) {}
+
+void Qtts::set_eos_hold(int) {}
+
 void Qtts::set_sampling(const QttsSampling&) {}
 
 // The defaults, which is what a build with no engine would have used anyway.
@@ -1304,6 +1354,11 @@ bool Qtts::say(const std::string&, QttsAudioSink, void*, QttsResult* out) {
     }
     impl_->error = "this build has no qwentts.cpp (YOAI_QTTS off)";
     return false;
+}
+
+bool Qtts::say_pulled(const std::string& start, TextSource, void*, QttsAudioSink sink,
+                      void* user_data, QttsResult* out) {
+    return say(start, sink, user_data, out);
 }
 
 #endif  // YOAI_QTTS

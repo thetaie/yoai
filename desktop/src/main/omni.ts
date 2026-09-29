@@ -116,7 +116,7 @@ export function setEnabled(on: boolean): void {
  */
 export function load(): Promise<string> {
   if (!available()) {
-    return Promise.resolve('this build has no omni lane -- rebuild with `build.cmd clean mnn`')
+    return Promise.resolve('this build has no omni lane -- rebuild with `python build.py clean mnn`')
   }
   const s = read()
   if (s.modelDir.length === 0) {

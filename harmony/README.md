@@ -50,19 +50,19 @@ detects this and creates a junction/symlink alias rather than failing.
 
 ## Building
 
-One script builds everything, selected by token — `build.cmd` on Windows,
-`./build.sh` on macOS/Linux:
+One script builds everything, selected by token — `python build.py`
+(`python3` on macOS/Linux):
 
 | | |
 |---|---|
-| `build.cmd` | everything, in the order below — the default |
-| `build.cmd deps` | the C++ dependencies — the required part |
-| `build.cmd llama` | the on-device engine (see below) |
-| `build.cmd hap` | compile and sign the app |
-| `build.cmd all` | the same three the bare command does, named explicitly |
-| `build.cmd --help` | every token, including `clean` and `arch=` |
+| `python build.py` | everything, in the order below — the default |
+| `python build.py deps` | the C++ dependencies — the required part |
+| `python build.py llama` | the on-device engine (see below) |
+| `python build.py hap` | compile and sign the app |
+| `python build.py all` | the same three the bare command does, named explicitly |
+| `python build.py --help` | every token, including `clean` and `arch=` |
 
-Tokens compose, so `build.cmd deps hap` is a full rebuild of what changed most
+Tokens compose, so `python build.py deps hap` is a full rebuild of what changed most
 days — and it is also how you build the app *without* the on-device engine.
 
 The bare command includes `llama` because on-device chat is part of the app, not
@@ -75,7 +75,7 @@ No ABI is named above because there is only one that matters: HarmonyOS NEXT is
 entry in `entry/build-profile.json5`'s `abiFilters`.
 
 The emulator is the one reason to want another. It runs an x86_64 image on an
-x86 host, so that means `build.cmd x86_64` for the native libraries AND adding
+x86 host, so that means `python build.py x86_64` for the native libraries AND adding
 `"x86_64"` to `abiFilters` — the script only produces the libraries, it does not
 decide what goes into the HAP.
 
@@ -117,11 +117,10 @@ DevEco ships at `tools/node`.
 
 Built by default, but the one thing the script will not fetch for you is
 llama.cpp itself — clone it once (beside the repo, or set `LLAMA_SRC`) and the
-bare `build.cmd` covers the rest. To build only this part:
+bare `python build.py` covers the rest. To build only this part:
 
 ```
-build.cmd llama       # Windows
-./build.sh llama      # macOS / Linux
+python build.py llama
 ```
 
 That cross-compiles llama.cpp and assembles `prebuilt/llama-sdk/<abi>/`
@@ -129,15 +128,15 @@ That cross-compiles llama.cpp and assembles `prebuilt/llama-sdk/<abi>/`
 itself. **Its presence IS the switch**: build it and `libyoai.so` links the
 engine, delete it and the core compiles its stub and the app still builds, with
 on-device chat reporting itself unavailable. That off state is still supported —
-`build.cmd deps hap` is how you ask for it — it just is not what a bare
-`build.cmd` gives you any more. Nothing to paste into `build-profile.json5`
+`python build.py deps hap` is how you ask for it — it just is not what a bare
+`python build.py` gives you any more. Nothing to paste into `build-profile.json5`
 either, which matters: that file is `skip-worktree`d for signing (below), so any
 machine-local path put there would be invisible to everyone else.
 
 Static archives, and CPU only. A HAP has nowhere to put a companion `.so`, so
 the engine has to link in; and GPU offload measured worse on every axis on this
 class of device, because it copies every tensor into memory that shares its
-bandwidth with the CPU. `build.cmd` has the details, including why the default
+bandwidth with the CPU. `build.py` has the details, including why the default
 `-march` string is what it is (a cross build with no `-march` silently lands on
 baseline armv8-a, because CMake's feature probes cannot run a target binary —
 which costs the fast integer kernels). Override it with `arch=<march>`, or

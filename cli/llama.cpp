@@ -75,7 +75,7 @@ void usage() {
         "common\n"
         "  -t N             threads (default 4; <= 0 means every core)\n"
         "  --gpu N          layers to offload to a GPU (default 0; 999 for all). Needs\n"
-        "                   a GPU backend in the build, e.g. build.cmd llama tts with\n"
+        "                   a GPU backend in the build, e.g. build.py llama tts with\n"
         "                   VULKAN_SDK set\n"
         "  --debug          verbose core logging\n"
         "\n"
@@ -430,8 +430,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     if (!LocalClient::available()) {
-        err("yoai-llama: this build has no llama.cpp -- build it with: build.cmd llama "
-            "(./build.sh llama)\n");
+        err("yoai-llama: this build has no llama.cpp -- build it with: python build.py llama\n");
         return 1;
     }
     return args[1] == "chat" ? chat_main(args) : embed_main(args);

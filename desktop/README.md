@@ -51,14 +51,13 @@ Needs what the root build needs — CMake, a C++11 compiler, curl / OpenSSL —
 plus Node 20 or newer.
 
 ```
-build.cmd            # Windows
-./build.sh           # macOS / Linux
+python build.py      # python3 on macOS / Linux
 ```
 
 That builds the addon into `build/Release/yoai.node` and the Electron
 bundles into `out/`. The two are separate arguments (`native`, `app`) because the
 C++ half is minutes and rarely changes while the UI half is seconds. After a
-change under `src/` or `native/`, `build.cmd native` rebuilds the addon alone;
+change under `src/` or `native/`, `python build.py native` rebuilds the addon alone;
 close the app first, since a running one holds `yoai.node` open.
 
 While writing UI, the loop is:
@@ -85,8 +84,7 @@ compiles to a truthful stub without them. Turning it on:
 
 ```
 git clone --depth 1 https://github.com/ggml-org/llama.cpp ../../llama.cpp
-build.cmd clean llama            # Windows
-./build.sh clean llama           # macOS / Linux
+python build.py clean llama
 ```
 
 `clean` is not optional when changing the lane set — CMake caches it, so adding

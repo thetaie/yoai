@@ -353,6 +353,21 @@ public:
     void set_seed(long long seed);
     void set_top_k(int top_k);
 
+    // How the text reaches the talker, outside ICL. Off (the default): the
+    // whole utterance sits in the prompt before the first frame. On: only its
+    // first token does, and the rest is added one token per generated frame --
+    // upstream's non_streaming_mode=False, the layout its own voice clone
+    // defaults to, and the one that could take text as it is written. Needs
+    // qwentts-streaming-text.patch; without it the engine reads the whole
+    // utterance either way. Takes effect on the next say().
+    void set_streaming_text(bool on);
+
+    // Frames the talker keeps going after it first chooses to stop: for that
+    // many 80 ms frames the stop code is masked out. 0 (the default) stops at
+    // once. Aimed at an ending cut while the last vowel is still sounding.
+    // Needs qwentts-streaming-text.patch. Takes effect on the next say().
+    void set_eos_hold(int frames);
+
     // The whole sampler, which is TWO samplers and was being ignored.
     //
     // The engine draws on two stacks with independent settings: the talker
@@ -415,6 +430,22 @@ public:
     // false is NOT a failure: generation stops early and this returns true with
     // whatever was produced, the same way the host cancels on every other lane.
     bool say(const std::string& text, QttsAudioSink sink, void* user_data, QttsResult* out);
+
+    // Where say_pulled() gets its text, qwentts.cpp's qt_text_pull_cb: up to
+    // `cap` bytes of UTF-8 into `buf`, returning how many and BLOCKING until
+    // there is at least one; 0 when the text has ended; negative to stop. Runs
+    // on the engine's compute worker.
+    typedef int (*TextSource)(char* buf, int cap, void* user_data);
+
+    // Speak text that is still being written, as ONE generation: `start` and
+    // then whatever `source` gives, read by the talker one token per frame
+    // (the streaming text layout, whatever set_streaming_text() says). A frame
+    // whose token has not been written yet waits for it, so the talker sees
+    // what it would have seen given the whole text at once; the host only has
+    // to keep writing faster than 12.5 tokens a second, the rate the talker
+    // reads at. Otherwise as say(). Needs qwentts-streaming-text.patch.
+    bool say_pulled(const std::string& start, TextSource source, void* source_user,
+                    QttsAudioSink sink, void* user_data, QttsResult* out);
 
     // Why the last load() or say() returned false. Empty after a success.
     const std::string& last_error() const;
