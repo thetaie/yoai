@@ -1,6 +1,6 @@
-#include "voice/asr/fbank/funasr.hpp"
+#include "voice/algorithms/fbank_funasr.hpp"
 
-#include "voice/asr/fbank/common.hpp"
+#include "voice/algorithms/fft.hpp"
 
 #include <cmath>
 #include <cstring>
@@ -113,7 +113,7 @@ void FunAsrFbank::mel_frame(const float* samples, float* out) const {
     for (int i = 0; i < len; ++i) {
         re[i] = frame[i] * window_[i];
     }
-    fbank::fft_radix2(re, im, opt_.n_fft);
+    fft_radix2(re, im, opt_.n_fft);
 
     for (int m = 0; m < opt_.n_mel; ++m) {
         const float* row = &mel_weights_[static_cast<size_t>(m) * n_bins_];

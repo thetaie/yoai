@@ -1,4 +1,4 @@
-#include "voice/asr/fbank/common.hpp"
+#include "voice/algorithms/fft.hpp"
 
 #include <cmath>
 #include <utility>
@@ -9,7 +9,6 @@
 
 namespace yoai {
 namespace voice {
-namespace fbank {
 
 // The bit-reversal permutation and the butterflies need no special cases for
 // a power of two.
@@ -51,6 +50,5 @@ void fft_radix2(std::vector<float>& re, std::vector<float>& im, int n) {
     }
 }
 
-}  // namespace fbank
 }  // namespace voice
 }  // namespace yoai

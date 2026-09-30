@@ -163,7 +163,7 @@ export async function begin(): Promise<boolean> {
  * Add a delta, exactly as the model wrote it. Fire and forget.
  *
  * Markdown and all: the core turns the reply into what should be spoken
- * (src/voice/text/speakable.hpp), and it can only do that on the whole stream.
+ * (src/voice/text/speakable_stream.hpp), and it can only do that on the whole stream.
  * This page used to clean fragments itself and lost every line break that fell
  * at a fragment's edge -- a list's "上海" and "南接" were read as one word.
  *

@@ -50,7 +50,7 @@ export function errorOf(): string {
  * Resolves to '' when it started, or to a reason it did not.
  *
  * The text as shown, markdown and emoji included: the core turns it into what
- * is spoken (src/voice/text/speakable.hpp). Asking again while something is
+ * is spoken (src/voice/text/speakable_stream.hpp). Asking again while something is
  * speaking STOPS the old one and starts this, which is what a second click on a
  * different message means.
  */

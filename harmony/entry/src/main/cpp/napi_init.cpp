@@ -911,6 +911,50 @@ napi_value NativeTtsReferenceSeconds(napi_env env, napi_callback_info) {
     return out;
 }
 
+// nativeTtsLoadReferenceEmbedding(spkPath: string): number
+//
+// Synchronous for the same reason as nativeTtsSetReference: a .spk is 4 or 8 KB.
+napi_value NativeTtsLoadReferenceEmbedding(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    const std::string path = ArgUtf8(env, argc, argv, 0);
+    return Int32(env, yoai_tts_load_reference_embedding(path.c_str()));
+}
+
+// nativeTtsSetTemperature(t: number): void
+napi_value NativeTtsSetTemperature(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    double t = 0.0;
+    if (argc >= 1) napi_get_value_double(env, argv[0], &t);
+    yoai_tts_set_temperature(static_cast<float>(t));
+    return nullptr;
+}
+
+// nativeTtsSetStreamingText(on: boolean): void
+napi_value NativeTtsSetStreamingText(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    bool on = false;
+    if (argc >= 1) napi_get_value_bool(env, argv[0], &on);
+    yoai_tts_set_streaming_text(on ? 1 : 0);
+    return nullptr;
+}
+
+// nativeTtsSetEosHold(frames: number): void
+napi_value NativeTtsSetEosHold(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    std::int32_t frames = 0;
+    if (argc >= 1) napi_get_value_int32(env, argv[0], &frames);
+    yoai_tts_set_eos_hold(frames);
+    return nullptr;
+}
+
 // nativeTtsSetStreaming(on: boolean): void
 napi_value NativeTtsSetStreaming(napi_env env, napi_callback_info info) {
     size_t argc = 1;
@@ -1126,6 +1170,10 @@ napi_value Init(napi_env env, napi_value exports) {
         {"nativeTtsSetStreaming", nullptr, NativeTtsSetStreaming, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsSetReference", nullptr, NativeTtsSetReference, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsReferenceSeconds", nullptr, NativeTtsReferenceSeconds, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsLoadReferenceEmbedding", nullptr, NativeTtsLoadReferenceEmbedding, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsSetTemperature", nullptr, NativeTtsSetTemperature, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsSetStreamingText", nullptr, NativeTtsSetStreamingText, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsSetEosHold",  nullptr, NativeTtsSetEosHold,  nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsSay",         nullptr, NativeTtsSay,         nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsLastSpeech",  nullptr, NativeTtsLastSpeech,  nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsLastError",   nullptr, NativeTtsLastError,   nullptr, nullptr, nullptr, napi_default, nullptr},

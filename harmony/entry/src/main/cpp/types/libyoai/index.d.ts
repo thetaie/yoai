@@ -450,6 +450,30 @@ export const nativeTtsSetReference: (wavPath: string, transcript: string) => num
 export const nativeTtsReferenceSeconds: () => number;
 
 /**
+ * The reference voice as a voice file: a .spk, as wide as the loaded talker
+ * (2048 values for 1.7B, 1024 for 0.6B). For a `base` checkpoint, after a load.
+ * Returns 0 on success, or non-zero with the reason in `nativeTtsLastError()`.
+ *
+ * What the desktop reads with: one vector, no reference audio, so nothing is
+ * added per frame. Exclusive with `nativeTtsSetReference`; setting one drops
+ * the other, and `nativeTtsSetReference('', '')` drops both. **A load does not
+ * drop it**, so drop it when switching talkers.
+ */
+export const nativeTtsLoadReferenceEmbedding: (spkPath: string) => number;
+
+/** The talker's sampling temperature. ≤ 0 restores the engine's default (0.9). */
+export const nativeTtsSetTemperature: (t: number) => void;
+
+/**
+ * The text layout: the talker reads the text one token per frame instead of all
+ * of it up front. Off by default.
+ */
+export const nativeTtsSetStreamingText: (on: boolean) => void;
+
+/** Frames generated past the talker's first stop code. 0, the default, stops at once. */
+export const nativeTtsSetEosHold: (frames: number) => void;
+
+/**
  * Whether audio is emitted as it is generated. On by default, and **measured to
  * cost nothing**.
  *

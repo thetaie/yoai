@@ -100,6 +100,32 @@ continuously, so it belongs beside Qwen3-TTS's *sustained* 3.52, not its fast
 second inference framework, on having to think before it can speak, and on
 having no way to ask for a voice.
 
+**All four `Q4_K_M` talkers, one session**, taken on 2026-09-30 through
+`/tts`'s Benchmark, which runs the PC's protocol ("All four talkers, one
+session" below): its three passages, each one `say()`, after a warm-up; seed
+101, talker temperature 1.3, the streaming text layout, a 2-frame eos hold, the
+12 Hz tokenizer at `Q8_0`, Base on `speaker/01_female`'s `.spk`, CustomVoice as
+`serena`. The CPU at the engine's default of 6 threads. Unlike the PC, the audio
+was decoded buffered, one codec pass per passage, which this phone measured to
+cost the same as streaming. One pass per talker, back to back, 2.5, 2.5 and 10
+minutes apart:
+
+| talker | passage 1 | passage 2 | passage 3 | total |
+| --- | --- | --- | --- | --- |
+| 0.6B Base | 2.70 | 2.38 | 2.68 | 2.61 |
+| 1.7B Base | 2.99 | 3.24 | 3.26 | 3.15 |
+| 0.6B CustomVoice | 2.28 | 2.65 | 3.55 | 2.87 |
+| 1.7B CustomVoice | 3.64 | 3.23 | 3.81 | 3.64 |
+
+- **0.6B lands at 2.6–2.8 and 1.7B at 3.2–3.7.** Above 1 either way, so the
+  phone keeps the platform's TTS.
+- **CustomVoice read 10–15% slower than Base of the same size here**, against
+  within 6% on the PC. The two CustomVoice runs came last, so heat left by the
+  runs before is the likelier cause than the checkpoint. Not re-run.
+- **1.7B CustomVoice's third passage ran to 44.7s of speech** where Base read the
+  same text in 21.1s. The audio was not kept, so whether that was long pauses or
+  a take that did not stop is not known.
+
 ### The PC
 
 **What runs where on the desktop today**: recognition, SenseVoice-Small `q8`,
@@ -115,6 +141,31 @@ processors — the language model's rows below have a column for that.
 a minute of audio on the phone, 8 s on the PC's CPU, and **nothing at all on its
 GPU**. That is the line between prepared playback and speaking as you go, and
 the PC is the first machine here on the far side of it.
+
+#### All four talkers, one session
+
+Taken on 2026-09-30 so that every cell shares one method; the older tables
+below come from several sessions and tools. `yoai-tts-sweep --whole`: each of
+its three passages read as one `say()`, about 60–78s of speech per cell. Seed
+101, talker temperature 1.3, the streaming text layout, a 2-frame eos hold, the
+12 Hz tokenizer at `Q8_0`. Base reads with `speaker/01_female`'s `.spk`,
+CustomVoice as `serena`. The CPU is forced with `GGML_BACKEND=CPU`, at
+qwentts.cpp's default of 11 threads; the iGPU is Vulkan with the shared-memory
+tuning. A warm-up sentence first, not counted. Two passes, nothing else running:
+
+| `Q4_K_M` talker | CPU, 11 threads | Arc iGPU, Vulkan |
+| --- | --- | --- |
+| 0.6B Base | 0.914, 0.950 | 0.441, 0.442 |
+| 1.7B Base | 1.143, 1.135 | 0.551, 0.550 |
+| 0.6B CustomVoice | 0.966, 0.961 | 0.445, 0.441 |
+| 1.7B CustomVoice | 1.116, 1.128 | 0.570, 0.549 |
+
+- **The two passes agree within 4%** on either backend, where the tables below
+  allow ±15% for the CPU across days.
+- **Size decides the speed, the checkpoint does not.** Base and CustomVoice of
+  one size are within 6% of each other on either backend.
+- **1.7B Base on the iGPU read 0.55**, a little under the 0.57–0.59 in the
+  deployment matrix below.
 
 #### CPU
 
@@ -2609,7 +2660,7 @@ The family has more than the Base checkpoint, and llama.cpp supports only Base.
 | Base, free-running | **changes, including gender** | good | 1.41 | llama.cpp |
 | Base, cloned through a speaker encoder | stable | **flattened** | 1.41 | llama.cpp |
 | Base, cloned in context | **stable** | **good** | 1.97 | qwentts.cpp |
-| **VoiceDesign**, text attributes | **stable** | **good** | **1.16** | qwentts.cpp |
+| **VoiceDesign**, text attributes | **stable** while the description is unchanged; a style word added to it changes the speaker | **good** | **1.16** | qwentts.cpp |
 | CustomVoice, 9 named speakers + optional style | stable by construction | **worse than VoiceDesign** | 1.89 at 0.6B on the phone | qwentts.cpp |
 
 **The same checkpoint is in the top three rows.** What separates them is the
@@ -2696,6 +2747,13 @@ phone will be slower and 1.16 has room where 1.97 does not — and because a
 described voice needs no reference file shipped or recorded. Cloning is what a
 later "use my own voice" feature would be built on, and it should wait until the
 ratio is known on the device.
+
+**Learned since: the description is the identity, so it cannot also carry a
+mood.** The same description gives the same voice take after take. Append a
+style word to it — 开心, or any other — and a different speaker reads, not the
+same one more cheerfully. Heard, not measured. A voice that must also change
+mood needs a speaker fixed some other way: a CustomVoice name, or a Base
+reference.
 
 **All of it is still above 1, and the phone will be worse.** So this belongs to
 prepared playback, not to conversation. Conversation already has its answer, and
@@ -3420,7 +3478,8 @@ than the half that was.
 limit off one's own failure to configure something.** "The seed does not pin the
 speaker, so the model cannot hold a voice" was stated before the model card had
 been read. `-Base` is the name of the cloning checkpoint. CustomVoice and
-VoiceDesign were one lookup away, and VoiceDesign is both faster and stable.
+VoiceDesign were one lookup away, and VoiceDesign is faster and holds a voice
+for as long as its description does not change.
 The correction came from being asked whether a TTS with no way to fix its voice
 was plausible — which is the question that should have been asked first, exactly
 as with MNN's silence.
@@ -3498,7 +3557,7 @@ Why Base and not the other two, for a reply read in pieces as it is written:
 | --- | --- | --- |
 | Base, mode A | register held: spread 1.31 st on average, 0.59–1.68 over four seeds | 0.57–0.59 |
 | CustomVoice, named speaker | spread 3.09 st on average; one piece in sixteen came out **five semitones low** | 0.57 |
-| VoiceDesign, described | not measured split; nothing but the description ties the pieces | 0.57–0.58 |
+| VoiceDesign, described | heard to hold while the description is unchanged; **a style word added to it changes the speaker** | 0.57–0.58 |
 | Base, mode B | identity and prosody, by the reference in context | not measured; 1.97 on the CPU with a 22 s reference, against VoiceDesign's 1.16 there |
 
 So **VoiceDesign becomes a tool rather than a voice**: describe one, render a
@@ -3570,7 +3629,7 @@ characters a second, F0 and RTF.
 The model reacts to what it reads. **Two full stops in a row are spoken as a
 hesitation — an audible "呃"** before the next sentence. It was found as a
 defect, when a line break was turned into a full stop after one that was
-already there, and src/voice/text/speakable.cpp now never writes two. The same
+already there, and src/voice/text/speakable_stream.cpp now never writes two. The same
 channel may carry more — "……", "——", written fillers such as "嗯……", final
 particles — and none of those has been listened to.
 

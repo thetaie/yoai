@@ -21,7 +21,7 @@
 // answers "is the filterbank worth hand-optimizing" -- and `-t` moves the only
 // part of the pass that a change would actually be felt in.
 
-#include "voice/asr/fbank/funasr.hpp"
+#include "voice/algorithms/fbank_funasr.hpp"
 #include "voice/asr/sensevoice.hpp"
 
 #include "yoai.h"

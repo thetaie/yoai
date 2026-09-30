@@ -259,11 +259,16 @@ add_library(yoai_core STATIC
     src/utils/memory_bandwidth.cpp
 
     # Voice. One subsystem, two halves with different appetites -- the same split
-    # design/voice.md is built on. fbank and prosody are arithmetic over a sample
-    # buffer and build everywhere; sensevoice needs ggml and compiles to a
+    # design/voice.md is built on. algorithms/ and prosody are arithmetic over a
+    # sample buffer and build everywhere; sensevoice needs ggml and compiles to a
     # truthful stub without it, the way llm/chat/local.cpp does for the LLM lane.
-    src/voice/asr/fbank/common.cpp
-    src/voice/asr/fbank/funasr.cpp
+    src/voice/algorithms/fft.cpp
+    src/voice/algorithms/fbank_funasr.cpp
+    # For the echo canceller's reference signal only; see its header for why
+    # the core's no-resampler rule does not cover that.
+    src/voice/algorithms/resampler.cpp
+    # What the speaker played, taken back out of what the microphone heard.
+    src/voice/algorithms/echo_canceller.cpp
     src/voice/asr/sensevoice.cpp
     src/voice/prosody/prosody.cpp
     # A SECOND engine, for the one thing the other two cannot do between them:
@@ -286,7 +291,7 @@ add_library(yoai_core STATIC
     src/voice/text/sentence_stream.cpp
     # A reply as written -- markdown, emoji -- turned into what is spoken, ahead
     # of the cutter. In the core so no host has to write it again.
-    src/voice/text/speakable.cpp
+    src/voice/text/speakable_stream.cpp
 )
 
 target_include_directories(yoai_core PUBLIC src)
@@ -852,6 +857,16 @@ if(YOAI_BUILD_CLI)
     # the result design/voice.md records.
     add_executable(yoai-prosody-test tests/prosody_test.cpp)
     target_link_libraries(yoai-prosody-test PRIVATE yoai_core)
+
+    # The resampler alone: closed-form checks with no arguments, a WAV
+    # converted to 16 kHz with two, to be listened to against the original.
+    add_executable(yoai-resampler-test tests/resampler_test.cpp)
+    target_link_libraries(yoai-resampler-test PRIVATE yoai_core)
+
+    # The echo canceller against synthetic echo whose every part is known, so
+    # the residual can be measured exactly, even while someone talks over it.
+    add_executable(yoai-echo-canceller-test tests/echo_canceller_test.cpp)
+    target_link_libraries(yoai-echo-canceller-test PRIVATE yoai_core)
 
     # One file in, a directory out. Checked against design/pack-mnn-model.py:
     # a truncated weight file is the one failure MNN would answer through

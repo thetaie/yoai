@@ -11,7 +11,7 @@
  * prompt for that turn only.
  *
  * Written for the ear rather than the eye. The core strips markdown before the
- * engine sees it (src/voice/text/speakable.hpp), but a stripped list is still a
+ * engine sees it (src/voice/text/speakable_stream.hpp), but a stripped list is still a
  * list: items with no connective between them, read one after another at the
  * same pace, which is most of what "mechanical" meant. Short sentences joined by
  * spoken connectives give the engine something to phrase. Numbers and units

@@ -1,6 +1,6 @@
 #include "voice/asr/sensevoice.hpp"
 
-#include "voice/asr/fbank/funasr.hpp"
+#include "voice/algorithms/fbank_funasr.hpp"
 #include "utils/log.hpp"
 
 #include <cmath>

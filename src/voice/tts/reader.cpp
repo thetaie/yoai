@@ -1,7 +1,7 @@
 #include "voice/tts/reader.hpp"
 
 #include "utils/log.hpp"
-#include "voice/text/speakable.hpp"
+#include "voice/text/speakable_stream.hpp"
 
 #include <algorithm>
 #include <chrono>

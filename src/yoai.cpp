@@ -25,7 +25,7 @@
 #include "store/timeline.hpp"
 #include "voice/omni/qwen25_omni.hpp"
 #include "voice/prosody/prosody.hpp"
-#include "voice/text/speakable.hpp"
+#include "voice/text/speakable_stream.hpp"
 #include "voice/tts/qwen3_tts.hpp"
 #include "voice/tts/reader.hpp"
 #include "voice/asr/sensevoice.hpp"
@@ -1496,9 +1496,34 @@ extern "C" float yoai_tts_reference_seconds(void) {
     return tts().reference_seconds();
 }
 
+extern "C" int yoai_tts_load_reference_embedding(const char* spk_path) {
+    std::lock_guard<std::mutex> guard(tts_mutex());
+    const bool ok = tts().load_reference_embedding(spk_path ? spk_path : "");
+    tts_error() = tts().last_error();
+    return ok ? 0 : 1;
+}
+
 extern "C" void yoai_tts_set_streaming(int on) {
     std::lock_guard<std::mutex> guard(tts_mutex());
     tts().set_streaming(on != 0);
+}
+
+extern "C" void yoai_tts_set_temperature(float temperature) {
+    std::lock_guard<std::mutex> guard(tts_mutex());
+    yoai::voice::QttsSampling sampling = tts().sampling();
+    sampling.temperature = temperature > 0.0f ? temperature
+                                              : yoai::voice::QttsSampling().temperature;
+    tts().set_sampling(sampling);
+}
+
+extern "C" void yoai_tts_set_streaming_text(int on) {
+    std::lock_guard<std::mutex> guard(tts_mutex());
+    tts().set_streaming_text(on != 0);
+}
+
+extern "C" void yoai_tts_set_eos_hold(int frames) {
+    std::lock_guard<std::mutex> guard(tts_mutex());
+    tts().set_eos_hold(frames);
 }
 
 extern "C" void yoai_tts_set_threads(int threads) {

@@ -1,14 +1,14 @@
-// The parts of a filterbank front end that are not a model's convention.
-//
-// Deliberately small. Front ends differ in nearly every step -- the window, the
-// mel scale, how the log is floored, how frames are stacked -- and each of
-// those is part of what a model was trained on, so it belongs in that model's
-// file (funasr.cpp) rather than here. What is left is arithmetic with one right
-// answer.
+// The FFT every signal-processing file in voice/ shares.
 //
 // **Changing anything here changes every front end that uses it, in the last
-// bits**, and funasr.hpp explains why that matters: bit-level agreement with
-// the reference implementation is how that front end is known to be right.
+// bits**, and fbank_funasr.hpp explains why that matters: bit-level agreement
+// with FunASR's front end is how that front end is known to be right. A user
+// that wants something else from an FFT -- a real-input transform, another
+// twiddle schedule -- gets its own function beside this one, not a change to
+// this one.
+//
+// There is no inverse. Conjugate, transform, conjugate and divide by n: the
+// same butterflies, so the same last bits.
 
 #pragma once
 
@@ -16,7 +16,6 @@
 
 namespace yoai {
 namespace voice {
-namespace fbank {
 
 // In-place radix-2 FFT. `n` must be a power of two and both vectors at least
 // `n` long; for real input, pass `im` zeroed.
@@ -26,6 +25,5 @@ namespace fbank {
 // simple form is the one that can be read against the reference.
 void fft_radix2(std::vector<float>& re, std::vector<float>& im, int n);
 
-}  // namespace fbank
 }  // namespace voice
 }  // namespace yoai

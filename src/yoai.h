@@ -831,6 +831,22 @@ int yoai_tts_set_reference(const char* wav_path, const char* transcript);
 // Seconds of reference currently held; 0 when none.
 float yoai_tts_reference_seconds(void);
 
+// The reference voice as a voice file instead: a .spk, raw f32 values as long
+// as the loaded talker is wide (2048 for 1.7B, 1024 for 0.6B). For a `base`
+// checkpoint, after yoai_tts_load.
+//
+// This is what the desktop reads with. It holds one vector and no reference
+// audio, so it adds nothing per frame, where yoai_tts_set_reference above keeps
+// the recording in context for every frame. The two are exclusive: setting one
+// drops the other, and yoai_tts_set_reference(NULL, NULL) drops both.
+//
+// **A load does not drop it**, so a voice file for the other model size stays
+// held across a reload and fails at the next yoai_tts_say. Drop it when
+// switching talkers.
+//
+// Returns 0 when held; the reason is in yoai_tts_last_error() otherwise.
+int yoai_tts_load_reference_embedding(const char* spk_path);
+
 // Whether audio is emitted as it is generated. Non-zero (the default) streams
 // it; 0 decodes the whole utterance in one pass and hands it over once.
 //
@@ -846,6 +862,20 @@ float yoai_tts_reference_seconds(void);
 // **Pin the seed before comparing anything here**, or the model generates a
 // different number of frames each time and only the per-frame rates survive.
 void yoai_tts_set_streaming(int on);
+
+// The talker's sampling temperature. <= 0 restores the engine's default (0.9).
+// The desktop reads at 1.3; see DEFAULT_TEMPERATURE in desktop/src/main/reader.ts.
+void yoai_tts_set_temperature(float temperature);
+
+// The text layout, not the audio: non-zero feeds the talker the text one token
+// per frame instead of all of it up front. Off by default. Needs
+// qwentts-streaming-text.patch; without it the engine ignores this.
+// See yoai_reader_set_streaming_text, which is the same switch on the reader.
+void yoai_tts_set_streaming_text(int on);
+
+// Frames generated past the talker's first stop code. 0 (the default) stops at
+// once. See yoai_reader_set_eos_hold; needs the same patch.
+void yoai_tts_set_eos_hold(int frames);
 
 // Worker threads for the NEXT yoai_tts_load(). <= 0 restores the engine's
 // own choice.
@@ -879,7 +909,7 @@ typedef int (*yoai_tts_audio_handler)(const float* pcm,
 //
 // `text` is the reply as written: markdown and emoji are turned into what should
 // be spoken here, in the core, so every host passes it unchanged. See
-// src/voice/text/speakable.hpp. Text that is nothing but markup fails with
+// src/voice/text/speakable_stream.hpp. Text that is nothing but markup fails with
 // "nothing to say".
 //
 // `on_audio` NULL generates and discards, which is a measurement mode rather
@@ -1115,7 +1145,7 @@ int yoai_reader_begin(yoai_reader_audio_handler on_audio, void* user_data);
 // what should be spoken -- a line break becomes a full stop, bullets and
 // emphasis marks go -- and it can only do that right on the whole stream: a
 // host cleaning fragments sees a line break at a fragment's edge and loses it.
-// See src/voice/text/speakable.hpp.
+// See src/voice/text/speakable_stream.hpp.
 int yoai_reader_feed(const char* delta);
 
 // No more text. BLOCKS until the last sample has been handed over.

@@ -1,4 +1,4 @@
-#include "voice/text/speakable.hpp"
+#include "voice/text/speakable_stream.hpp"
 
 namespace yoai {
 namespace voice {

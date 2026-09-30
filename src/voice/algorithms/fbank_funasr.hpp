@@ -10,7 +10,7 @@
 //
 // No ggml and no model: this is arithmetic over a buffer of samples, so it
 // compiles and can be checked on any platform whether or not the ASR lane is
-// built. The FFT is in common.hpp; everything else here is FunASR's convention
+// built. The FFT is in fft.hpp; everything else here is FunASR's convention
 // and stays with it.
 //
 // It is scalar on purpose, and should stay that way.

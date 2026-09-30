@@ -14,12 +14,17 @@
  * having to think before it could speak, and on having no way to ask for a
  * voice at all.
  *
- * **The voice is written, not cloned.** The field below takes an English
- * description and the same description gives the same speaker across different
- * passages. That sentence cost five attempts: the cloning checkpoint run free
- * changed speaker between texts, including gender; pinned through its speaker
- * encoder it held the speaker and flattened the prosody; in-context cloning
- * fixed both and cost 70% more. design/voice.md has the table.
+ * **VoiceDesign's voice is written, not cloned, and it holds within one take
+ * only.** Read sentence by sentence it was heard to change voice, gender
+ * included; whether the model or this code is at fault is not settled
+ * (design/voice.md). A `base` checkpoint reads with a voice file (.spk), as the
+ * desktop does, or clones in context from a .wav and its transcript, which
+ * holds identity and prosody at 70% more per frame.
+ *
+ * **Benchmark** runs the PC's RTF protocol on this phone, so the two columns of
+ * design/voice.md's "All four talkers, one session" table compare: a warm-up
+ * sentence, then three passages, each one say(), at the desktop's settings.
+ * Each line also goes to hilog under the tag `yoai`, prefixed `bench`.
  *
  * So this page is two measurements at once, and the second one has no number.
  * The ratio is on screen. Whether the voice is worth having is in the ear, and
@@ -29,8 +34,9 @@ import { common } from '@kit.AbilityKit';
 import { audio } from '@kit.AudioKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { picker } from '@kit.CoreFileKit';
-import { router } from '@kit.ArkUI';
+import { router, window } from '@kit.ArkUI';
 import fileUri from '@ohos.file.fileuri';
+import hilog from '@ohos.hilog';
 import yoai from 'libyoai.so';
 import { ICON_TOOLBAR, icon } from '../core/Icons';
 import { LocalModelStore, PickedFile } from '../core/LocalModelStore';
@@ -106,6 +112,32 @@ const LONG_TEXT: string =
  */
 const PINNED_SEED: number = 23;
 
+/**
+ * The PC's RTF protocol (design/voice.md, "All four talkers, one session"):
+ * tests/tts_sweep.cpp's three passages, each read as one say(), after a
+ * warm-up that is not counted. Seed, temperature, text layout and eos hold are
+ * the desktop's reading settings, not this page's.
+ */
+const BENCH_WARMUP: string = '你好。';
+const BENCH_PASSAGES: string[] = [
+  '说起黄浦江，很多人第一个想到的是外滩。其实这条江的故事比外滩长得多。' +
+    '它从淀山湖一带流出来，一路向东北，穿过上海市区，最后在吴淞口汇入长江。' +
+    '你知道吗？江上的轮渡到今天还在开。' +
+    '傍晚坐一趟，看着两岸的灯一盏盏亮起来，真的很美！',
+  '我查了一下，明天上海多云转小雨，最高气温二十六度，最低十九度。' +
+    '早上出门的话，记得带把伞。另外，晚高峰地铁二号线可能会比较挤，' +
+    '你要是不赶时间，可以晚半小时再走。',
+  '这个问题其实不难。简单来说，植物白天靠叶子里的叶绿素吸收阳光，' +
+    '把二氧化碳和水变成糖，同时放出氧气。到了晚上没有光，这个过程就停下来了，' +
+    '植物反而会像我们一样呼吸，消耗一点氧气。所以卧室里放太多花草，并不是一个好主意。'
+];
+const BENCH_SEED: number = 101;
+const BENCH_TEMPERATURE: number = 1.3;
+const BENCH_EOS_HOLD: number = 2;
+
+/** The speaker the desktop picks on a custom_voice checkpoint, when it has one. */
+const DEFAULT_SPEAKER: string = 'serena';
+
 @Entry
 @Component
 struct TtsDebug {
@@ -137,6 +169,11 @@ struct TtsDebug {
    * mistake in-context cloning cannot recover from.
    */
   @State private refText: string = LONG_TEXT;
+  /** The voice file held instead, for a base checkpoint; '' for none. */
+  @State private spkName: string = '';
+
+  /** One line per passage of the last Benchmark, then its total. */
+  @State private benchLines: string[] = [];
 
   @State private voice: string = DEFAULT_VOICE;
   @State private text: string = FRESH_TEXT;
@@ -245,13 +282,21 @@ struct TtsDebug {
       if (type === 'ok') {
         this.modelType = content;
         this.readSpeakers();
+        // A load keeps whatever reference the last model held, and a voice file
+        // is only valid for the talker width it was extracted with. Dropped on
+        // every load, so switching between 0.6B and 1.7B cannot carry one over.
+        yoai.nativeTtsSetReference('', '');
+        this.refName = '';
+        this.refSeconds = 0;
+        this.spkName = '';
+        this.benchLines = [];
         // Said here rather than at synthesis time, because the checkpoint
         // decides which parameters are legal. Picking the wrong file is a file
         // name mistake, not a broken model, and this is where it is cheapest to
         // notice.
-        this.note = content === 'base' && this.refSeconds === 0
-          ? 'a "base" checkpoint clones — pick a reference recording and type ' +
-            'what it says, or it has no voice to copy'
+        this.note = content === 'base'
+          ? 'a "base" checkpoint needs a voice — pick a voice file (.spk) for ' +
+            'this model size, or a reference recording and what it says'
           : '';
       } else {
         this.modelType = '';
@@ -267,8 +312,9 @@ struct TtsDebug {
    *
    * Asked of the model rather than hard-coded, because "nine named speakers" is
    * something this project read on a model card and never verified — and a
-   * count that came out of the file cannot be stale. The first one is selected
-   * so a custom_voice model is runnable without a second tap.
+   * count that came out of the file cannot be stale. The desktop's speaker is
+   * selected when the model has it, else the first, so a custom_voice model is
+   * runnable without a second tap and a Benchmark reads as the desktop does.
    */
   private readSpeakers(): void {
     const raw: string = yoai.nativeTtsSpeakers();
@@ -279,8 +325,44 @@ struct TtsDebug {
       names = [];
     }
     this.speakers = names;
-    this.speaker = names.length > 0 ? names[0] : '';
+    this.speaker = names.indexOf(DEFAULT_SPEAKER) >= 0 ? DEFAULT_SPEAKER
+      : names.length > 0 ? names[0] : '';
     yoai.nativeTtsSetSpeaker(this.speaker);
+  }
+
+  /**
+   * Pick a voice file (.spk) for a base checkpoint. It has to match the loaded
+   * talker's width, which the core checks: speaker/01_female has one for each
+   * size.
+   */
+  private async pickVoiceFile(): Promise<void> {
+    let uris: string[] = [];
+    try {
+      const opts: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
+      opts.maxSelectNumber = 1;
+      opts.fileSuffixFilters = ['.spk'];
+      uris = await new picker.DocumentViewPicker(this.ctx()).select(opts);
+    } catch (err) {
+      const e = err as BusinessError;
+      this.note = 'picker failed: ' + e.code + ' ' + e.message;
+      return;
+    }
+    if (uris.length === 0) {
+      return;
+    }
+
+    const parsed: fileUri.FileUri = new fileUri.FileUri(uris[0]);
+    if (yoai.nativeTtsLoadReferenceEmbedding(parsed.path) !== 0) {
+      this.spkName = '';
+      this.note = yoai.nativeTtsLastError();
+      return;
+    }
+    // Exclusive with the recording: the core dropped it.
+    this.spkName = parsed.name;
+    this.refName = '';
+    this.refSeconds = 0;
+    this.result = undefined;
+    this.note = '';
   }
 
   /**
@@ -322,6 +404,7 @@ struct TtsDebug {
     }
     this.refName = parsed.name;
     this.refSeconds = yoai.nativeTtsReferenceSeconds();
+    this.spkName = '';   // exclusive with the voice file: the core dropped it
     this.result = undefined;
     this.note = '';
   }
@@ -376,6 +459,95 @@ struct TtsDebug {
       this.result = JSON.parse(content) as TtsJson;
       this.speechBytes = yoai.nativeTtsLastSpeech().byteLength;
     });
+  }
+
+  /** One say(), as a promise, without keeping the audio. */
+  private sayOnce(line: string): Promise<TtsJson> {
+    return new Promise<TtsJson>((resolve: (r: TtsJson) => void, reject: (e: Error) => void) => {
+      yoai.nativeTtsSay(line, false, (type: string, content: string) => {
+        if (type !== 'result') {
+          reject(new Error(content));
+          return;
+        }
+        resolve(JSON.parse(content) as TtsJson);
+      });
+    });
+  }
+
+  /**
+   * The screen stays on while a Benchmark runs: a phone that sleeps partway
+   * through freezes the app and the ratio with it.
+   */
+  private async keepScreenOn(on: boolean): Promise<void> {
+    try {
+      const win: window.Window = await window.getLastWindow(this.ctx());
+      await win.setWindowKeepScreenOn(on);
+    } catch (err) {
+      const e = err as BusinessError;
+      hilog.warn(0x0000, 'yoai', 'bench: keep-screen-on failed: %{public}d %{public}s',
+        e.code, e.message);
+    }
+  }
+
+  private addBenchLine(line: string): void {
+    this.benchLines = this.benchLines.concat([line]);
+    hilog.info(0x0000, 'yoai', 'bench %{public}s | %{public}s', this.shortName(this.talkerName), line);
+  }
+
+  /**
+   * The PC's protocol, on this phone; see BENCH_PASSAGES.
+   *
+   * Every passage is its own line, in the order they ran, because this device
+   * has two speeds: the clock steps down about 30s into continuous generation,
+   * so the first passage runs partly at the fast rate and the last one at the
+   * sustained rate. The total is what the table takes; the lines show where the
+   * step fell. Start each checkpoint from a phone that has cooled down, or the
+   * step comes early and the checkpoints do not compare.
+   *
+   * The page's own settings -- its seed, the engine's temperature, the text
+   * layout and the eos hold -- are put back afterwards, so Speak behaves as it
+   * did before.
+   */
+  private async bench(): Promise<void> {
+    yoai.nativeTtsSetVoice(this.modelType === 'custom_voice' ? '' : this.voice.trim());
+    yoai.nativeTtsSetSpeaker(this.speaker);
+    yoai.nativeTtsSetStreaming(true);
+    yoai.nativeTtsSetSeed(BENCH_SEED);
+    yoai.nativeTtsSetTemperature(BENCH_TEMPERATURE);
+    yoai.nativeTtsSetStreamingText(true);
+    yoai.nativeTtsSetEosHold(BENCH_EOS_HOLD);
+    this.result = undefined;
+    this.note = '';
+    this.benchLines = [];
+    // Busy before the first await, so a second tap cannot start a second run.
+    this.busy = 'benchmark: warm-up…';
+    await this.keepScreenOn(true);
+
+    let speech: number = 0;
+    let seconds: number = 0;
+    try {
+      await this.sayOnce(BENCH_WARMUP);
+      for (let i = 0; i < BENCH_PASSAGES.length; i++) {
+        this.busy = 'benchmark: passage ' + (i + 1) + ' of ' + BENCH_PASSAGES.length + '…';
+        const r: TtsJson = await this.sayOnce(BENCH_PASSAGES[i]);
+        speech += r.speechSeconds;
+        seconds += r.seconds;
+        this.addBenchLine('passage ' + (i + 1) + ': ' + this.fixed(r.speechSeconds, 1) +
+          's of speech in ' + this.fixed(r.seconds, 1) + 's, RTF ' + this.fixed(r.realtime, 3));
+      }
+      this.addBenchLine('total: ' + this.fixed(speech, 1) + 's of speech in ' +
+        this.fixed(seconds, 1) + 's, RTF ' + this.fixed(speech > 0 ? seconds / speech : 0, 3));
+    } catch (err) {
+      this.note = 'benchmark failed: ' + (err as Error).message;
+      hilog.error(0x0000, 'yoai', 'bench %{public}s | failed: %{public}s',
+        this.shortName(this.talkerName), (err as Error).message);
+    } finally {
+      yoai.nativeTtsSetTemperature(0);
+      yoai.nativeTtsSetStreamingText(false);
+      yoai.nativeTtsSetEosHold(0);
+      this.busy = '';
+      await this.keepScreenOn(false);
+    }
   }
 
   /** Play what it said, at ITS rate rather than the recorder's. */
@@ -435,6 +607,11 @@ struct TtsDebug {
 
   private shortName(name: string): string {
     return name === '' ? '(none)' : name.replace('.gguf', '');
+  }
+
+  private canSpeak(): boolean {
+    return this.engine && this.busy === '' && this.modelType !== '' &&
+      (this.modelType !== 'base' || this.refSeconds > 0 || this.spkName !== '');
   }
 
   private statusLine(): string {
@@ -586,11 +763,23 @@ struct TtsDebug {
         .width('100%')
       }
 
-      // A base checkpoint clones and takes nothing else: no description, no
-      // named speaker. The transcript is not optional — audio alone selects the
-      // speaker-encoder path, which held identity and flattened prosody, and
-      // in-context cloning is the configuration worth hearing.
+      // A base checkpoint takes a voice and nothing else: no description, no
+      // named speaker. Two ways to give it one. The voice file is what the
+      // desktop reads with and what Benchmark measures; the recording and its
+      // transcript are in-context cloning, dearer every frame. Either replaces
+      // the other.
       if (this.modelType === 'base') {
+        Button(this.spkName !== ''
+          ? 'Voice file: ' + this.spkName + ' · no context cost'
+          : 'Pick a voice file (.spk) for this model size')
+          .width('100%')
+          .height(40)
+          .fontSize(12)
+          .backgroundColor(this.theme.bg_surface)
+          .fontColor(this.theme.text_primary)
+          .enabled(this.busy === '')
+          .onClick(() => { this.pickVoiceFile(); })
+
         TextInput({ text: this.refText, placeholder: 'what the recording says' })
           .width('100%')
           .height(40)
@@ -680,17 +869,27 @@ struct TtsDebug {
       }
       .width('100%')
 
-      // A base checkpoint with no reference has no voice to copy, and the
+      // A base checkpoint with no voice has nothing to read with, and the
       // engine's refusal would be correct but late. Disabled is clearer than a
       // run that fails.
-      Button('Speak')
-        .width('100%')
-        .height(44)
-        .backgroundColor(this.theme.brand)
-        .fontColor(this.theme.on_brand)
-        .enabled(this.engine && this.busy === '' && this.modelType !== '' &&
-                 (this.modelType !== 'base' || this.refSeconds > 0))
-        .onClick(() => { this.say(); })
+      Row({ space: 10 }) {
+        Button('Speak')
+          .layoutWeight(1)
+          .height(44)
+          .backgroundColor(this.theme.brand)
+          .fontColor(this.theme.on_brand)
+          .enabled(this.canSpeak())
+          .onClick(() => { this.say(); })
+
+        Button('Benchmark')
+          .layoutWeight(1)
+          .height(44)
+          .backgroundColor(this.theme.bg_surface)
+          .fontColor(this.theme.text_primary)
+          .enabled(this.canSpeak())
+          .onClick(() => { this.bench(); })
+      }
+      .width('100%')
 
       Text(this.statusLine())
         .fontSize(12)
@@ -781,6 +980,25 @@ struct TtsDebug {
     .padding(16)
   }
 
+  @Builder
+  benchPanel() {
+    Column({ space: 4 }) {
+      Text('Benchmark · ' + this.shortName(this.talkerName) + ' · seed ' + BENCH_SEED +
+           ', temperature ' + BENCH_TEMPERATURE + ', streaming text, eos hold ' + BENCH_EOS_HOLD)
+        .fontSize(12)
+        .fontColor(this.theme.text_secondary)
+        .width('100%')
+      ForEach(this.benchLines, (line: string) => {
+        Text(line)
+          .fontSize(13)
+          .fontColor(this.theme.text_primary)
+          .width('100%')
+      }, (line: string, i: number) => i.toString() + line)
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, bottom: 12 })
+  }
+
   build() {
     Column() {
       this.header()
@@ -788,6 +1006,10 @@ struct TtsDebug {
       Scroll() {
         Column() {
           this.controls()
+
+          if (this.benchLines.length > 0) {
+            this.benchPanel()
+          }
 
           if (this.result !== undefined) {
             this.resultPanel()

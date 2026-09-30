@@ -9,12 +9,18 @@
 // on a desktop against omni's 3.0x for the same job.
 //
 // **The voice is written, not cloned.** `instruct` is an English description --
-// `breathy, unhurried but not slow` -- and the same description gives the same
-// voice across different passages. That is the requirement the Base checkpoint
-// failed: free-running it changed speaker between texts, including gender, and
-// pinning it through the speaker encoder held the identity but flattened the
-// prosody. VoiceDesign holds both, and needs no reference recording shipped in
-// the app or captured from the user.
+// `breathy, unhurried but not slow` -- and needs no reference recording shipped
+// in the app or captured from the user. While the description stays the same
+// the voice holds across takes and the prosody is good, where the Base
+// checkpoint through llama.cpp, pinned by its speaker encoder, held the
+// identity but flattened the prosody.
+//
+// **The description is the identity, so it cannot also carry a mood.** Append
+// a style word to it -- 开心, or any other -- and it is a different speaker, not
+// the same one reading differently. Heard, not measured. CustomVoice keeps its
+// speaker by name while its style changes, which is why the styles are offered
+// there; VoiceDesign makes reference voices for the Base checkpoint and does
+// not read replies.
 //
 // Two files, both GGUF: a talker and a 12 Hz audio tokenizer. The 1.7B
 // VoiceDesign pair is 1.4 GB at Q4_K_M; there is no smaller VoiceDesign.

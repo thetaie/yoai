@@ -52,7 +52,7 @@
 
 #include "voice/prosody/prosody.hpp"
 #include "voice/text/sentence_stream.hpp"
-#include "voice/text/speakable.hpp"
+#include "voice/text/speakable_stream.hpp"
 #include "voice/tts/reader.hpp"
 
 #include <algorithm>
