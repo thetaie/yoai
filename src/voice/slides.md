@@ -168,73 +168,71 @@ Below 1 the speech keeps up with playback; above 1 a stream needs duration×(RTF
 
 ---
 
-## The reading problem
+<style scoped>
+section { font-size: 18px; padding-top: 36px; padding-bottom: 36px; }
+h2 { font-size: 32.5px; margin-bottom: 0.2em; }   /* the other slides' size: 1.25em of 26px */
+p { margin: 0.3em 0; }
+svg.fig { width: 64%; margin: 6px auto 0; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; font-size: 16px; line-height: 1.4; }
+.cols h3 { font-size: 19px; margin: 0.3em 0 0.2em; }
+.cols ul { margin: 0; padding-left: 1.1em; }
+.cols li { margin: 0.1em 0; }
+.cols p { margin: 0.5em 0 0.3em; }
+table { font-size: 14px; }
+th, td { padding: 2px 9px !important; }
+</style>
 
-- A reply takes **seconds to write**. A single `say()` cannot start until the last token has arrived.
-- The engine is waiting for text, so faster synthesis cannot recover that time.
-- `Reader` has two ways to speak while the model is still writing, and one switch between them: `set_whole_reply`.
+## The reading problem, and two modes
 
-```text
-reader.begin(sink, user)   // open the stream before the first token
-reader.feed(delta)         // once per token, from any provider
-reader.finish(&result)     // no more text; blocks until the last sample
-```
+A reply takes **seconds to write**, and a single `say()` waits for the last token; faster synthesis cannot recover that. `Reader` speaks while it is written: `begin()`, `feed(delta)` per token from any provider, `finish()`.
 
----
-
-## Two modes
-
-<svg class="fig" viewBox="0 0 1200 390" role="img" aria-label="Timelines: whole reply is one continuous generation; pieces are cut from the text and played one after another with seams">
+<svg class="fig" viewBox="0 0 1200 255" role="img" aria-label="Timelines: whole reply is one continuous generation; pieces are cut from the text and played one after another with seams">
 <defs><marker id="arrow-time" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#57606a"/></marker></defs>
-<g font-size="16" fill="#57606a">
-<line x1="230" y1="25" x2="270" y2="25" stroke="#0969da" stroke-width="14" stroke-dasharray="8 5"/>
-<text x="280" y="31">text from the model</text>
-<rect x="500" y="16" width="40" height="18" rx="3" fill="#1a7f37"/>
-<text x="550" y="31">audio</text>
-<line x1="680" y1="13" x2="680" y2="37" stroke="#bc4c00" stroke-width="3"/>
-<text x="692" y="31">seam</text>
-<line x1="800" y1="13" x2="800" y2="37" stroke="#24292f" stroke-width="2"/>
-<text x="812" y="31">cut</text>
+<g font-size="22" fill="#57606a">
+<line x1="230" y1="22" x2="270" y2="22" stroke="#0969da" stroke-width="14" stroke-dasharray="8 5"/>
+<text x="280" y="30">text from the model</text>
+<rect x="530" y="12" width="40" height="18" rx="3" fill="#1a7f37"/>
+<text x="580" y="30">audio</text>
+<line x1="710" y1="8" x2="710" y2="36" stroke="#bc4c00" stroke-width="3"/>
+<text x="722" y="30">seam</text>
+<line x1="840" y1="8" x2="840" y2="36" stroke="#24292f" stroke-width="2"/>
+<text x="852" y="30">cut</text>
 </g>
-<text x="20" y="100" font-size="22" font-weight="700" fill="#24292f">Whole reply</text>
-<text x="20" y="124" font-size="14" font-family="monospace" fill="#57606a">set_whole_reply(true)</text>
-<line x1="230" y1="80" x2="780" y2="80" stroke="#0969da" stroke-width="16" stroke-dasharray="8 5"/>
-<rect x="275" y="100" width="860" height="24" rx="4" fill="#1a7f37"/>
-<text x="705" y="118" font-size="15" fill="#ffffff" text-anchor="middle">one generation</text>
-<text x="230" y="155" font-size="16" fill="#57606a">the talker reads 1 text token per frame, 12.5 a second, and waits when the text runs out</text>
-<text x="20" y="250" font-size="22" font-weight="700" fill="#24292f">Pieces</text>
-<text x="20" y="274" font-size="14" font-family="monospace" fill="#57606a">set_whole_reply(false)</text>
-<line x1="230" y1="230" x2="780" y2="230" stroke="#0969da" stroke-width="16" stroke-dasharray="8 5"/>
+<text x="20" y="112" font-size="26" font-weight="700" fill="#24292f">Whole reply</text>
+<line x1="230" y1="85" x2="780" y2="85" stroke="#0969da" stroke-width="16" stroke-dasharray="8 5"/>
+<rect x="275" y="102" width="860" height="26" rx="4" fill="#1a7f37"/>
+<text x="705" y="121" font-size="19" fill="#ffffff" text-anchor="middle">one generation</text>
+<text x="20" y="197" font-size="26" font-weight="700" fill="#24292f">Pieces</text>
+<line x1="230" y1="170" x2="780" y2="170" stroke="#0969da" stroke-width="16" stroke-dasharray="8 5"/>
 <g stroke="#24292f" stroke-width="2">
-<line x1="290" y1="216" x2="290" y2="244"/>
-<line x1="470" y1="216" x2="470" y2="244"/>
-<line x1="780" y1="216" x2="780" y2="244"/>
+<line x1="290" y1="156" x2="290" y2="184"/>
+<line x1="470" y1="156" x2="470" y2="184"/>
+<line x1="780" y1="156" x2="780" y2="184"/>
 </g>
-<rect x="305" y="250" width="190" height="24" rx="4" fill="#1a7f37"/>
-<rect x="499" y="250" width="300" height="24" rx="4" fill="#1a7f37"/>
-<rect x="803" y="250" width="332" height="24" rx="4" fill="#1a7f37"/>
-<g font-size="15" fill="#ffffff" text-anchor="middle">
-<text x="400" y="268">1</text>
-<text x="649" y="268">2</text>
-<text x="969" y="268">3</text>
+<rect x="305" y="187" width="190" height="26" rx="4" fill="#1a7f37"/>
+<rect x="499" y="187" width="300" height="26" rx="4" fill="#1a7f37"/>
+<rect x="803" y="187" width="332" height="26" rx="4" fill="#1a7f37"/>
+<g font-size="19" fill="#ffffff" text-anchor="middle">
+<text x="400" y="206">1</text>
+<text x="649" y="206">2</text>
+<text x="969" y="206">3</text>
 </g>
 <g stroke="#bc4c00" stroke-width="3">
-<line x1="497" y1="244" x2="497" y2="280"/>
-<line x1="801" y1="244" x2="801" y2="280"/>
+<line x1="497" y1="184" x2="497" y2="219"/>
+<line x1="801" y1="184" x2="801" y2="219"/>
 </g>
-<text x="230" y="305" font-size="16" fill="#57606a">piece 1: 12–40 characters, a full stop from 6 on · later pieces: 30–80 characters</text>
-<text x="230" y="329" font-size="16" fill="#57606a">each piece starts from a sentence's opening state, so the pace resets at every seam</text>
-<line x1="230" y1="365" x2="1150" y2="365" stroke="#57606a" stroke-width="2" marker-end="url(#arrow-time)"/>
-<text x="1160" y="371" font-size="16" fill="#57606a">time</text>
+<line x1="230" y1="240" x2="1125" y2="240" stroke="#57606a" stroke-width="2" marker-end="url(#arrow-time)"/>
+<text x="1135" y="247" font-size="20" fill="#57606a">time</text>
 </svg>
 
----
+<div class="cols">
+<div>
 
-## Mode 1: whole reply
+### Whole reply · `set_whole_reply(true)`
 
 - One generation per reply. The text is pulled into the talker as it is written: `Qtts::say_pulled`, which needs `qwentts-streaming-text.patch`.
 - **No seams**, and the pace moves across the reply the way a whole take's does.
-- The talker reads **one text token per frame**: 12.5 tokens a second. So the writer has to stay above that, **about 17–18 Chinese characters a second**.
+- The talker reads **one text token per frame**, 12.5 a second, and waits when the text runs out. So the writer has to stay above **about 17–18 Chinese characters a second**.
 
 With a simulated writer, a player that waits for 0.5s of audio:
 
@@ -244,15 +242,19 @@ With a simulated writer, a player that waits for 0.5s of audio:
 | 21 | 15 | 0.98–1.52 | 0 |
 | 14 | 10 | 1.36–2.26 | **1.16–1.24** |
 
----
+</div>
+<div>
 
-## Mode 2: pieces
+### Pieces · `set_whole_reply(false)`
 
 - `SentenceStream` cuts the text as it arrives. Each piece is its own `say()`.
 - **Piece 1 is the whole of the wait**: 12–40 characters, and a full stop ends it from 6 on.
 - **Later pieces** wait for 30–80 characters (30 sounded better than 12), and are cut early when the listener has under 1s of audio left.
-- **Cost**: every piece starts from the same state, so the pace is even; N pieces are N draws. The voice file holds the register: 1.31 semitones of spread across pieces, against 3.09 without it.
+- **Cost**: every piece starts from a sentence's opening state, so the pace is even and resets at every seam; N pieces are N draws. The voice file holds the register: 1.31 semitones of spread across pieces, against 3.09 without it.
 - **Tolerant of a slow or bursty writer**: each piece is complete text before it is spoken.
+
+</div>
+</div>
 
 ---
 
