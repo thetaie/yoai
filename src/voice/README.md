@@ -19,7 +19,8 @@ Engine-backed files are named after the model they run (`qwen25_omni`,
 | [fft](algorithms/fft.hpp) | The radix-2 FFT everything here shares. Its last bits are pinned by `fbank_funasr`, so it is never changed for another user | none | always built |
 | [fbank_funasr](algorithms/fbank_funasr.hpp) | `FunAsrFbank`: the 80-bin log-mel front end SenseVoice was trained on, plus low-frame-rate stacking (7 frames, hop 6, 560 wide), matching FunASR's output bit for bit | none | always built |
 | [resampler](algorithms/resampler.hpp) | `Resampler`: fixed-ratio polyphase FIR, for the echo canceller's reference signal only (24 kHz playback to the 16 kHz capture) | none | always built |
-| [echo_canceller](algorithms/echo_canceller.hpp) | `EchoCanceller`: what the speaker played taken back out of the microphone. The linear stage only -- a partitioned frequency-domain adaptive filter with Valin's step size; no residual suppression or delay estimation yet | none | always built |
+| [echo_canceller](algorithms/echo_canceller.hpp) | `EchoCanceller`: what the speaker played taken back out of the microphone. The linear stage only -- a partitioned frequency-domain adaptive filter with Valin's step size; no residual suppression yet, and not yet fed by the delay estimator | none | always built |
+| [delay_estimator](algorithms/delay_estimator.hpp) | `DelayEstimator`: how far behind the reference the echo starts, from what is being played -- GCC-PHAT over 1s windows, accepted when three windows agree; silent when there is no echo | none | always built |
 
 ### asr/ -- audio in, text out
 
@@ -92,16 +93,17 @@ host can check at runtime before offering the feature. `algorithms/`,
   that delays playback but does not stall generation.
 - Returning false from any sink cancels. That is not an error: the call returns
   true with whatever was produced.
-- `SentenceStream`, `Resampler` and `EchoCanceller` are not thread-safe; each
-  has one writer. The canceller takes the reference and the microphone in one
-  call, in lockstep; pairing a playback thread with a capture thread is not
-  in it yet.
+- `SentenceStream`, `Resampler`, `EchoCanceller` and `DelayEstimator` are not
+  thread-safe; each has one writer. The canceller and the estimator take the
+  reference and the microphone in one call, in lockstep; pairing a playback
+  thread with a capture thread is not in either yet.
 
 ## Tests
 
 `yoai-sensevoice-test`, `yoai-prosody-test`, `yoai-resampler-test`,
-`yoai-echo-canceller-test` and `yoai-reader-test` are plain executables, not
-registered with CTest; run them directly from the build directory. With no
+`yoai-echo-canceller-test`, `yoai-delay-estimator-test` and `yoai-reader-test`
+are plain executables, not registered with CTest; run them directly from the
+build directory. With no
 arguments the reader test checks `split_sentences` and `SentenceStream`; given
 a talker and a codec GGUF it also reads a passage aloud. The prosody test needs
 a WAV. The resampler test checks tones and streaming with no arguments; given
@@ -109,7 +111,20 @@ a WAV. The resampler test checks tones and streaming with no arguments; given
 listening. The echo canceller test runs white noise through synthetic rooms
 with no arguments; given a reply WAV, a talker WAV and a directory, it plays
 the reply into a synthetic room, talks over it, and writes the microphone, the
-output and what is left of the echo.
+output and what is left of the echo. The delay estimator test runs noise
+through synthetic rooms at known delays with no arguments; given `<ref.wav>
+<mic.wav> [--true-ms D]`, both 16kHz, it traces every window.
+
+The files in `algorithms/` stay C++11 with nothing newer. MSVC has no C++11
+mode -- its oldest is C++14, and its own headers need that -- so a Windows
+build does not check it; compile them with the NDK's clang, `-std=c++11
+-pedantic-errors`, against its libc++.
+
+`tests/tts_rtf.py` measures TTS speed on a new machine: `python
+tests/tts_rtf.py --models <dir>` runs the four `Q4_K_M` talkers through
+`yoai-tts-sweep` on the CPU and on the engine's own pick of GPU (or on the
+backends named with `--backend`, e.g. `Vulkan0`, `CUDA0`) and prints the RTF
+table in the shape of design/voice.md's "All four talkers, one session".
 
 ## Timing
 

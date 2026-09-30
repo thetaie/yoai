@@ -151,7 +151,9 @@ its three passages read as one `say()`, about 60–78s of speech per cell. Seed
 12 Hz tokenizer at `Q8_0`. Base reads with `speaker/01_female`'s `.spk`,
 CustomVoice as `serena`. The CPU is forced with `GGML_BACKEND=CPU`, at
 qwentts.cpp's default of 11 threads; the iGPU is Vulkan with the shared-memory
-tuning. A warm-up sentence first, not counted. Two passes, nothing else running:
+tuning. A warm-up sentence first, not counted. Two passes, nothing else running.
+The same protocol is `tests/tts_rtf.py`, which repeats this table on any
+machine with a `python build.py tts` build, one column per ggml backend:
 
 | `Q4_K_M` talker | CPU, 11 threads | Arc iGPU, Vulkan |
 | --- | --- | --- |
@@ -3785,6 +3787,83 @@ one favourable reading survives: CosyVoice3's per-utterance cost falls away with
 a shorter reference in a way Qwen3-TTS's does not, because `prompt_speech` is
 extracted once. That matters only if the rate term comes down too, and it has
 not.
+
+## Other autoregressive TTS under 5B: surveyed, not measured
+
+Qwen3-TTS is what ships, and CosyVoice3 is the one alternative this file has
+measured. This is the rest of the field at 5B parameters or less with an
+autoregressive stage, so that the next candidate is picked from a list rather
+than from whatever was announced last.
+
+**Nothing in this section was run here.** Every size, license and claim is what
+the models' authors or their public model cards report, surveyed on
+2026-09-30. "Unverified" marks what those sources did not settle. By this
+file's own labels, none of it is even *measured elsewhere*: no method was
+reproduced.
+
+### Three shapes, and the shape decides the port
+
+- **Discrete AR**: the language model emits codec tokens and a codec decodes
+  them. Qwen3-TTS's shape, and the one qwentts.cpp and llama.cpp's `mtmd`
+  generation pipeline are built for.
+- **AR, then flow**: the language model emits speech tokens, then a
+  non-autoregressive flow-matching or DiT network turns them into a
+  spectrogram over several steps, then a vocoder. CosyVoice3's shape, and the
+  second network is a port of its own, as it was there.
+- **Continuous AR**: no tokenizer. Each autoregressive step runs a small
+  diffusion head over a continuous latent, so every frame carries an inner loop
+  that Qwen3-TTS's frames do not.
+
+| model | parameters | shape | Chinese | weights | notes |
+| --- | --- | --- | --- | --- | --- |
+| VoxCPM1.5 / VoxCPM2 | 0.6B / 2B | continuous AR | strong; v2 adds nine dialects | Apache 2.0 | streaming; v2 takes a voice described in words; 44.1 kHz / 48 kHz out; the authors list a community ggml port |
+| IndexTTS-2.5 | 0.8B | AR, then flow | strong | custom: free below 100 million monthly users or 1 billion yuan a year | emotion and duration control; the first IndexTTS mixed pinyin into the characters to make polyphones controllable, unverified for 2.5 |
+| GLM-TTS | unverified | AR, then flow | strong | unverified | phonemes mixed into the text input, for pronunciation |
+| SoulX-Podcast | 1.7B | AR, then flow (unverified) | strong, plus Sichuanese, Henanese and Cantonese | Apache 2.0 | built for dialogue and podcasts; a community GGUF of its language model exists |
+| MOSS-TTS-Nano | 0.1B | discrete AR | one of 20 languages | Apache 2.0 | streams on a 4-core CPU by its authors' account; 48 kHz stereo |
+| MOSS-TTS-Local-Transformer v1.5 | 4B | discrete AR | unverified for this checkpoint | unverified | June 2026 |
+| Chatterbox Multilingual | 0.5B | AR, then flow | unverified | MIT | |
+| Spark-TTS | 0.5B | discrete AR | strong | CC BY-NC-SA, non-commercial | Apache 2.0 when first released |
+| OuteTTS 1.0 | 0.6B / 1B | discrete AR | unknown | CC BY-NC, non-commercial | runs in llama.cpp as it is |
+| Fish Audio S2-Pro | about 4.4B | discrete AR, two stages | strong | research license; commercial use by agreement | emotion asked for in words |
+| Breeze TTS 2 | 3B | unverified | one of 50 languages | non-commercial | top open-weights model on one public leaderboard, August 2026; cloning, a voice from a description, delivery on request |
+
+### Which to look at first
+
+Against the constraints the rest of this file works under: Chinese first,
+weights an app can ship, the device rather than a server, and ggml rather than
+a second framework, which is a cost omni was already charged for.
+
+1. **VoxCPM1.5 or VoxCPM2.** Apache 2.0, strong Chinese, dialects and a voice
+   from a description in v2, streaming, and a ggml port already exists, so it
+   is the cheapest to put on the PC next to Qwen3-TTS. The diffusion head in
+   every step means its per-frame cost has to be measured; the parameter count
+   will not predict it.
+2. **GLM-TTS or IndexTTS-2.5, if the polyphone failure matters.** GLM-TTS
+   takes phonemes mixed into its text, and the first IndexTTS took pinyin; for
+   2.5 that is unverified. Qwen3-TTS takes neither, which is why `调暗` read as
+   `diào` on one checkpoint had no fix from the API. Both carry a flow stage
+   and ship as Python, so they bring CosyVoice3's porting cost and its rate
+   question with them.
+3. **MOSS-TTS-Nano, if the phone has to get under RTF 1.** The only entry an
+   order of magnitude smaller than what ships. Size did not save the 0.6B
+   Qwen3-TTS on the phone — the code predictor and the codec did not shrink
+   with it — so the first thing to hear is its Chinese, and the second is
+   whether its cost is in the language model at all.
+
+The non-commercial ones — Spark-TTS, OuteTTS, Fish Audio S2-Pro, Breeze TTS 2
+— are fit for a listening comparison and nothing else.
+
+### What this does not settle
+
+- No row has a measurement behind it: not a real time factor, not a
+  polyphone probe, not a listen.
+- Licenses move. Spark-TTS changed from Apache 2.0 to CC BY-NC-SA after
+  release, over the terms of its training data. Read the license again at the
+  time of adoption, not from this table.
+- Sizes are not always counted the same way. IndexTTS2, the predecessor of
+  2.5, is given as about 1.5B by one source and as a 560M backbone by another,
+  and neither says which stages it counted.
 
 ## What llama.cpp can do now
 

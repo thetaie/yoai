@@ -269,6 +269,8 @@ add_library(yoai_core STATIC
     src/voice/algorithms/resampler.cpp
     # What the speaker played, taken back out of what the microphone heard.
     src/voice/algorithms/echo_canceller.cpp
+    # How far behind the reference the echo is, from what is being played.
+    src/voice/algorithms/delay_estimator.cpp
     src/voice/asr/sensevoice.cpp
     src/voice/prosody/prosody.cpp
     # A SECOND engine, for the one thing the other two cannot do between them:
@@ -409,7 +411,7 @@ macro(yoai_require_ggml _why)
     # find_library caches, so without clearing it a changed directory (switching
     # target ABI, or the qtts lane appearing) would silently keep linking the
     # previously found libs.
-    foreach(_v GGML_LIB GGML_CPU_LIB GGML_BASE_LIB GGML_VULKAN_LIB)
+    foreach(_v GGML_LIB GGML_CPU_LIB GGML_BASE_LIB GGML_VULKAN_LIB GGML_CUDA_LIB)
         unset(${_v} CACHE)
     endforeach()
 
@@ -423,16 +425,22 @@ macro(yoai_require_ggml _why)
     # Optional, and present only when the SDK was built with `vulkan`. Found by
     # name like the others rather than inferred from a switch, so the archive
     # that exists is the one that gets linked -- the SDK's contents are the
-    # record of how it was built.
+    # record of how it was built. CUDA the same way; the root build.py puts it
+    # beside Vulkan wherever there is a CUDA Toolkit.
     find_library(GGML_VULKAN_LIB NAMES ggml-vulkan ${_ggml_find})
+    find_library(GGML_CUDA_LIB   NAMES ggml-cuda   ${_ggml_find})
 
     # A shared llama build puts all of ggml inside libllama, so finding none of
     # these is only an error when nothing else supplies them.
     #
-    # ggml-vulkan goes FIRST: it references the rest of ggml and, with static
-    # archives, the linker resolves left to right.
+    # The order is the reference order, because with static archives a
+    # single-pass linker (GNU ld) resolves left to right: libggml is the backend
+    # registry and names every backend compiled in, each backend names
+    # ggml-base, and so does the CPU one. lld and MSVC's link.exe resolve in any
+    # order, which is why the order this replaced, Vulkan first, linked on
+    # Windows, Android and OHOS.
     set(YOAI_GGML_LIBS "")
-    foreach(_lib GGML_VULKAN_LIB GGML_LIB GGML_CPU_LIB GGML_BASE_LIB)
+    foreach(_lib GGML_LIB GGML_VULKAN_LIB GGML_CUDA_LIB GGML_CPU_LIB GGML_BASE_LIB)
         if(${_lib})
             list(APPEND YOAI_GGML_LIBS "${${_lib}}")
         endif()
@@ -483,6 +491,29 @@ macro(yoai_require_ggml _why)
                 "everywhere.")
         endif()
         message(STATUS "yoai_core: ggml Vulkan backend ON -> ${GGML_VULKAN_LIB}")
+    endif()
+
+    # CUDA's runtime, which the archive needs and does not carry: ggml-cuda
+    # links cudart, cuBLAS and the driver PRIVATE, so a link that takes the bare
+    # archive has to name them itself. The shared ones, as ggml's own build
+    # does unless GGML_STATIC -- the toolkit has no static cuBLAS on Windows.
+    # By file rather than as CUDA:: targets, like everything else on this line:
+    # an imported target is visible only in this directory, and android/ and
+    # harmony/ link yoai_core from theirs. build.py passes CUDAToolkit_ROOT, the
+    # toolkit that compiled the archive.
+    if(GGML_CUDA_LIB)
+        find_package(CUDAToolkit REQUIRED)
+        foreach(_cuda cudart cublas cuda_driver)
+            if(NOT CUDA_${_cuda}_LIBRARY)
+                message(FATAL_ERROR
+                    "ggml's CUDA backend is in ${GGML_CUDA_LIB} but the CUDA Toolkit "
+                    "${CUDAToolkit_VERSION} at ${CUDAToolkit_LIBRARY_DIR} has no "
+                    "${_cuda} library to link it against.")
+            endif()
+            list(APPEND YOAI_GGML_LIBS "${CUDA_${_cuda}_LIBRARY}")
+        endforeach()
+        message(STATUS "yoai_core: ggml CUDA backend ON -> ${GGML_CUDA_LIB}, "
+                       "CUDA ${CUDAToolkit_VERSION}")
     endif()
 endmacro()
 
@@ -867,6 +898,11 @@ if(YOAI_BUILD_CLI)
     # the residual can be measured exactly, even while someone talks over it.
     add_executable(yoai-echo-canceller-test tests/echo_canceller_test.cpp)
     target_link_libraries(yoai-echo-canceller-test PRIVATE yoai_core)
+
+    # The delay estimator against delays it was not told, through synthetic
+    # rooms; with two WAVs, a window-by-window trace of a real pair.
+    add_executable(yoai-delay-estimator-test tests/delay_estimator_test.cpp)
+    target_link_libraries(yoai-delay-estimator-test PRIVATE yoai_core)
 
     # One file in, a directory out. Checked against design/pack-mnn-model.py:
     # a truncated weight file is the one failure MNN would answer through

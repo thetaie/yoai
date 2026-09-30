@@ -143,7 +143,6 @@ Recognition and synthesis sit outside the language model, so **voice works with 
 
 <ul class="note">
 <li>The voice file is one slot in the prompt, so Base costs no more per frame. A real recording holds pieces tighter than a VoiceDesign sample: 1.31 against 1.68 semitones of spread.</li>
-<li>Where they live: <code>voice/text/</code> has <code>SpeakableStream</code> and <code>SentenceStream</code>; <code>voice/tts/</code> has <code>Reader</code> and <code>Qtts</code>.</li>
 </ul>
 
 ---
@@ -163,6 +162,7 @@ Below 1 the speech keeps up with playback; above 1 a stream needs duration×(RTF
 <li>Kirin 9020: 6 threads, clock steps down after about 30s, GPU unusable. Core Ultra 9: 11 threads, ±15% across days.</li>
 <li>Per 80ms frame at 1.7B, CPU → iGPU: codec 34.9 → 6.3ms, talker 23.9 → 17.3ms, code predictor 20.0 → 20.5ms. The code predictor is sized by the 16 codebooks, so neither a GPU nor a smaller talker speeds it up.</li>
 <li>The chat model stays on the CPU: sharing the iGPU with it pushed speech to RTF 1.64.</li>
+<li>Reproduce: <code>python tests/tts_rtf.py --models &lt;dir&gt;</code> on a PC; on the phone, /tts → Benchmark.</li>
 <li>¹ Sounds worse on Vulkan for now; the cause may still be in our code.</li>
 </ul>
 

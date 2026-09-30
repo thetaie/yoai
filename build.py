@@ -10,7 +10,8 @@ into build/: configures if needed, then builds. This is not the desktop app
   llama      also compile the on-device engine in: chat and embedding on a
              GGUF, for cli/yoai-llama. The same checkout, and a longer build
   tts        also compile speech output (Qwen3-TTS) in. Needs qwentts.cpp
-             and llama.cpp checkouts; uses the GPU when there is one
+             and llama.cpp checkouts; uses the GPU when there is one --
+             Vulkan, and CUDA too where the CUDA Toolkit is installed
   server     also build the WebSocket speech server, src/server/ and
              cli/yoai-server. Installs libwebsockets; speaks only with tts
   cosyvoice  also build CosyVoice3's own CLI into build/cosyvoice/bin, for
@@ -33,6 +34,8 @@ wins -- see .env.example:
   QTTS_SRC          qwentts.cpp checkout for tts (default: ../qwentts.cpp)
   COSYVOICE_SRC     cosyvoice.cpp checkout for cosyvoice (default: ../cosyvoice.cpp)
   VULKAN_SDK        Vulkan SDK, for tts on the GPU; optional
+  CUDA_PATH         CUDA Toolkit, for tts on an NVIDIA GPU; optional. Without
+                    it, nvcc on PATH, then /usr/local/cuda off Windows
 """
 
 # Two things in one file. The bottom half is the root build. The top half is
@@ -92,8 +95,8 @@ PY = "python" if WINDOWS else "python3"
 # it is expanded or executed. A new setting goes in NAMES and in .env.example.
 
 NAMES = (
-    "VS_DIR", "NINJA", "VCPKG_ROOT", "OPENSSL_ROOT_DIR", "VULKAN_SDK", "LLAMA_SRC",
-    "LLAMA_SDK_DIR", "QTTS_SRC", "COSYVOICE_SRC", "MNN_SRC", "DEVECO_HOME",
+    "VS_DIR", "NINJA", "VCPKG_ROOT", "OPENSSL_ROOT_DIR", "VULKAN_SDK", "CUDA_PATH",
+    "LLAMA_SRC", "LLAMA_SDK_DIR", "QTTS_SRC", "COSYVOICE_SRC", "MNN_SRC", "DEVECO_HOME",
     "OHOS_SDK_ROOT",
 )
 
@@ -289,6 +292,14 @@ def configured(build_dir):
             or os.path.isfile(os.path.join(build_dir, "Makefile")))
 
 
+def cached_lib(build_dir, var):
+    """Did the last configure of `build_dir` find the library its find_library
+    stored in `var`? A miss is cached too, as <var>-NOTFOUND."""
+    m = re.search(r"^%s:FILEPATH=(.*)$" % re.escape(var),
+                  read(os.path.join(build_dir, "CMakeCache.txt")), re.M)
+    return bool(m) and not m.group(1).endswith("-NOTFOUND")
+
+
 def find(root, *patterns):
     """Every file under `root` whose name matches one of `patterns`."""
     found = []
@@ -410,6 +421,35 @@ def spirv_args(vulkan_sdk):
             if os.path.isfile(os.path.join(d, "SPIRV-HeadersConfig.cmake")):
                 return ["-DSPIRV-Headers_DIR=" + fwd(d)]
     return []
+
+
+def nvcc():
+    """The CUDA Toolkit's compiler, or None when there is no toolkit.
+
+    CUDA_PATH first, the variable the Windows installer sets; then PATH; then
+    /usr/local/cuda, where the Linux installer puts it without adding it to
+    PATH. A CUDA_PATH with no compiler in it is a broken install, and saying
+    so beats a CPU build that looks like a choice."""
+    exe = "nvcc" + EXE
+    cuda = env("CUDA_PATH")
+    if cuda:
+        path = os.path.join(cuda, "bin", exe)
+        if not os.path.isfile(path):
+            fail('[build] CUDA_PATH is "%s", which has no bin/%s.' % (cuda, exe),
+                 "[build] Repair the CUDA Toolkit install, or set YOAI_CUDA_PATH in .env.")
+        return path
+    found = which("nvcc")
+    if found:
+        return found
+    if not WINDOWS and os.path.isfile("/usr/local/cuda/bin/nvcc"):
+        return "/usr/local/cuda/bin/nvcc"
+    return None
+
+
+def cmake_at_least(major, minor):
+    """Is the cmake on PATH at least `major`.`minor`?"""
+    m = re.search(r"(\d+)\.(\d+)", output(["cmake", "--version"]) or "")
+    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (major, minor)
 
 
 # --- Checkouts -----------------------------------------------------------------
@@ -555,9 +595,11 @@ def main(argv):
     # After the arguments, so the help text still prints when a configured path
     # is wrong. The names are the paths this script reads.
     if WINDOWS:
-        names = ("VS_DIR", "NINJA", "VCPKG_ROOT", "LLAMA_SRC", "QTTS_SRC", "COSYVOICE_SRC", "VULKAN_SDK")
+        names = ("VS_DIR", "NINJA", "VCPKG_ROOT", "LLAMA_SRC", "QTTS_SRC", "COSYVOICE_SRC",
+                 "VULKAN_SDK", "CUDA_PATH")
     else:
-        names = ("VCPKG_ROOT", "OPENSSL_ROOT_DIR", "LLAMA_SRC", "QTTS_SRC", "COSYVOICE_SRC", "VULKAN_SDK")
+        names = ("VCPKG_ROOT", "OPENSSL_ROOT_DIR", "LLAMA_SRC", "QTTS_SRC", "COSYVOICE_SRC",
+                 "VULKAN_SDK", "CUDA_PATH")
     if not load_env(*names):
         return 1
 
@@ -597,7 +639,19 @@ def main(argv):
         if "llama" in want:
             args.append("-DYOAI_ONDEVICE_LLM=ON")
     if "tts" in want:
-        args += ["-DYOAI_QTTS=ON", "-DQTTS_DIR=" + qtts_sdk(gen)]
+        sdk = qtts_sdk(gen)
+        args += ["-DYOAI_QTTS=ON", "-DQTTS_DIR=" + sdk]
+        # CUDA follows what the SDK holds, as Vulkan does: the core finds the
+        # ggml-cuda archive by name. The toolkit goes along, the same one that
+        # compiled the archive, for the runtime libraries it needs. A tree
+        # configured before the archive appeared, or after it went, is
+        # configured again -- it would link libggml's reference to the CUDA
+        # backend against nothing, or name an archive that is gone.
+        with_cuda = has(os.path.join(sdk, "lib"), lib("ggml-cuda"))
+        if with_cuda:
+            args.append("-DCUDAToolkit_ROOT=" + fwd(os.path.dirname(os.path.dirname(nvcc()))))
+        if configured(BUILD) and cached_lib(BUILD, "GGML_CUDA_LIB") != with_cuda:
+            reconfigure = True
     if "server" in want:
         # The manifest feature is what makes vcpkg install libwebsockets; with
         # no vcpkg in play the variable is ignored and a distro package serves.
@@ -743,8 +797,15 @@ def qtts_sdk(gen):
     # GGML_VULKAN is passed either way off macOS, and the tree is configured
     # every run, so the backend follows the machine rather than whatever the
     # first run cached.
+    #
+    # CUDA the same way, beside Vulkan rather than instead of it: one ggml can
+    # hold both, so one build compares them on the same card
+    # (tests/tts_rtf.py --backend Vulkan0 --backend CUDA0). ggml registers
+    # CUDA first, so the engine's own pick is CUDA when both are in.
     vulkan_sdk = env("VULKAN_SDK")
+    nvcc_path = None if MACOS else nvcc()
     vulkan = False
+    cuda = nvcc_path is not None
     backend = []
     if MACOS:
         say("[build] tts backend: Metal, which ggml enables for Apple by itself")
@@ -754,15 +815,32 @@ def qtts_sdk(gen):
         say("[build] tts backend: Vulkan" + (", from " + vulkan_sdk if vulkan_sdk else ""))
     else:
         backend = ["-DGGML_VULKAN=OFF"]
-        warn("[build] warning: no Vulkan found, so tts is built for the CPU only.")
-        warn("[build]   It works, slower: RTF 1.13 against 0.63 on the GPU where measured.")
-        if WINDOWS:
-            warn("[build]   For the GPU, install the Vulkan SDK or set YOAI_VULKAN_SDK in .env,")
-        else:
-            warn("[build]   For the GPU: apt install libvulkan-dev glslc (Debian/Ubuntu), or set")
-            warn("[build]   YOAI_VULKAN_SDK in .env;")
-        warn("[build]   then %s clean tts -- the core only looks for it when configured."
-             % script_cmd(__file__))
+        if not cuda:
+            warn("[build] warning: no Vulkan found, so tts is built for the CPU only.")
+            warn("[build]   It works, slower: RTF 1.13 against 0.63 on the GPU where measured.")
+            if WINDOWS:
+                warn("[build]   For the GPU, install the Vulkan SDK or set YOAI_VULKAN_SDK in .env,")
+            else:
+                warn("[build]   For the GPU: apt install libvulkan-dev glslc (Debian/Ubuntu), or set")
+                warn("[build]   YOAI_VULKAN_SDK in .env;")
+            warn("[build]   then %s clean tts -- the core only looks for it when configured."
+                 % script_cmd(__file__))
+
+    # Built for THIS machine's card only, as the CPU half is built for this
+    # machine's CPU. qwentts.cpp otherwise asks for five architectures, several
+    # times the compile, for cards this tree will never run on. `native` needs
+    # CMake 3.24; an older one keeps that list and only builds slower.
+    #
+    # NCCL off: it splits one model across several GPUs, and ggml links it
+    # whenever it finds it, which the core's link line would then have to know.
+    if cuda:
+        backend += ["-DGGML_CUDA=ON", "-DGGML_CUDA_NCCL=OFF",
+                    "-DCMAKE_CUDA_COMPILER=" + fwd(nvcc_path)]
+        if cmake_at_least(3, 24):
+            backend.append("-DCMAKE_CUDA_ARCHITECTURES=native")
+        say("[build] tts backend: CUDA, from " + nvcc_path)
+    elif not MACOS:
+        backend.append("-DGGML_CUDA=OFF")
 
     qbuild = os.path.join(BUILD, "qtts")
     sdk = os.path.join(BUILD, "qtts-sdk")
@@ -777,9 +855,9 @@ def qtts_sdk(gen):
 
     # lib/ is laid out from empty every run. The libraries are collected by
     # search, because ggml splits its archives differently between versions,
-    # and a tree that was once built with Vulkan keeps its ggml-vulkan archive
-    # after Vulkan is turned off: the core links whatever this directory
-    # holds, so that one is taken out. include/ is kept, so that
+    # and a tree that was once built with Vulkan or CUDA keeps that backend's
+    # archive after the backend is turned off: the core links whatever this
+    # directory holds, so those are taken out. include/ is kept, so that
     # copy_headers() can tell which headers changed.
     inc, libdir = os.path.join(sdk, "include"), os.path.join(sdk, "lib")
     rmtree(libdir)
@@ -787,13 +865,16 @@ def qtts_sdk(gen):
     copy_headers_glob(os.path.join(src, "src", "qwen*.h"), inc)
     patterns = ["*.lib"] if WINDOWS else ["libqwen-core.*", "libggml*.*"]
     copy_all(find(qbuild, *patterns), libdir)
-    if not vulkan:
-        for p in find(libdir, lib("ggml-vulkan")):
-            os.remove(p)
+    for name, on in (("ggml-vulkan", vulkan), ("ggml-cuda", cuda)):
+        if not on:
+            for p in find(libdir, lib(name)):
+                os.remove(p)
     if not has(libdir, lib("qwen-core")):
         fail("[build] qwentts built, but no qwen-core library landed in %s" % libdir)
     if vulkan and not has(libdir, lib("ggml-vulkan")):
         fail("[build] qwentts built WITHOUT the Vulkan backend -- check that cmake found it")
+    if cuda and not has(libdir, lib("ggml-cuda")):
+        fail("[build] qwentts built WITHOUT the CUDA backend -- check that cmake found the toolkit")
     say("[build] tts SDK at %s" % sdk)
     return sdk
 
