@@ -98,7 +98,7 @@ the other two chevron directions. Pinned at the same version as the rest:
 HarmonyOS has no Lucide package. The icons ship as path data inlined into an
 ArkUI `Shape` + `Path`.
 
-They live in `harmony/entry/src/main/ets/core/Icons.ets`, one table plus one
+They live in `examples/harmony/entry/src/main/ets/core/Icons.ets`, one table plus one
 `icon(name, size, color)` builder, and nothing else in the app draws a `Shape`.
 Six of the 24 are in that table — `menu`, the three chevrons, `check`,
 `settings` — because those are what the screens that exist actually draw; add

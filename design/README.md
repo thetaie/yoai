@@ -1,6 +1,6 @@
 # Design
 
-Design source of record, kept outside `harmony/` so it serves the Android app
+Design source of record, kept outside `examples/harmony/` so it serves the Android app
 too when that arrives.
 
 Two kinds of file live here, and they are read for different reasons. **What

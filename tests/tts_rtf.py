@@ -63,7 +63,7 @@ TALKERS = [
 WARMUP = "你好。"
 
 # tests/tts_sweep.cpp's three passages. The phone's copy is BENCH_PASSAGES in
-# harmony/entry/src/main/ets/pages/TtsDebug.ets; change all three together, or
+# examples/harmony/entry/src/main/ets/pages/TtsDebug.ets; change all three together, or
 # the figures stop comparing.
 PASSAGES = [
     "说起黄浦江，很多人第一个想到的是外滩。其实这条江的故事比外滩长得多。"

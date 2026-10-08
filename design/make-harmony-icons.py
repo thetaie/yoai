@@ -3,10 +3,10 @@
     python design/make-harmony-icons.py
 
 Writes, relative to the repo root:
-    harmony/AppScope/resources/base/media/app_icon.png
-    harmony/entry/src/main/resources/base/media/foreground.png
-    harmony/entry/src/main/resources/base/media/background.png
-    harmony/entry/src/main/resources/base/media/startIcon.png
+    examples/harmony/AppScope/resources/base/media/app_icon.png
+    examples/harmony/entry/src/main/resources/base/media/foreground.png
+    examples/harmony/entry/src/main/resources/base/media/background.png
+    examples/harmony/entry/src/main/resources/base/media/startIcon.png
 
 Needs ImageMagick (`magick`) on PATH and Pillow.
 
@@ -142,8 +142,8 @@ def build_svg():
 
 def main():
     root = pathlib.Path(__file__).resolve().parent.parent
-    entry = root / "harmony/entry/src/main/resources/base/media"
-    appscope = root / "harmony/AppScope/resources/base/media"
+    entry = root / "examples/harmony/entry/src/main/resources/base/media"
+    appscope = root / "examples/harmony/AppScope/resources/base/media"
     for d in (entry, appscope):
         if not d.is_dir():
             sys.exit(f"not found: {d}")

@@ -2,7 +2,7 @@
 
     python design/make-compose-palettes.py
 
-Writes android/app/src/main/kotlin/com/yoai/bodyclock/ui/Palettes.kt. Run it
+Writes examples/android/app/src/main/kotlin/com/yoai/bodyclock/ui/Palettes.kt. Run it
 whenever palettes.json changes; do not hand-edit the generated file.
 
 The third sibling, after make-arkts-palettes.py and make-css-palettes.py, over
@@ -29,7 +29,7 @@ import pathlib
 from palette_tokens import FAMILIES, FIELDS, ORDER, family_of, load
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DST = ROOT / "android/app/src/main/kotlin/com/yoai/bodyclock/ui/Palettes.kt"
+DST = ROOT / "examples/android/app/src/main/kotlin/com/yoai/bodyclock/ui/Palettes.kt"
 
 # The picker's label for each family is a STRING RESOURCE, not text built here:
 # it pairs the design's own name with a temperature word, and how that pair

@@ -12,8 +12,8 @@ project(yoai C CXX)
 # workstation without a device in the loop. It is a test harness, not a product.
 #
 # Dependencies come from vcpkg (see vcpkg.json). Cross-compiling for HarmonyOS
-# goes through harmony/build.{sh,cmd}, which lays the same ports out
-# under harmony/prebuilt/<abi>/ for the find_package calls below to resolve.
+# goes through examples/harmony/build.{sh,cmd}, which lays the same ports out
+# under examples/harmony/prebuilt/<abi>/ for the find_package calls below to resolve.
 
 # A build tree configured before the switches were renamed from BODYCLOCK_* to
 # YOAI_* still caches the old names, and would read every YOAI_* option at its
@@ -380,8 +380,8 @@ endif()
 # crash, because C symbols are strong -- a genuine collision is a
 # duplicate-definition error, not a silent wrong-layout read.
 #
-# On HarmonyOS nobody sets these variables by hand: `harmony/build.py <abi>
-# llama` and `... qtts` assemble the SDKs under harmony/prebuilt/ and the app's
+# On HarmonyOS nobody sets these variables by hand: `examples/harmony/build.py <abi>
+# llama` and `... qtts` assemble the SDKs under examples/harmony/prebuilt/ and the app's
 # CMakeLists finds them there. Building an SDK IS turning its lane on.
 
 # Resolves the ggml archives into YOAI_GGML_LIBS, and fails with the reason
@@ -498,8 +498,8 @@ macro(yoai_require_ggml _why)
     # archive has to name them itself. The shared ones, as ggml's own build
     # does unless GGML_STATIC -- the toolkit has no static cuBLAS on Windows.
     # By file rather than as CUDA:: targets, like everything else on this line:
-    # an imported target is visible only in this directory, and android/ and
-    # harmony/ link yoai_core from theirs. build.py passes CUDAToolkit_ROOT, the
+    # an imported target is visible only in this directory, and examples/android/ and
+    # examples/harmony/ link yoai_core from theirs. build.py passes CUDAToolkit_ROOT, the
     # toolkit that compiled the archive.
     if(GGML_CUDA_LIB)
         find_package(CUDAToolkit REQUIRED)
@@ -535,8 +535,8 @@ endmacro()
 # would come back undefined.
 #
 # OFF by default like the others. QTTS_DIR points at an SDK dir shaped like the
-# llama one: include/ + lib/. harmony/build.py qtts assembles it at
-# harmony/prebuilt/qtts-sdk/<abi>.
+# llama one: include/ + lib/. examples/harmony/build.py qtts assembles it at
+# examples/harmony/prebuilt/qtts-sdk/<abi>.
 option(YOAI_QTTS "Build speech output (qwentts.cpp + Qwen3-TTS)" OFF)
 
 if(YOAI_QTTS)
@@ -612,7 +612,7 @@ if(YOAI_ONDEVICE_LLM)
             "The llama.cpp SDK at ${LLAMA_CPP_DIR} is older than this repo needs: its "
             "llama_sampler_init_penalties has no n_vocab parameter, so src/llm/chat/local.cpp "
             "will not compile against it.\n"
-            "Update the llama.cpp checkout and re-run harmony/build.py <abi> llama "
+            "Update the llama.cpp checkout and re-run examples/harmony/build.py <abi> llama "
             "with `clean`, so the cached SDK is discarded rather than reused.")
     endif()
     unset(_llama_h)
@@ -691,7 +691,7 @@ endif()
 # before turning it on.
 #
 # MNN_DIR points at an SDK dir shaped like the llama one: include/ + lib/.
-# harmony/build.py mnn assembles it at harmony/prebuilt/mnn-sdk/<abi>.
+# examples/harmony/build.py mnn assembles it at examples/harmony/prebuilt/mnn-sdk/<abi>.
 option(YOAI_MNN "Build the MNN engine: omni speech output and chat" OFF)
 
 if(YOAI_MNN)
@@ -707,7 +707,7 @@ if(YOAI_MNN)
         message(FATAL_ERROR
             "no rapidjson under ${MNN_DIR}/include. The MNN SDK must ship the "
             "rapidjson libMNN was compiled with -- two versions in one .so "
-            "crash on the first JSON parse. Re-run harmony/build.py mnn.")
+            "crash on the first JSON parse. Re-run examples/harmony/build.py mnn.")
     endif()
 
     unset(MNN_LIB CACHE)
@@ -920,6 +920,11 @@ if(YOAI_BUILD_CLI)
     # listened to. Needs the engine to do anything; builds everywhere.
     add_executable(yoai-tts-sweep tests/tts_sweep.cpp)
     target_link_libraries(yoai-tts-sweep PRIVATE yoai_core)
+
+    # Whether a CustomVoice reading style reaches the Base checkpoint, through a
+    # voice file or a reference in the prompt. Needs the engine; builds everywhere.
+    add_executable(yoai-tts-style tests/tts_style.cpp)
+    target_link_libraries(yoai-tts-style PRIVATE yoai_core)
 
     # A passage read while it is still being "written" at a fixed rate,
     # against the same passage given whole: the audio must match, and the

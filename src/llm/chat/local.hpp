@@ -92,7 +92,7 @@ struct LocalOptions {
 
     /**
      * Layers to offload to a GPU backend. 0 because this repo builds llama.cpp
-     * CPU-only for HarmonyOS (see harmony/build.py for the measurements that
+     * CPU-only for HarmonyOS (see examples/harmony/build.py for the measurements that
      * decided it), so asking for offload would only be a claim the binary cannot
      * honour. 999 means "all" if a GPU-capable SDK is ever linked.
      */

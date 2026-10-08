@@ -864,7 +864,7 @@ int yoai_tts_load_reference_embedding(const char* spk_path);
 void yoai_tts_set_streaming(int on);
 
 // The talker's sampling temperature. <= 0 restores the engine's default (0.9).
-// The desktop reads at 1.3; see DEFAULT_TEMPERATURE in desktop/src/main/reader.ts.
+// The desktop reads at 1.3; see DEFAULT_TEMPERATURE in examples/desktop/src/main/reader.ts.
 void yoai_tts_set_temperature(float temperature);
 
 // The text layout, not the audio: non-zero feeds the talker the text one token

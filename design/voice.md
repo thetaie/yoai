@@ -2797,8 +2797,8 @@ see "The GPU runs, and the platform kills it" below.
 ### On the phone: RTF 2.1 for half a minute, then 3.5 — half a laptop's clock
 
 qwentts.cpp cross-compiles for HarmonyOS and the lane is wired end to end —
-[harmony/build.py](../harmony/build.py) `qtts` assembling
-`harmony/prebuilt/qtts-sdk/<abi>/`, `src/voice/qtts.*` behind a
+[examples/harmony/build.py](../examples/harmony/build.py) `qtts` assembling
+`examples/harmony/prebuilt/qtts-sdk/<abi>/`, `src/voice/qtts.*` behind a
 `yoai_tts_*` C ABI, NAPI bindings, and `/tts` to drive it.
 
 **The device has two speeds and every subsection but the last measured only the
@@ -3269,7 +3269,7 @@ most 0.27 GB a frame in 73.5 ms, under 4 GB/s against a chip measured at 24.4 �
 which is the profile a GPU helps. So ggml's Vulkan backend was cross-compiled
 for OHOS and linked in.
 
-**It builds and it runs.** `harmony/build.py <abi> vulkan` assembles it, the
+**It builds and it runs.** `examples/harmony/build.py <abi> vulkan` assembles it, the
 driver initialises (`<HM_GPU> # Device init`), ggml selects it, and the engine
 reports `[Load] Talker backend: Vulkan0`. Four build obstacles, all in the
 toolchain and none in the model:
@@ -3308,7 +3308,7 @@ there is no partial offload to fall back to either.
 **What stays**: the build path, because it is one command and the next driver or
 the next ggml may behave differently, and because the finding is about a policy
 rather than about arithmetic. **What does not**: the SDK ships CPU-only, which
-is what `harmony/build.py <abi> qtts` assembles.
+is what `examples/harmony/build.py <abi> qtts` assembles.
 
 **What was not reached**: whether the GPU would be faster at all. The codec is a
 convolutional decoder with 21 conv contexts and it is 45% of the bill; if
@@ -3388,7 +3388,7 @@ added `GGML_SOURCE_DIR` on 2026-09-21, which points its build at any ggml tree,
 llama.cpp's included. The measurement above says that direction works — 134 of
 134, nothing missing — which makes it the fix rather than a tidy-up.
 
-**Done on the desktop lane, and it links.** `desktop/build.py qtts` now
+**Done on the desktop lane, and it links.** `examples/desktop/build.py qtts` now
 compiles llama.cpp's ggml inside the qwentts build, with `GGML_VULKAN=ON`, and
 the resulting archive set carries `ggml_dsv4_hc_pre_gated` for libllama and
 `ggml_backend_vk_reg` for the GPU path, satisfying both libraries from one
@@ -3403,9 +3403,9 @@ is noise — five unfused ops in the stage that is 45% of the bill and was
 already the floor.
 
 **The phone lane had the same breakage, and now has the same fix.**
-`harmony/build.py qtts` passes `GGML_SOURCE_DIR` too, cross-compiles clean,
+`examples/harmony/build.py qtts` passes `GGML_SOURCE_DIR` too, cross-compiles clean,
 and the HAP builds and signs — so libllama.a and libqwen-core.a link against
-one ggml on the device as well. `android/build.py` is changed to match. Two
+one ggml on the device as well. `examples/android/build.py` is changed to match. Two
 things came with it: llama.cpp's affinity patch is now *applied by the script*
 rather than by hand, which is how it came to be recorded at all, and `qtts`
 needs a llama.cpp checkout whether or not `llama` is being built.
@@ -3542,6 +3542,45 @@ The first two shapes are errors in arithmetic and in reading. This one is an
 error in the experiment: **an option left out of the question cannot be chosen
 by the answer.**
 
+## Qwen3-TTS, file by file
+
+What runs every 80 ms frame, and where its weights are. **Read from the GGUF
+headers** of qwentts.cpp's Base files (`qwen-talker-*-base-Q8_0.gguf`,
+`qwen-tokenizer-12hz-Q8_0.gguf`), parameters counted tensor by tensor; the
+per-frame loop is from qwentts.cpp's docs/ARCHITECTURE.md and
+prompt-builder.h.
+
+| network | file | 1.7B | 0.6B | per frame |
+| --- | --- | --- | --- | --- |
+| talker | talker | 1.74B: 28 layers, 2048 wide, 16/8 heads, FFN 6144 | 0.76B: 28 layers, 1024 wide | one pass, emits code 0 |
+| code predictor | talker | 175M: 5 layers, 1024 wide | 142M: the same 5 layers | 15 passes, codes 1–15 |
+| codec decoder | tokenizer | 114M, shared by every talker | | 16 codes → 1920 samples at 24 kHz |
+| speaker encoder | talker | 12.0M → 2048 values | 8.9M → 1024 values | none: once per recording |
+| codec encoder | tokenizer | 48M, shared | | none: mode B's reference only |
+
+- **The input row is two embeddings summed**: the text stream's
+  (`text_projection(text_embedding(token))`) and the codec stream's, which
+  after the prompt is the sum of the last frame's 16 code embeddings. With the
+  streaming text layout the text stream gets one token a frame.
+- **The code predictor is the same network on both sizes.** Its 33.5M
+  difference is all at the edges: 15 code-embedding tables as wide as the
+  talker, 62.9M against 31.5M, and `mtp_proj`, a 2048→1024 linear on the 1.7B
+  that is an identity on the 0.6B. That is why the 0.6B bought only about a
+  tenth of a frame (the 0.6B section above): the part sized by the 16
+  codebooks did not shrink.
+- **Per frame the code predictor runs 15 passes**: its cache is reset, the
+  talker's hidden state and code 0 are prefilled, and 14 single-token steps
+  follow. Fifteen small serial passes are the likely reason the iGPU does not
+  speed it up (20.0 → 20.5 ms, the Vulkan table).
+- **The codec decoder**: 16 codebooks of 2048, a pre-conv, an 8-layer
+  transformer with a 72-frame sliding window (30.4M), two ConvNeXt upsampling
+  blocks for 4× (21.0M), and a DAC decoder at strides 8, 5, 4, 3 (52.4M) —
+  4 × 480 = 1920 samples a frame.
+- **The speaker encoder** is an ECAPA-TDNN over a 128-bin mel spectrogram
+  (0–12 kHz), pooled over time into one vector as wide as the talker: the
+  voice file, one row of the prompt.
+- **VoiceDesign has no 0.6B.** The 0.6B ships as Base and CustomVoice only.
+
 ## Base with one vector: what steers the voice, and what does not
 
 **The conversation voice is now 1.7B Base, anchored by a speaker vector** —
@@ -3624,7 +3663,205 @@ could, in order of how likely it is to work — **none of it measured**:
 The experiment that answers the first two: one speaker reads the same passage
 slow, normal, fast and cheerful; each take becomes a `.spk` and a mode B
 reference; the same text is rendered from all eight and measured for
-characters a second, F0 and RTF.
+characters a second, F0 and RTF. **Since run**, with a synthesized speaker in
+place of a recorded one: the next section.
+
+### The first two, measured: a style rides on the voice file
+
+**Measured on the PC, on the CPU**, with `tests/tts_style.cpp`
+(`yoai-tts-style`): 1.7B talkers at Q4_K_M, the 12 Hz tokenizer at Q8_0, and
+the desktop's reading settings (talker temperature 1.3, the streaming text
+layout, a 2-frame eos hold).
+
+The speaker who reads in several styles is **synthesized, not recorded**:
+CustomVoice's serena reads one passage under six instructions at seed 101 —
+the desktop's four (`STYLES` in examples/desktop/src/main/reader.ts) plus 语速很快 and
+语速很慢. Base then reads a different passage at seeds 23, 101 and 202, three
+ways: each reference as a voice file (mode A); each reference and its
+transcript in the prompt (mode B); and speaker/01_female's voice file plus
+`emb(style) − emb(calm)`, a style on a voice that never read in it.
+
+**Heard: the six references are one voice reading six ways.** The style
+changes and the timbre does not, which is the condition the rest needs.
+
+Change from calm, as a mean over the three seeds; the reference column is one
+take.
+
+| pace, characters a second | reference | mode A | mode B | 01_female + direction |
+| --- | --- | --- | --- | --- |
+| caring | −0.93 | −0.39 | −0.80 | −0.46 |
+| cheerful | +0.14 | −0.49 | −0.27 | −0.17 |
+| sorry | −0.52 | −0.28 | −0.38 | −0.02 |
+| fast | +1.58 | +0.21 | +0.84 | +0.40 |
+| slow | −3.20 | −0.65 | −1.83 | −0.58 |
+
+| mean pitch, semitones | reference | mode A | mode B | 01_female + direction |
+| --- | --- | --- | --- | --- |
+| caring | +0.83 | +0.64 | −0.14 | −0.04 |
+| cheerful | +0.45 | +0.21 | +0.22 | +0.97 |
+| sorry | +1.32 | +1.37 | +0.28 | −0.11 |
+| fast | +1.98 | +2.25 | +1.23 | +2.53 |
+| slow | −2.60 | −0.99 | −3.19 | −2.14 |
+
+| level, dB | reference | mode A | mode B | 01_female + direction |
+| --- | --- | --- | --- | --- |
+| caring | +1.86 | +1.84 | +1.75 | −0.91 |
+| cheerful | +2.86 | +1.65 | +1.28 | +0.87 |
+| sorry | −1.46 | −1.12 | −1.16 | −3.09 |
+| fast | +2.62 | +0.90 | +1.46 | +1.11 |
+| slow | +0.63 | +1.83 | +3.16 | −0.35 |
+
+- **Mode A carries pitch and level, and not pace.** Pitch followed the
+  reference on caring and sorry, +0.64 against +0.83 and +1.37 against +1.32;
+  level followed in direction on all five. Pace moved by an eighth to a half
+  of the reference's — slow −0.65 against −3.20 — and cheerful's the wrong
+  way. The prediction above — a statistic over time discards tempo — holds.
+- **And mode A is heard.** The mode A takes at seed 101 differ audibly in
+  style, by one listener's ear, which is more than these three numbers show.
+- **Mode B carries pace**, caring −0.80 against −0.93, fast +0.84 against
+  +1.58 and slow −1.83 against −3.20, and pitch less reliably.
+- **Mode A costs nothing, whatever the reference's length.** RTF 1.07–1.09 on
+  every style, from a 9.6 s reference to a 73.5 s one, because the recording is
+  reduced to one row of the prompt. Mode B ran at 2.00–2.30, which includes
+  encoding the reference, 9.6–73.5 s of it, again on every call.
+- **A style is a small part of the vector.** Cosine 0.973–0.996 between
+  serena's styles, 0.95–0.96 between any of them and 01_female.
+- **语速很慢 overshot rather than broke.** The reference ran 73.5 s, 0.70
+  characters a second against calm's 3.90, and is heard as the same voice
+  reading extremely slowly. Its length alone was first taken for a broken take;
+  listening said otherwise. Mode B followed it unevenly: one seed ran to 164 s
+  and the other two read the passage in 9.6 and 10.2 s, so mode B's slow row
+  is a mean of very different takes, 3.42 characters a second apart.
+
+**What this does not settle.** Outside mode B's slow row, the seeds alone
+moved pace by 0.04–0.50 characters a second and pitch by 0.2–2.5 semitones, so
+several cells above are inside that; three seeds and one reference take per
+style do not separate them. The references are a model's, not a person's.
+
+**Heard, 01_female + direction at seed 101: the speaker holds, and only the
+pace styles come through.** All six takes are one voice. Fast and slow are
+heard; caring, cheerful and sorry differ slightly and not clearly. By the
+numbers, what fast and slow moved most was pitch, +2.53 and −2.14 semitones,
+against +0.40 and −0.58 characters a second. So a direction taken from one speaker can be moved onto another
+without changing who is speaking, but at full strength (the whole difference,
+once) the emotional styles are too weak to use.
+
+**Then tried: averaged directions and a stronger step, and the step is
+capped by the speaker.** Directions averaged over serena, vivian and uncle_fu
+at seeds 101 and 23 made caring and sorry change the speaker at α = 1 — the
+mean was dominated by two breathy caring takes that had moved further than
+two different speakers' calm voice files are apart (5.75 and 4.74 against a
+median of 4.72 over the nine built-in speakers). Dropping every pair that
+moved more than 0.7 of that median, and projecting out the eight dimensions
+the nine speakers span (which removed only 12–32% of each direction), gave
+directions 1.1–1.4 long. Heard on 01_female at seed 101: **α = 1 keeps the
+speaker, α = 2 does not.** At α = 2 a voice file has moved 2.2–2.8, about the
+distance between the two closest built-in speakers (2.85).
+
+**Where a direction comes from matters as well as how far it goes.** A
+stricter cut, 0.5 of the median, left mostly serena's own pairs and directions
+1.0–1.7 long. At α = 2 those moved 01_female's file 2.0–3.3, further than the
+mix above, and changed the voice only slightly — borderline. One speaker's
+pairs, a woman like 01_female, carried less identity than a mix that included
+a man's. serena is also the built-in speaker nearest 01_female's file (5.00;
+vivian 5.32, uncle_fu the farthest at 6.96). That is two variants and one
+listener: a lead, not a rule. If it holds, a user's directions should come
+from the built-in speakers nearest their own voice file, which the app can
+pick when the file is made.
+
+So a direction in the speaker encoder's space carries style and identity
+together. How much identity comes with a given length depends on the
+direction: 1.70 changed the speaker for sorry and 1.57 did not for cheerful,
+both at α = 1 on the mixed directions.
+Within that, the styles are measurable but small: at α = 1, sorry −0.7
+semitones and fast +0.65 characters a second, against seed noise of up to 0.7
+characters a second and 1.6 semitones. **So far mode A alone has not made a
+style both clear and the user's**; the closest is serena's directions at
+α = 2, borderline on the speaker.
+
+### Speaking on the same three axes
+
+**Decided: the reply's delivery is described on the axes the user is read
+on** — valence, arousal, dominance, "Three axes, not a list of emotions" above
+— with TextAxes.ets's five-point scale, −1, −0.5, 0, 0.5, 1. The chat model
+states the reply's three values at its start, ahead of the text, and the
+reader is to take them off before anything is spoken; read whole
+(`WHOLE_REPLY`), they are in before the first frame. Not built yet.
+
+**Planned, not built: on Base, the voice file becomes
+`own + V·d_V + A·d_A + D·d_D`.** That is mode A, so it adds nothing per frame.
+The three directions are to be fitted by least squares over the voice files
+of CustomVoice reading instructions labeled with their intended values:
+
+| instruction | V | A | D |
+| --- | --- | --- | --- |
+| 语气平静 | 0 | −0.5 | 0 |
+| 语气关切，温柔 | 0.5 | −0.5 | 0 |
+| 语气轻快，开心 | 0.5 | 0.5 | 0 |
+| 语气兴奋 | 1 | 1 | 0.5 |
+| 语气抱歉，诚恳 | −0.5 | −0.5 | −0.5 |
+| 语气郑重，坚定 | 0 | 0 | 1 |
+| 语气疲惫，低落 | −0.5 | −1 | −0.5 |
+| 语气急切 | −0.5 | 1 | 0 |
+
+Tired and urgent are there to pull the directions apart, not to be spoken
+with. A CustomVoice talker has no voice file to move and takes the nearest
+instruction instead.
+
+**A named style is a point on the axes plus what the axes leave out.** Three
+things a reply's delivery depends on are not emotion and do not live on them:
+
+- **Intent.** An apology is a social act before it is a feeling: it sits near
+  (−0.5, −0.5, −0.5), and so does plain discouragement.
+- **Delivery.** Pace, emphasis and pauses. A phone number is read slowly for
+  no emotional reason, and mode A does not carry pace anyway, so it needs a
+  control of its own.
+- **Paralinguistic events.** A laugh, a sigh, a whisper: discrete, not a
+  position on an axis. Qwen3-TTS has no control for them, so none is offered.
+
+So a style is a name, a point, and delivery settings. Proposed:
+
+| style | V | A | D | delivery | for |
+| --- | --- | --- | --- | --- | --- |
+| 平静 calm | 0 | −0.5 | 0 | | the default: facts, the weather |
+| 关切 caring | 0.5 | −0.5 | 0 | | the user unwell or low; health |
+| 轻快 cheerful | 0.5 | 0.5 | 0 | | greetings, good news, encouragement |
+| 歉意 sorry | −0.5 | −0.5 | −0.5 | | an error, something it cannot do |
+| 郑重 serious | 0 | 0 | 1 | slower | medication, safety |
+
+The chat model may give the name or the numbers; a name is the easier thing
+for it to choose consistently.
+
+**emotion2vec+ adds no label the axes lack.** Its nine labels are points on
+these axes — happy V+ A+, sad V− A−, angry V− A+ D+, fearful V− A+ D−, neutral
+at the origin, and other and unknown are not emotions — and none of them is
+low-arousal, the gap SenseVoice's labels have.
+
+**Checking is offline only.** Arousal is measured on the synthesized speech by
+prosody/, the same code that reads the user, against the arousal asked for.
+Valence and dominance have no acoustic measure in this repo; audeering's
+`wav2vec2-large-robust-12-ft-emotion-msp-dim` reads all three from audio, and
+its license is CC BY-NC-SA 4.0. **It is for research only and is never
+shipped**: nothing in the app may depend on it.
+
+**emotion2vec+ large is the second offline meter, on the same terms**: does a
+reply asked for cheerful come back labeled happy more often than one asked for
+calm. Its authors' chart of four-class accuracy (angry, happy, neutral, sad)
+across about thirty corpora, read off the plot to about ±0.05, splits in two:
+
+- **Acted corpora, 0.85–1.0**: tess, savee, pavoque, emodb, emovdb, mead.
+- **Natural speech, about 0.57–0.74**: meld 0.57, m3ed 0.58, mer2023 0.64,
+  iemocap 0.67, msppodcast 0.74. The two Chinese ones in this band, m3ed and
+  mer2023, are drama and film dialogue.
+
+That split is why it suits the synthesized side and not the user's. Speech read
+to a style instruction is closer to acting than to a person talking, so it
+should land in the band where the model is right — expected, not measured; the
+user's speech lands in the band where it is wrong about two times in five. The chart's baselines are three
+single-corpus wav2vec2 models, each the best on its own training corpus — the
+IEMOCAP one beats emotion2vec+ on iemocap — and three of the four score about
+1.0 on enterface, so the corpora are not all held out. The chart does not say which
+ones emotion2vec+ trained on.
 
 ### The text is the one channel that is free
 
@@ -3726,7 +3963,7 @@ downloaded, and on a **0.5B** checkpoint — smaller than the 0.6B that failed
 this probe at Q4 — that is the row most likely to fail it.
 
 Output is 24 kHz mono float, which is already what
-[audio.ts](../desktop/src/renderer/src/audio.ts) asks its `AudioContext` for, so
+[audio.ts](../examples/desktop/src/renderer/src/audio.ts) asks its `AudioContext` for, so
 nothing about the rate would have to change.
 
 `prompt_speech` extracts once and is reused: 279 KB, 3–4 s, and no ONNX pass per
@@ -3772,7 +4009,7 @@ land near 2, not near 1. Fixing the Vulkan crash would not change that
 conclusion, so it was not attempted.
 
 **And the feature it was looked at for is gated on the same number.**
-[audio.ts](../desktop/src/renderer/src/audio.ts)'s `REALTIME_MARGIN` is a
+[audio.ts](../examples/desktop/src/renderer/src/audio.ts)'s `REALTIME_MARGIN` is a
 threshold, not a preference: a producer slower than playback is never streamed
 at all, it is gathered and played in one piece. A 10-second reply at RTF 4.16
 needs 31.6 s of pre-buffer. Streaming text *in* saves a fraction of a second at
@@ -3797,7 +4034,9 @@ than from whatever was announced last.
 
 **Nothing in this section was run here.** Every size, license and claim is what
 the models' authors or their public model cards report, surveyed on
-2026-09-30. "Unverified" marks what those sources did not settle. By this
+2026-09-30, with the last seven rows of the table and Breeze TTS 2's shape and
+languages added on 2026-10-08. "Unverified" marks what those sources did not
+settle. By this
 file's own labels, none of it is even *measured elsewhere*: no method was
 reproduced.
 
@@ -3826,7 +4065,45 @@ reproduced.
 | Spark-TTS | 0.5B | discrete AR | strong | CC BY-NC-SA, non-commercial | Apache 2.0 when first released |
 | OuteTTS 1.0 | 0.6B / 1B | discrete AR | unknown | CC BY-NC, non-commercial | runs in llama.cpp as it is |
 | Fish Audio S2-Pro | about 4.4B | discrete AR, two stages | strong | research license; commercial use by agreement | emotion asked for in words |
-| Breeze TTS 2 | 3B | unverified | one of 50 languages | non-commercial | top open-weights model on one public leaderboard, August 2026; cloning, a voice from a description, delivery on request |
+| Breeze TTS 2 | 3B | discrete AR, by the stages its card lists: backbone, depth decoder, codec | English and Chinese, by its model card; an earlier source said 50 languages | non-commercial | top open-weights model on one public leaderboard, August 2026; cloning, a voice from a description, delivery on request; "the audio tokenizer is based on Qwen3-TTS" |
+| MOSS-TTS-Realtime | 1.7B, plus a 1.6B codec counting its encoder | discrete AR: a Qwen3-1.7B backbone (28 layers, 2048 wide), then a 4-layer local transformer emitting 17 channels a step — a text token and 16 codebooks | Chinese and English | Apache 2.0 | a community GGUF runs the backbone in stock llama.cpp and the rest in codec.cpp; RTF 0.51 on an L20 in PyTorch, its authors' figure; can be conditioned on earlier turns, the user's voice included |
+| Magpie TTS Multilingual | 0.36B | discrete AR: encoder–decoder, two frames a step, a local transformer for 8 codebooks; 21.5 Hz, 22.05 kHz | one of 12; character error 3.17% on its own evaluation, English 0.37% | NVIDIA Open Model License, commercial use stated | five built-in voices and no cloning; IPA for pronunciation; NVIDIA's own ggml runtime, NeMo-Speech.cpp; a community magpie-tts.cpp whose tokenizer does not take Chinese yet |
+| Higgs Audio v3 | about 4B | discrete AR, Qwen3-4B backbone | one of about 100 | non-commercial | emotion, pauses and effects as tags in the text |
+| Voxtral TTS | 4B | AR, with 16 flow steps inside every frame | unverified | CC BY-NC | Mistral, March 2026; a 12.5 Hz codec |
+| Step-Audio-EditX | 3B | AR, then flow | unverified | Apache 2.0 | edits emotion, style and paralinguistics over several passes |
+| Pocket TTS | 0.1B | continuous AR, one-step head | unverified | MIT | real time on a CPU by its authors' account; registered in llama.cpp's mtmd (below) |
+| VibeVoice Realtime | 0.5B | continuous AR | unverified | MIT | single speaker, no cloning; Microsoft withdrew the 1.5B and 7B's TTS code in September 2025 over misuse |
+
+Left out as older or English-first: Orpheus, Llasa, Dia2, Kyutai TTS, Sesame
+CSM-1B. Over 5B: MisoTTS, 8B, Sesame's architecture scaled up.
+
+### Which runtime suits which shape
+
+**Derived**, from numbers this file measured. The split is by stage, not by
+shape: every model above does two kinds of work, and each runtime is good at
+one of them.
+
+- **The autoregressive stage is bandwidth-bound.** One stream, every step reads
+  every weight: omni's Talker on MNN ran 30 ms a token, about 13 GB/s of 8-bit
+  weights. llama.cpp is built for this — low-bit weights cut the reads, and the
+  KV cache and sampling come with it. ONNX Runtime leaves the cache and the
+  sampling loop to the host.
+- **The rest is compute-bound**: codec, flow or DiT, vocoder, diffusion head,
+  convolutions over a chunk at fixed shapes. Qwen3-TTS's codec went from 34.9
+  to 6.3 ms a frame, CPU to iGPU. ONNX takes these from PyTorch as they are and
+  onto GPU or NPU back ends; ggml needs each network written by hand. Low bits
+  break them: MNN's exporter records INT4 leaving omni's vocoder at a
+  correlation of 0.03 with PyTorch.
+
+| shape | llama.cpp | ONNX Runtime | so |
+| --- | --- | --- | --- |
+| discrete AR | single codebook: a plain GGUF. Several: the depth loop by hand, and dispatch-bound — the code predictor went 20.0 → 20.5 ms on the iGPU | the codec at most | llama.cpp |
+| AR, then flow | the LM as it is; flow and vocoder by hand — cosyvoice.cpp, RTF 4.16 on the CPU, noise on Vulkan | flow and vocoder export as they are | both, with two memory pools and one GPU between them |
+| continuous AR | embeddings in, a hidden state out, the head a second graph: a round trip every frame. Pocket TTS and VoxCPM are ported anyway | the LM step and the unrolled head in one graph; the KV cache still outside | neither fits |
+
+MNN holds both stages in one engine — omni's Talker, DiT and BigVGAN ran on the
+phone at RTF 3.0 — and its Vulkan output was noise. NPUs suit the fixed-shape
+stages and not bandwidth-bound decoding; none has been tried here.
 
 ### Which to look at first
 
@@ -3851,8 +4128,23 @@ a second framework, which is a cost omni was already charged for.
    with it — so the first thing to hear is its Chinese, and the second is
    whether its cost is in the language model at all.
 
-The non-commercial ones — Spark-TTS, OuteTTS, Fish Audio S2-Pro, Breeze TTS 2
-— are fit for a listening comparison and nothing else.
+Of the rows added on 2026-10-08, two bear on this list and neither enters it
+yet:
+
+- **MOSS-TTS-Realtime is the nearest in shape to Qwen3-TTS** — the same
+  backbone size and width, 16 codebooks, a depth loop — and already has a ggml
+  path. Its codec is the open question: 1.6B counting the encoder, against
+  Qwen3-TTS's 162M, and how much of it decodes is not published. Its depth
+  loop also covers 17 channels a frame where Qwen3-TTS's covers 15. Worth
+  measuring before ranking.
+- **Magpie fits on license and runtime and not on voice**: commercial use and
+  NVIDIA's own ggml runtime, but five fixed voices and no cloning. The one
+  community ggml port cannot read Chinese text yet; whether NVIDIA's runtime
+  can is unverified.
+
+The non-commercial ones — Spark-TTS, OuteTTS, Fish Audio S2-Pro, Breeze TTS 2,
+Higgs Audio v3, Voxtral TTS — are fit for a listening comparison and nothing
+else.
 
 ### What this does not settle
 
@@ -3887,8 +4179,8 @@ Parakeet, Granite Speech, Whisper, Conformer.
 ## The port exists; multimodal is not in it
 
 This repo already cross-compiles llama.cpp for HarmonyOS —
-[harmony/build.py](../harmony/build.py) `llama`, assembling
-`harmony/prebuilt/llama-sdk/<abi>/`. It defaults to
+[examples/harmony/build.py](../examples/harmony/build.py) `llama`, assembling
+`examples/harmony/prebuilt/llama-sdk/<abi>/`. It defaults to
 `-march=armv8.6-a+i8mm+bf16+dotprod+fp16`, which is not a guess: a cross build
 with no `-march` lands on baseline `armv8-a`, because CMake's feature probes
 compile **and run** a test binary and cannot run one for the phone. That costs

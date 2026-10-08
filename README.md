@@ -28,9 +28,10 @@ src/                  the core -- a static library plus a C ABI
   utils/                what is too small for a directory of its own:
                         logging, HTTP + TLS, bundles, a memory benchmark
 cli/                  a desktop harness -- run the core without a device
-harmony/              the HarmonyOS app (ArkTS) + its NAPI bridge
-android/              a measurement bench (Compose) + its JNI bridge
-desktop/              the desktop client (Electron) + its Node-API bridge
+examples/             the hosts, each linking the core as it is
+  harmony/              the HarmonyOS app (ArkTS) + its NAPI bridge
+  android/              a measurement bench (Compose) + its JNI bridge
+  desktop/              the desktop client (Electron) + its Node-API bridge
 ```
 
 ### The core is a library, not a server
@@ -95,7 +96,7 @@ on-device engine (chat and embedding on a GGUF), `tts` for speech output, and
 
 Paths that differ per machine -- Visual Studio, vcpkg, the llama.cpp checkout
 -- go in `.env` at the root, which git ignores and every C/C++ build script
-reads (root, `harmony/`, `desktop/`, `android/`, `third/sync.py`) by the
+reads (root, `examples/harmony/`, `examples/desktop/`, `examples/android/`, `third/sync.py`) by the
 rules in the root `build.py`. Copy
 [.env.example](.env.example); it lists every `YOAI_*` setting.
 
@@ -143,7 +144,7 @@ In the app that same key goes in under Settings → add a model → **Google
 Gemini**, which prefills the URL and a model name, so the only thing to paste is
 the key itself — and it lands in the platform's encrypted asset store, not in a
 config file. The built-in vendor list is
-[Provider.ets](harmony/entry/src/main/ets/model/Provider.ets); its `custom`
+[Provider.ets](examples/harmony/entry/src/main/ets/model/Provider.ets); its `custom`
 entry takes any endpoint that is not on it.
 
 ### HarmonyOS
@@ -162,9 +163,9 @@ the app without the on-device engine, name the other two targets:
 
 `hap` drives the same hvigor build DevEco does — same tasks, same signing — and
 drops an installable `entry-default-signed.hap` under
-`harmony/entry/build/default/outputs/default/`. The IDE is for editing and
-debugging, not a build dependency. Open `harmony/` in DevEco Studio when you want
-it; see [harmony/README.md](harmony/README.md) for signing and the SDK
+`examples/harmony/entry/build/default/outputs/default/`. The IDE is for editing and
+debugging, not a build dependency. Open `examples/harmony/` in DevEco Studio when you want
+it; see [examples/harmony/README.md](examples/harmony/README.md) for signing and the SDK
 requirements.
 
 #### On-device models
@@ -186,7 +187,7 @@ The checkout goes beside the repo (`YOAI_LLAMA_SRC` moves it) and is never updat
 for you: this build wants a source you can pin and re-measure against, not one
 that changes under you between two runs.
 
-That assembles `harmony/prebuilt/llama-sdk/<abi>/`, which the app's CMakeLists
+That assembles `examples/harmony/prebuilt/llama-sdk/<abi>/`, which the app's CMakeLists
 finds by itself — **building it is what turns the lane on**, and deleting it
 turns the lane off again with the app still compiling. There is no path to paste
 into `build-profile.json5` and then keep out of commits.
@@ -219,7 +220,7 @@ One thing differs and is worth knowing before reading a number off it. The
 probes compile and run a test binary and cannot run one for the phone; the
 default is the Kirin 9020's, so the first run on a new device is comparable
 rather than optimal. The Device panel prints what the chip actually reports.
-See [android/README.md](android/README.md).
+See [examples/android/README.md](examples/android/README.md).
 
 ### Desktop client (Electron)
 
@@ -238,7 +239,7 @@ same reason it is everywhere else and turns on the same way: `python build.py
 clean llama`, with a llama.cpp checkout beside the repo.
 
 One directory rather than an `electron/` and a `web/`, and
-[desktop/README.md](desktop/README.md) argues it: a browser cannot mmap a GGUF
+[examples/desktop/README.md](examples/desktop/README.md) argues it: a browser cannot mmap a GGUF
 or hold a key out of a page's reach, so a web build would be a different
 product rather than a second front end for this one.
 

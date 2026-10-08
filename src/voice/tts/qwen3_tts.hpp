@@ -261,7 +261,7 @@ public:
     // After the first load that costs about a second from page cache.
     //
     // Carried by an environment variable, because qwen.h has no thread
-    // parameter; harmony/patches/ is what teaches qwentts.cpp to read it, and
+    // parameter; third/patches/ is what teaches qwentts.cpp to read it, and
     // without that patch this is a no-op.
     void set_threads(int n);
 

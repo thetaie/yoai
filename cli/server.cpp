@@ -178,7 +178,7 @@ int main(int argc, char** argv) {
         reader.set_voice(instruct);
     }
 
-    // The desktop's settings, desktop/src/main/reader.ts, where each one says
+    // The desktop's settings, examples/desktop/src/main/reader.ts, where each one says
     // what it was measured against.
     reader.set_seed(seed);
     QttsSampling sampling = reader.sampling();

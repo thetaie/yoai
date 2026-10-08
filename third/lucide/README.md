@@ -21,7 +21,7 @@ that one file at this same version — not vendoring the whole set.
 ## These are the source, not the build input
 
 Nothing reads this directory at build time. The app draws icons from a table of
-path strings in `harmony/entry/src/main/ets/core/Icons.ets`, transcribed from
+path strings in `examples/harmony/entry/src/main/ets/core/Icons.ets`, transcribed from
 these files as each screen needs them. This directory is what that table is
 checked against, and what proves where the shapes came from.
 

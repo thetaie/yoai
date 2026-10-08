@@ -2,7 +2,7 @@
 
     python design/make-arkts-palettes.py
 
-Writes harmony/entry/src/main/ets/core/Palettes.ets. Run it whenever
+Writes examples/harmony/entry/src/main/ets/core/Palettes.ets. Run it whenever
 palettes.json changes; do not hand-edit the generated file.
 
 palettes.json names its colors the way the design system does. The app names
@@ -16,7 +16,7 @@ import pathlib
 from palette_tokens import FIELDS, ORDER, family_of, load
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DST = ROOT / "harmony/entry/src/main/ets/core/Palettes.ets"
+DST = ROOT / "examples/harmony/entry/src/main/ets/core/Palettes.ets"
 
 # design name -> app token name. The nine tokens the design added in round 10
 # already use the app's names and need no entry here.

@@ -2,7 +2,7 @@
 
     python design/make-css-palettes.py
 
-Writes desktop/src/renderer/src/palettes.css. Run it whenever palettes.json
+Writes examples/desktop/src/renderer/src/palettes.css. Run it whenever palettes.json
 changes; do not hand-edit the generated file.
 
 The sibling of make-arkts-palettes.py, against the same source and with the same
@@ -22,7 +22,7 @@ import pathlib
 from palette_tokens import FAMILIES, FIELDS, ORDER, family_of, load
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DST = ROOT / "desktop/src/renderer/src/palettes.css"
+DST = ROOT / "examples/desktop/src/renderer/src/palettes.css"
 
 
 

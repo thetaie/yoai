@@ -29,7 +29,7 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-RES = ROOT / "harmony/entry/src/main/resources"
+RES = ROOT / "examples/harmony/entry/src/main/resources"
 STATUS = ROOT / "design/i18n-status.md"
 
 SOURCE = "en_US"

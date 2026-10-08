@@ -20,7 +20,7 @@ build\yoai-server.exe Qwen3-TTS-12Hz-1.7B-Base-Q4_K_M.gguf qwen-tokenizer-12hz-Q
 ```
 
 `--help` lists the options. The reading settings are the desktop's (see
-`desktop/src/main/reader.ts`). Clients cannot change them.
+`examples/desktop/src/main/reader.ts`). Clients cannot change them.
 
 `tests/tts_server_client.py` is a client for trying it: Python 3.8+, standard
 library only. It sends a passage at a fixed rate, as a language model would,

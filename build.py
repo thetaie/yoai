@@ -3,7 +3,7 @@
 
 Builds the core library, the desktop tools in cli/ and the tests in tests/,
 into build/: configures if needed, then builds. This is not the desktop app
--- that is desktop/build.py.
+-- that is examples/desktop/build.py.
 
   asr        also compile speech recognition in. Needs a llama.cpp checkout
              for ggml; see LLAMA_SRC
@@ -39,10 +39,10 @@ wins -- see .env.example:
 """
 
 # Two things in one file. The bottom half is the root build. The top half is
-# what every build script shares -- desktop/, android/ and harmony/ each have a
+# what every build script shares -- examples/desktop/, examples/android/ and examples/harmony/ each have a
 # build.py of their own -- plus the .env loader third/sync.py reads its
 # settings with. Those load this file BY PATH, under the name yoai_build: a
-# plain `import build` from android/build.py would import android/build.py.
+# plain `import build` from examples/android/build.py would import examples/android/build.py.
 #
 # The rule every helper here follows: a command that fails ends the build with
 # that command's exit code and no message of our own, because the tool has
@@ -723,7 +723,7 @@ def llama_src(what):
 
 
 def ggml_sdk(gen, with_llama):
-    """A desktop ggml SDK, shaped like the one harmony/build.py assembles per
+    """A desktop ggml SDK, shaped like the one examples/harmony/build.py assembles per
     ABI: include/ plus lib/. Recognition links ggml and nothing else, so for
     `asr` alone only the three ggml targets are built. `llama` adds libllama
     and llama.h, built in the same tree on the same ggml."""
@@ -772,7 +772,7 @@ def ggml_sdk(gen, with_llama):
 def qtts_sdk(gen):
     """A qwentts.cpp SDK for this build: include/ plus lib/, like the ggml SDK,
     so the core can speak without the desktop app. Its own copy rather than
-    desktop/sdk/qtts-sdk, which on Windows is built /MT for cmake-js: this
+    examples/desktop/sdk/qtts-sdk, which on Windows is built /MT for cmake-js: this
     build is /MD like the vcpkg libraries it links, and the two do not mix in
     one link.
 
@@ -792,7 +792,7 @@ def qtts_sdk(gen):
     third_verify("qwentts.cpp", "QTTS_SRC", src)
     ggml = llama_src("tts")
 
-    # The backend, per platform, as in desktop/build.py: Metal on macOS, which
+    # The backend, per platform, as in examples/desktop/build.py: Metal on macOS, which
     # ggml turns on by itself for Apple; Vulkan elsewhere when there is one.
     # GGML_VULKAN is passed either way off macOS, and the tree is configured
     # every run, so the backend follows the machine rather than whatever the

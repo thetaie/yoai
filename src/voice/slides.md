@@ -3,7 +3,7 @@ marp: true
 theme: default
 size: 16:9
 paginate: true
-title: "YoAI: Voice"
+title: "Voice streaming"
 ---
 
 <style>
@@ -23,9 +23,9 @@ svg.fig { display: block; width: 100%; height: auto; margin-top: 12px; }
 
 <!-- Render with HTML enabled (marp --html, or the VS Code setting markdown.marp.html set to all); the diagrams are inline SVG. -->
 
-# YoAI: Voice
+# Voice streaming
 
-Recognition and synthesis sit outside the language model, so **voice works with every provider**, local or remote.
+A reply is spoken while it is still being written. Recognition and synthesis sit outside the language model, so **voice works with every provider**, local or remote.
 
 <svg class="fig" viewBox="0 0 1250 330" role="img" aria-label="Microphone to asr to a chat model to the tts Reader to the speaker, with prosody read from the audio">
 <defs><marker id="arrow-chain" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#57606a"/></marker></defs>
@@ -66,9 +66,311 @@ Recognition and synthesis sit outside the language model, so **voice works with 
 
 ---
 
+<style scoped>
+section { font-size: 18px; padding: 36px 56px; }
+h2 { font-size: 32.5px; margin-bottom: 0.2em; }   /* the other slides' size: 1.25em of 26px */
+p { margin: 0.3em 0; }
+.cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; font-size: 15px; line-height: 1.35; }
+.cols h3 { font-size: 19px; margin: 0.4em 0 0.2em; }
+.cols svg { display: block; width: 100%; height: auto; margin: 6px 0 2px; }
+.cols ul { margin: 0.4em 0 0; padding-left: 1.1em; }
+.cols li { margin: 0.3em 0; }
+.cols li span { display: block; font-size: 13px; color: #57606a; }
+.more { font-size: 13px; color: #57606a; }
+.note { font-size: 14px; }
+</style>
+
+## Autoregressive TTS: three shapes
+
+All generate frame by frame in an LM. They differ in what a step emits, and what runs after it.
+
+<div class="cols">
+<div>
+
+### Discrete AR
+
+<svg viewBox="0 0 380 46" role="img" aria-label="Per frame, a language-model step and a small depth model; then the codec">
+<defs><marker id="arrow-dar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#57606a"/></marker></defs>
+<g stroke-width="2">
+<rect x="1" y="6" width="46" height="34" rx="6" fill="#dafbe1" stroke="#1a7f37"/>
+<rect x="50" y="6" width="54" height="34" rx="6" fill="#ddf4ff" stroke="#0969da"/>
+<rect x="113" y="6" width="46" height="34" rx="6" fill="#dafbe1" stroke="#1a7f37"/>
+<rect x="162" y="6" width="54" height="34" rx="6" fill="#ddf4ff" stroke="#0969da"/>
+<rect x="282" y="6" width="96" height="34" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+</g>
+<g text-anchor="middle" font-size="14" fill="#24292f">
+<text x="24" y="28">LM</text>
+<text x="77" y="28">depth</text>
+<text x="136" y="28">LM</text>
+<text x="189" y="28">depth</text>
+<text x="229" y="28">…</text>
+<text x="330" y="28">codec</text>
+</g>
+<line x1="242" y1="23" x2="278" y2="23" stroke="#57606a" stroke-width="2" marker-end="url(#arrow-dar)"/>
+</svg>
+
+A step emits codec tokens; a small depth model fills the other codebooks.
+
+- **Qwen3-TTS** 0.6B / 1.7B · Apache 2.0 <span>Alibaba, 2026-01 · in use here</span>
+- **Breeze TTS 2** 3B · non-commercial <span>BreezeBlue, 2026-08 · Qwen3-TTS's codec</span>
+- **Fish Audio S2-Pro** 4B + 0.4B · research <span>Fish Audio, 2026-03 · slow AR over time, fast over codebooks</span>
+- **Higgs Audio v3** 4B · non-commercial <span>Boson AI, 2026-06 · Qwen3-4B, ~100 languages</span>
+- **MOSS-TTS-Nano** 0.1B · Apache 2.0 <span>OpenMOSS, 2026 · streams on 4 CPU cores; family up to 4B</span>
+- **Magpie TTS** 0.36B · NVIDIA Open Model <span>NVIDIA, 2026-07 · 2 frames a step; no cloning</span>
+
+<p class="more">Earlier: Orpheus, Llasa, Spark-TTS, Dia2, Kyutai TTS, OuteTTS, Sesame CSM. Closed: VALL-E (the first), MiMo-V2-TTS.</p>
+
+</div>
+<div>
+
+### AR, then flow or diffusion
+
+<svg viewBox="0 0 380 46" role="img" aria-label="Several language-model steps, then a flow network of N steps over the chunk, then a vocoder">
+<defs><marker id="arrow-flow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#57606a"/></marker></defs>
+<g stroke-width="2">
+<rect x="1" y="6" width="35" height="34" rx="6" fill="#dafbe1" stroke="#1a7f37"/>
+<rect x="40" y="6" width="35" height="34" rx="6" fill="#dafbe1" stroke="#1a7f37"/>
+<rect x="79" y="6" width="35" height="34" rx="6" fill="#dafbe1" stroke="#1a7f37"/>
+<rect x="118" y="6" width="35" height="34" rx="6" fill="#dafbe1" stroke="#1a7f37"/>
+<rect x="186" y="6" width="104" height="34" rx="6" fill="#fff1e5" stroke="#bc4c00"/>
+<rect x="308" y="6" width="70" height="34" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+</g>
+<g text-anchor="middle" font-size="14" fill="#24292f">
+<text x="18.5" y="28">LM</text>
+<text x="57.5" y="28">LM</text>
+<text x="96.5" y="28">LM</text>
+<text x="135.5" y="28">LM</text>
+<text x="238" y="28">flow ×N</text>
+<text x="343" y="28">vocoder</text>
+</g>
+<g stroke="#57606a" stroke-width="2" marker-end="url(#arrow-flow)">
+<line x1="157" y1="23" x2="182" y2="23"/>
+<line x1="292" y1="23" x2="304" y2="23"/>
+</g>
+</svg>
+
+The LM emits semantic tokens; a non-AR network turns each chunk into sound in N steps.
+
+- **CosyVoice 2 / CosyVoice3** 0.5B · Apache 2.0 <span>Alibaba, 2024-12 / 2025-12 · measured here</span>
+- **IndexTTS-2.5** 0.8B · Bilibili license <span>bilibili, 2026-08 · inline pinyin, duration, emotion vector</span>
+- **GLM-TTS** · license unverified <span>Zhipu, 2025-12 · phonemes in the text</span>
+- **Step-Audio-EditX** 3B · Apache 2.0 <span>StepFun, 2025-11 · edits emotion and style</span>
+- **Chatterbox** 0.5B · MIT <span>Resemble AI, 2025 · Turbo: one-step flow</span>
+- **Voxtral TTS** 4B · CC BY-NC <span>Mistral, 2026-03 · 16 flow steps inside every frame</span>
+
+<p class="more">Closed: Seed-TTS, MiniMax-Speech. Also Kimi-Audio's speech.</p>
+
+</div>
+<div>
+
+### Continuous AR
+
+<svg viewBox="0 0 380 46" role="img" aria-label="Per frame, a language-model step and a diffusion head of N steps; then a decoder">
+<defs><marker id="arrow-cont" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#57606a"/></marker></defs>
+<g stroke-width="2">
+<rect x="1" y="6" width="40" height="34" rx="6" fill="#dafbe1" stroke="#1a7f37"/>
+<rect x="44" y="6" width="64" height="34" rx="6" fill="#fff1e5" stroke="#bc4c00"/>
+<rect x="117" y="6" width="40" height="34" rx="6" fill="#dafbe1" stroke="#1a7f37"/>
+<rect x="160" y="6" width="64" height="34" rx="6" fill="#fff1e5" stroke="#bc4c00"/>
+<rect x="282" y="6" width="96" height="34" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+</g>
+<g text-anchor="middle" font-size="14" fill="#24292f">
+<text x="21" y="28">LM</text>
+<text x="76" y="28">diff ×N</text>
+<text x="137" y="28">LM</text>
+<text x="192" y="28">diff ×N</text>
+<text x="237" y="28">…</text>
+<text x="330" y="28">decoder</text>
+</g>
+<line x1="250" y1="23" x2="278" y2="23" stroke="#57606a" stroke-width="2" marker-end="url(#arrow-cont)"/>
+</svg>
+
+No tokenizer; every step runs its own diffusion loop, so size does not predict cost.
+
+- **VoxCPM2** 2B · Apache 2.0 <span>OpenBMB, 2026-04 · 30 languages, 48 kHz; ggml port</span>
+- **VibeVoice** 1.5B / 7B · MIT <span>Microsoft, 2025-08 · 90 minutes, 4 speakers; TTS pulled</span>
+- **Pocket TTS** 0.1B · MIT <span>Kyutai, 2026-01 · one-step head; in llama.cpp</span>
+
+</div>
+</div>
+
+<p class="note">As of September 2026, from model cards; only Qwen3-TTS and CosyVoice3 were run here. Not AR, so left out: F5-TTS, MaskGCT, MegaTTS 3, Kokoro.
+<br>Architecture undisclosed: ElevenLabs v3, Gemini 3.8 Flash TTS, Cartesia Sonic 3.6.</p>
+
+---
+
+<style scoped>
+section { font-size: 18px; padding: 36px 56px; }
+h2 { font-size: 32.5px; margin-bottom: 0.2em; }   /* the other slides' size: 1.25em of 26px */
+p { margin: 0.3em 0; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; font-size: 15px; line-height: 1.35; margin: 10px 0 14px; }
+.cols > div { border-left: 4px solid; padding: 2px 0 2px 14px; }
+.cols > div.ar { border-color: #1a7f37; }
+.cols > div.nar { border-color: #bc4c00; }
+.cols h3 { font-size: 19px; margin: 0 0 0.25em; }
+.cols ul { margin: 0; padding-left: 1.1em; }
+.cols li { margin: 0.2em 0; }
+table { font-size: 14px; line-height: 1.35; }
+th, td { padding: 3px 9px !important; }
+.note { font-size: 14px; }
+</style>
+
+## Runtimes: split by stage, not by shape
+
+Each model does two kinds of work; each runtime is good at one.
+
+<div class="cols">
+<div class="ar">
+
+### AR stage · llama.cpp
+
+- Every step reads every weight: **bandwidth-bound**. Omni's Talker: 30ms a token, about 13 GB/s.
+- Low bits cut the reads; KV cache and sampling are built in.
+- ONNX leaves the KV cache and the loop to the host.
+
+</div>
+<div class="nar">
+
+### Non-AR stage · ONNX
+
+- Codec, flow, vocoder, diffusion head: convolutions over a chunk, **compute-bound**. Qwen3-TTS's codec, CPU → iGPU: 34.9 → 6.3ms a frame.
+- Exported from PyTorch as is, onto GPU or NPU. ggml needs each written by hand.
+- Low bits break it: INT4 left omni's vocoder at 0.03 correlation with PyTorch.
+
+</div>
+</div>
+
+| shape | llama.cpp | ONNX Runtime | verdict |
+| --- | --- | --- | --- |
+| **Discrete AR** | Single-codebook: plain GGUF (Orpheus, Llasa, OuteTTS).<br>Multi-codebook: the depth loop by hand, dispatch-bound (20.0 → 20.5ms on the iGPU) | codec only | **llama.cpp** |
+| **AR, then flow** | LM as is; flow and vocoder by hand.<br>cosyvoice.cpp: RTF 4.16 on CPU, noise on Vulkan | flow and vocoder export as is | **both**:<br>two memory pools, one GPU |
+| **Continuous AR** | Embeddings in, hidden state out, the head a second graph; round trips every frame.<br>Ported: Pocket TTS, VoxCPM | LM step and unrolled head in one graph;<br>KV cache still outside | **neither fits** |
+
+<p class="note">MNN runs both stages in one engine: omni ran on the phone at RTF 3.0, but its Vulkan output was noise.
+<br>NPUs suit the fixed-shape stages, not bandwidth-bound decoding; untried here.</p>
+
+---
+
+<style scoped>
+section { font-size: 18px; padding: 36px 56px; }
+h2 { font-size: 32.5px; margin-bottom: 0.2em; }   /* the other slides' size: 1.25em of 26px */
+p { margin: 0.3em 0; }
+svg.fig { margin-top: 4px; }
+.cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 32px; font-size: 15px; line-height: 1.35; margin-top: 8px; }
+.cols p { margin: 0; }
+.variants { font-size: 15px; line-height: 1.35; margin-top: 12px; padding-top: 8px; border-top: 1px solid #d0d7de; }
+</style>
+
+## Qwen3-TTS: talker, code predictor, and codec, a frame at a time
+
+Every 80ms frame, the talker emits one code, the code predictor 15 more, and the codec turns the 16 into 1920 samples.
+
+<svg class="fig" viewBox="0 0 1250 350" role="img" aria-label="A voice file is made once from a recording: a 128-bin mel spectrogram, then the speaker encoder pools it over time into one vector. Text tokens and the voice file feed the input row, which is the sum of a text and a codec embedding. The talker emits code 0 and its hidden state; the code predictor emits codes 1 to 15; the codec decoder turns the 16 codes into 1920 samples of 24 kHz audio. The 16 code embeddings plus the next text token become the next input row.">
+<defs>
+<marker id="arrow-q3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#57606a"/></marker>
+<marker id="arrow-q3-loop" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#bc4c00"/></marker>
+</defs>
+<g fill="none" stroke="#57606a" stroke-width="1.5" stroke-dasharray="6 4">
+<rect x="448" y="58" width="494" height="170" rx="14"/>
+<rect x="1018" y="58" width="224" height="170" rx="14"/>
+</g>
+<g font-size="13" font-family="monospace" fill="#57606a">
+<text x="462" y="80">qwen-talker-*.gguf</text>
+<text x="1130" y="80" text-anchor="middle">qwen-tokenizer-12hz-*.gguf</text>
+</g>
+<g stroke-width="2">
+<rect x="20" y="40" width="180" height="60" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+<rect x="20" y="112" width="180" height="86" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+<rect x="20" y="236" width="215" height="88" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+<rect x="255" y="110" width="150" height="90" rx="10" fill="#ddf4ff" stroke="#0969da"/>
+<rect x="460" y="95" width="200" height="120" rx="10" fill="#dafbe1" stroke="#1a7f37"/>
+<rect x="730" y="95" width="200" height="120" rx="10" fill="#ddf4ff" stroke="#0969da"/>
+<rect x="1030" y="95" width="200" height="120" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+</g>
+<g stroke-width="1">
+<rect x="965" y="80" width="28" height="8" fill="#dafbe1" stroke="#1a7f37"/>
+<rect x="965" y="90" width="28" height="8" fill="#ddf4ff" stroke="#0969da"/>
+<rect x="965" y="100" width="28" height="8" fill="#ddf4ff" stroke="#0969da"/>
+<rect x="965" y="110" width="28" height="8" fill="#ddf4ff" stroke="#0969da"/>
+<rect x="965" y="120" width="28" height="8" fill="#ddf4ff" stroke="#0969da"/>
+<rect x="965" y="130" width="28" height="8" fill="#ddf4ff" stroke="#0969da"/>
+<rect x="965" y="140" width="28" height="8" fill="#ddf4ff" stroke="#0969da"/>
+<rect x="965" y="150" width="28" height="8" fill="#ddf4ff" stroke="#0969da"/>
+<rect x="965" y="160" width="28" height="8" fill="#ddf4ff" stroke="#0969da"/>
+<rect x="965" y="170" width="28" height="8" fill="#ddf4ff" stroke="#0969da"/>
+<rect x="965" y="180" width="28" height="8" fill="#ddf4ff" stroke="#0969da"/>
+<rect x="965" y="190" width="28" height="8" fill="#ddf4ff" stroke="#0969da"/>
+<rect x="965" y="200" width="28" height="8" fill="#ddf4ff" stroke="#0969da"/>
+<rect x="965" y="210" width="28" height="8" fill="#ddf4ff" stroke="#0969da"/>
+<rect x="965" y="220" width="28" height="8" fill="#ddf4ff" stroke="#0969da"/>
+<rect x="965" y="230" width="28" height="8" fill="#ddf4ff" stroke="#0969da"/>
+</g>
+<g text-anchor="middle" fill="#24292f">
+<text x="110" y="66" font-size="20" font-weight="700">text</text>
+<text x="110" y="88" font-size="14" fill="#57606a">BPE tokens, one a frame</text>
+<text x="110" y="136" font-size="19" font-weight="700">voice file (.spk)</text>
+<text x="110" y="156" font-size="13" fill="#57606a">1.7B · 2048 wide</text>
+<text x="110" y="173" font-size="13" fill="#57606a">0.6B · 1024 wide</text>
+<text x="110" y="190" font-size="13" fill="#57606a">one row in the prompt</text>
+<text x="127" y="258" font-size="17" font-weight="700">speaker encoder</text>
+<text x="127" y="277" font-size="13" fill="#57606a">a recording → 128-bin mel</text>
+<text x="127" y="294" font-size="13" fill="#57606a">→ ECAPA-TDNN, pooled over time</text>
+<text x="127" y="312" font-size="13" fill="#57606a">1.7B · 12M, 0.6B · 8.9M</text>
+<text x="330" y="145" font-size="19" font-weight="700">input row</text>
+<text x="330" y="168" font-size="14" fill="#57606a">text + codec</text>
+<text x="330" y="186" font-size="14" fill="#57606a">embeddings, summed</text>
+<text x="560" y="137" font-size="22" font-weight="700">Talker</text>
+<text x="560" y="163" font-size="15" fill="#57606a">1.7B · 28 layers, 2048 wide</text>
+<text x="560" y="187" font-size="15" fill="#57606a">0.6B · 28 layers, 1024 wide</text>
+<text x="830" y="132" font-size="20" font-weight="700">Code predictor</text>
+<text x="830" y="157" font-size="15" fill="#57606a">5 layers, 1024 wide</text>
+<text x="830" y="178" font-size="15" fill="#57606a">1.7B · 175M</text>
+<text x="830" y="199" font-size="15" fill="#57606a">0.6B · 142M</text>
+<text x="979" y="70" font-size="14" fill="#57606a">16 codes</text>
+<text x="1130" y="145" font-size="20" font-weight="700">Codec decoder</text>
+<text x="1130" y="172" font-size="15" fill="#57606a">114M, causal</text>
+<text x="1130" y="286" font-size="17" font-weight="700">24 kHz PCM</text>
+<text x="695" y="146" font-size="14" fill="#57606a">hidden</text>
+<g font-size="13" fill="#57606a" text-anchor="start">
+<text x="122" y="226">once, about 4.5s</text>
+<text x="20" y="344">A reference clip can also go in the prompt as codes, from a 48M encoder in the tokenizer file</text></g>
+<text x="655" y="291" font-size="15" fill="#bc4c00">next row: the 16 code embeddings + the next text token</text>
+</g>
+<path d="M202,70 H228 V155" stroke="#57606a" stroke-width="2" fill="none"/>
+<g stroke="#57606a" stroke-width="2" fill="none" marker-end="url(#arrow-q3)">
+<line x1="110" y1="234" x2="110" y2="202"/>
+<line x1="202" y1="155" x2="251" y2="155"/>
+<line x1="407" y1="155" x2="456" y2="155"/>
+<line x1="662" y1="155" x2="726" y2="155"/>
+<line x1="932" y1="155" x2="961" y2="155"/>
+<line x1="995" y1="155" x2="1026" y2="155"/>
+<line x1="1130" y1="217" x2="1130" y2="262"/>
+</g>
+<path d="M979,240 V300 H330 V204" stroke="#bc4c00" stroke-width="2" stroke-dasharray="6 4" fill="none" marker-end="url(#arrow-q3-loop)"/>
+<path d="M860,95 C860,60 800,60 800,91" stroke="#bc4c00" stroke-width="2" stroke-dasharray="6 4" fill="none" marker-end="url(#arrow-q3-loop)"/>
+<text x="790" y="78" font-size="14" fill="#bc4c00" text-anchor="end">×15 a frame</text>
+</svg>
+
+<div class="cols">
+
+**Talker**: a Qwen3 decoder with M-RoPE. Text can also go all in the prompt.
+
+**Code predictor**: its cache resets every frame; serial, so dispatch-bound.
+
+**Codec**: 16 codebooks of 2048; a transformer, 4× upsampling, a DAC decoder.
+
+</div>
+
+<p class="variants"><b>Same networks, different checkpoints.</b> Each has its own talker file; the tokenizer file is shared:
+<br> - <i>Base</i> takes a voice file or a reference clip;
+<br> - <i>CustomVoice</i>, built-in speakers;
+<br> - <i>VoiceDesign</i>, a voice described in words, <b>with no 0.6B</b>.</p>
+
+---
+
 ## Speech out: what is said, and who says it
 
-<svg class="fig" viewBox="0 0 1250 425" role="img" aria-label="Reply text from a remote or local LLM goes through SpeakableStream, then either whole into a text buffer or cut into pieces by SentenceStream, into the Qwen3-TTS talker, then the emitter and speech. The voice comes from above for Base, a voice file extracted once from a recording or a VoiceDesign sample, or from below for CustomVoice, a speaker name and an optional style. A pacer cuts pieces early when the listener is about to run out.">
+<svg class="fig" viewBox="0 0 1250 425" role="img" aria-label="Reply text from a remote or local LLM goes through SpeakableStream, then either whole into a text buffer or cut into pieces by SentenceStream, into Qwen3-TTS, then the emitter and speech. The voice comes from above for Base, a voice file made once by the speaker encoder from a recording or a VoiceDesign sample, or from below for CustomVoice, a speaker name and an optional style. A pacer cuts pieces early when the listener is about to run out.">
 <defs>
 <marker id="arrow-out" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#57606a"/></marker>
 <marker id="arrow-pacer" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#bc4c00"/></marker>
@@ -84,11 +386,11 @@ Recognition and synthesis sit outside the language model, so **voice works with 
 <text x="100" y="106" font-size="15" fill="#bc4c00">are the voice; add 开心</text>
 <text x="100" y="124" font-size="15" fill="#bc4c00">and the speaker changes</text>
 <rect x="430" y="38" width="170" height="60" rx="10" fill="#f6f8fa" stroke="#d0d7de" stroke-width="2"/>
-<text x="515" y="63" font-size="19" font-weight="700" fill="#24292f">extract the voice</text>
+<text x="515" y="63" font-size="19" font-weight="700" fill="#24292f">speaker encoder</text>
 <text x="515" y="85" font-size="14" fill="#57606a">once, about 4.5s</text>
 <rect x="650" y="38" width="230" height="60" rx="10" fill="#f6f8fa" stroke="#d0d7de" stroke-width="2"/>
 <text x="765" y="63" font-size="19" font-weight="700" fill="#24292f">voice file (.spk)</text>
-<text x="765" y="85" font-size="14" fill="#57606a">1024 or 2048 numbers</text>
+<text x="765" y="85" font-size="14" fill="#57606a">one row, 1024 or 2048 wide</text>
 <rect x="20" y="180" width="140" height="50" rx="10" fill="#f6f8fa" stroke="#d0d7de" stroke-width="2"/>
 <text x="90" y="212" font-size="19" font-weight="700" fill="#24292f">remote LLM</text>
 <rect x="20" y="250" width="140" height="50" rx="10" fill="#f6f8fa" stroke="#d0d7de" stroke-width="2"/>
@@ -102,10 +404,11 @@ Recognition and synthesis sit outside the language model, so **voice works with 
 <rect x="430" y="264" width="170" height="56" rx="10" fill="#ddf4ff" stroke="#0969da" stroke-width="2"/>
 <text x="515" y="288" font-size="17" font-family="monospace" font-weight="700" fill="#24292f">SentenceStream</text>
 <text x="515" y="309" font-size="14" fill="#57606a">cut into pieces</text>
-<rect x="650" y="190" width="230" height="100" rx="10" fill="#dafbe1" stroke="#1a7f37" stroke-width="2"/>
-<text x="765" y="222" font-size="20" font-weight="700" fill="#24292f">Qwen3-TTS talker</text>
-<text x="765" y="247" font-size="15" fill="#57606a">Base or CustomVoice</text>
-<text x="765" y="270" font-size="15" fill="#57606a">0.6B or 1.7B</text>
+<rect x="650" y="185" width="230" height="110" rx="10" fill="#dafbe1" stroke="#1a7f37" stroke-width="2"/>
+<text x="765" y="214" font-size="20" font-weight="700" fill="#24292f">Qwen3-TTS</text>
+<text x="765" y="238" font-size="14" fill="#57606a">talker, code predictor, codec</text>
+<text x="765" y="259" font-size="15" fill="#57606a">Base or CustomVoice</text>
+<text x="765" y="280" font-size="15" fill="#57606a">0.6B or 1.7B</text>
 <rect x="650" y="335" width="230" height="56" rx="10" fill="#f6f8fa" stroke="#d0d7de" stroke-width="2"/>
 <text x="765" y="359" font-size="19" font-weight="700" fill="#24292f">speaker name + style</text>
 <text x="765" y="380" font-size="14" fill="#57606a">serena · 语气平静 (optional)</text>
@@ -117,7 +420,7 @@ Recognition and synthesis sit outside the language model, so **voice works with 
 <text x="1167" y="258" font-size="14" fill="#57606a">24 kHz</text>
 </g>
 <g font-size="15" fill="#57606a">
-<text x="430" y="152">whole reply</text>
+<text x="430" y="152">one take</text>
 <text x="430" y="256">pieces</text>
 <text x="777" y="322" font-size="14">CustomVoice: built-in speakers</text>
 </g>
@@ -126,14 +429,14 @@ Recognition and synthesis sit outside the language model, so **voice works with 
 <path d="M382,35 H405 V68 H426"/>
 <path d="M382,100 H405 V68 H426"/>
 <line x1="602" y1="68" x2="646" y2="68"/>
-<line x1="765" y1="100" x2="765" y2="186"/>
+<line x1="765" y1="100" x2="765" y2="181"/>
 <path d="M162,205 H180 V240 H196"/>
 <path d="M162,275 H180 V240 H196"/>
 <path d="M382,240 H405 V188 H426"/>
 <path d="M382,240 H405 V292 H426"/>
 <path d="M602,188 H625 V240 H646"/>
 <path d="M602,292 H625 V240 H646"/>
-<line x1="765" y1="333" x2="765" y2="294"/>
+<line x1="765" y1="333" x2="765" y2="299"/>
 <line x1="882" y1="240" x2="916" y2="240"/>
 <line x1="1072" y1="240" x2="1101" y2="240"/>
 </g>
@@ -142,29 +445,34 @@ Recognition and synthesis sit outside the language model, so **voice works with 
 </svg>
 
 <ul class="note">
-<li>The voice file is one slot in the prompt, so Base costs no more per frame. A real recording holds pieces tighter than a VoiceDesign sample: 1.31 against 1.68 semitones of spread.</li>
+<li>The voice file is one row in the prompt, so Base costs no more per frame. A real recording holds pieces tighter than a VoiceDesign sample: 1.31 against 1.68 semitones of spread.</li>
 </ul>
 
 ---
+
+<style scoped>
+table { margin-left: auto; margin-right: auto; font-size: 18px; }
+th, td { padding: 4px 14px !important; vertical-align: top; }
+.sub { display: block; font-size: 13px; font-weight: 400; color: #57606a; }
+tbody tr:nth-child(6) td, tbody tr:nth-child(10) td { border-top: 2px solid #8c959f; }
+</style>
 
 ## Real-time factor (RTF)
 
 Below 1 the speech keeps up with playback; above 1 a stream needs duration×(RTF−1) of buffer.
 
-| `Q4_K_M` | Kirin 9020 (ARM) | Core Ultra 9 185H (x86) | Arc iGPU (Vulkan) | RTX 3090 |
-| --- | --- | --- | --- | --- |
-| 0.6B Base | 2.61 | 0.91–0.95 | 0.44 | not measured |
-| 1.7B Base | 3.15 | 1.14 | **0.55** | not measured |
-| 0.6B CustomVoice | 2.87 | 0.96–0.97 | 0.44–0.45¹ | not measured |
-| 1.7B CustomVoice | 3.64 | 1.12–1.13 | 0.55–0.57 | not measured |
-
-<ul class="note">
-<li>Kirin 9020: 6 threads, clock steps down after about 30s, GPU unusable. Core Ultra 9: 11 threads, ±15% across days.</li>
-<li>Per 80ms frame at 1.7B, CPU → iGPU: codec 34.9 → 6.3ms, talker 23.9 → 17.3ms, code predictor 20.0 → 20.5ms. The code predictor is sized by the 16 codebooks, so neither a GPU nor a smaller talker speeds it up.</li>
-<li>The chat model stays on the CPU: sharing the iGPU with it pushed speech to RTF 1.64.</li>
-<li>Reproduce: <code>python tests/tts_rtf.py --models &lt;dir&gt;</code> on a PC; on the phone, /tts → Benchmark.</li>
-<li>¹ Sounds worse on Vulkan for now; the cause may still be in our code.</li>
-</ul>
+| `Q4_K_M` | Kirin 9020 (ARM)<span class="sub">6 threads; slows after ~30s; GPU unusable</span> | Core Ultra 9 185H (x86)<span class="sub">11 threads; ±15% day to day</span> | Arc iGPU (Vulkan)<span class="sub">RTF 1.64 if the chat model shares it</span> |
+| --- | --- | --- | --- |
+| **RTF** | | | |
+| 0.6B Base | 2.61 | 0.91–0.95 | 0.44 |
+| 1.7B Base | 3.15 | 1.14 | **0.55** |
+| 0.6B CustomVoice | 2.87 | 0.96–0.97 | 0.44–0.45<span class="sub">sounds worse; may be our code</span> |
+| 1.7B CustomVoice | 3.64 | 1.12–1.13 | 0.55–0.57 |
+| **Time per 80ms frame, 1.7B** | | | |
+| talker | — | 23.9ms | 17.3ms |
+| code predictor<span class="sub">set by the 16 codebooks: no GPU gain</span> | — | 20.0ms | 20.5ms |
+| codec | — | 34.9ms | 6.3ms |
+| reproduce | /tts → Benchmark | `tests/tts_rtf.py` | the same run |
 
 ---
 
@@ -178,15 +486,19 @@ svg.fig { width: 64%; margin: 6px auto 0; }
 .cols ul { margin: 0; padding-left: 1.1em; }
 .cols li { margin: 0.1em 0; }
 .cols p { margin: 0.5em 0 0.3em; }
-table { font-size: 14px; }
-th, td { padding: 2px 9px !important; }
+table { font-size: 15px; margin-left: auto; margin-right: auto; }
+th, td { padding: 3px 10px !important; }
+.rules { margin-top: 14px; padding-top: 8px; border-top: 1px solid #d0d7de; font-size: 15px; line-height: 1.35; }
+.rules h3 { font-size: 19px; margin: 0 0 0.3em; }
+.rules .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+.rules p { margin: 0; }
 </style>
 
-## The reading problem, and two modes
+## The reading problem: speak it in pieces
 
 A reply takes **seconds to write**, and a single `say()` waits for the last token; faster synthesis cannot recover that. `Reader` speaks while it is written: `begin()`, `feed(delta)` per token from any provider, `finish()`.
 
-<svg class="fig" viewBox="0 0 1200 255" role="img" aria-label="Timelines: whole reply is one continuous generation; pieces are cut from the text and played one after another with seams">
+<svg class="fig" viewBox="0 0 1200 170" role="img" aria-label="Timeline: the text is cut into pieces as it arrives, and the pieces are spoken one after another with seams between them">
 <defs><marker id="arrow-time" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#57606a"/></marker></defs>
 <g font-size="22" fill="#57606a">
 <line x1="230" y1="22" x2="270" y2="22" stroke="#0969da" stroke-width="14" stroke-dasharray="8 5"/>
@@ -198,127 +510,210 @@ A reply takes **seconds to write**, and a single `say()` waits for the last toke
 <line x1="840" y1="8" x2="840" y2="36" stroke="#24292f" stroke-width="2"/>
 <text x="852" y="30">cut</text>
 </g>
-<text x="20" y="112" font-size="26" font-weight="700" fill="#24292f">Whole reply</text>
+<text x="20" y="112" font-size="26" font-weight="700" fill="#24292f">Pieces</text>
 <line x1="230" y1="85" x2="780" y2="85" stroke="#0969da" stroke-width="16" stroke-dasharray="8 5"/>
-<rect x="275" y="102" width="860" height="26" rx="4" fill="#1a7f37"/>
-<text x="705" y="121" font-size="19" fill="#ffffff" text-anchor="middle">one generation</text>
-<text x="20" y="197" font-size="26" font-weight="700" fill="#24292f">Pieces</text>
-<line x1="230" y1="170" x2="780" y2="170" stroke="#0969da" stroke-width="16" stroke-dasharray="8 5"/>
 <g stroke="#24292f" stroke-width="2">
-<line x1="290" y1="156" x2="290" y2="184"/>
-<line x1="470" y1="156" x2="470" y2="184"/>
-<line x1="780" y1="156" x2="780" y2="184"/>
+<line x1="290" y1="71" x2="290" y2="99"/>
+<line x1="470" y1="71" x2="470" y2="99"/>
+<line x1="780" y1="71" x2="780" y2="99"/>
 </g>
-<rect x="305" y="187" width="190" height="26" rx="4" fill="#1a7f37"/>
-<rect x="499" y="187" width="300" height="26" rx="4" fill="#1a7f37"/>
-<rect x="803" y="187" width="332" height="26" rx="4" fill="#1a7f37"/>
+<rect x="305" y="102" width="190" height="26" rx="4" fill="#1a7f37"/>
+<rect x="499" y="102" width="300" height="26" rx="4" fill="#1a7f37"/>
+<rect x="803" y="102" width="332" height="26" rx="4" fill="#1a7f37"/>
 <g font-size="19" fill="#ffffff" text-anchor="middle">
-<text x="400" y="206">1</text>
-<text x="649" y="206">2</text>
-<text x="969" y="206">3</text>
+<text x="400" y="121">1</text>
+<text x="649" y="121">2</text>
+<text x="969" y="121">3</text>
 </g>
 <g stroke="#bc4c00" stroke-width="3">
-<line x1="497" y1="184" x2="497" y2="219"/>
-<line x1="801" y1="184" x2="801" y2="219"/>
+<line x1="497" y1="99" x2="497" y2="134"/>
+<line x1="801" y1="99" x2="801" y2="134"/>
 </g>
-<line x1="230" y1="240" x2="1125" y2="240" stroke="#57606a" stroke-width="2" marker-end="url(#arrow-time)"/>
-<text x="1135" y="247" font-size="20" fill="#57606a">time</text>
+<line x1="230" y1="155" x2="1125" y2="155" stroke="#57606a" stroke-width="2" marker-end="url(#arrow-time)"/>
+<text x="1135" y="162" font-size="20" fill="#57606a">time</text>
 </svg>
 
 <div class="cols">
 <div>
 
-### Whole reply · `set_whole_reply(true)`
+### How it cuts
 
-- One generation per reply. The text is pulled into the talker as it is written: `Qtts::say_pulled`, which needs `qwentts-streaming-text.patch`.
-- **No seams**, and the pace moves across the reply the way a whole take's does.
-- The talker reads **one text token per frame**, 12.5 a second, and waits when the text runs out. So the writer has to stay above **about 17–18 Chinese characters a second**.
-
-With a simulated writer, a player that waits for 0.5s of audio:
-
-| writer, characters/s | ≈ tokens/s | playback starts, s | starved, s |
-| --- | --- | --- | --- |
-| 29 | 21 | 0.78–1.11 | 0 |
-| 21 | 15 | 0.98–1.52 | 0 |
-| 14 | 10 | 1.36–2.26 | **1.16–1.24** |
+- `SentenceStream` cuts the text as it arrives; each piece is its own `say()`.
+- **Piece 1 sets the wait**: 12–40 characters. A full stop ends it from 6 on, since <span style="white-space: nowrap">"你好。"</span> alone comes out clipped.
+- **Later pieces**: 30–80 characters, cut early when under 1s of audio is left.
+- **Cost**: the pace resets at every seam. The voice file holds the pitch: 1.31 semitones of spread, 3.09 without it.
+- **Tolerant of a slow or bursty writer**: each piece is complete text before it is spoken.
 
 </div>
 <div>
 
-### Pieces · `set_whole_reply(false)`
+### Measured in the app
 
-- `SentenceStream` cuts the text as it arrives. Each piece is its own `say()`.
-- **Piece 1 is the whole of the wait**: 12–40 characters, and a full stop ends it from 6 on.
-- **Later pieces** wait for 30–80 characters (30 sounded better than 12), and are cut early when the listener has under 1s of audio left.
-- **Cost**: every piece starts from a sentence's opening state, so the pace is even and resets at every seam; N pieces are N draws. The voice file holds the register: 1.31 semitones of spread across pieces, against 3.09 without it.
-- **Tolerant of a slow or bursty writer**: each piece is complete text before it is spoken.
+The PC: speech on the Arc iGPU, the chat model on the CPU. First audio counts from sending, prefill included.
+
+| chat model | decode, tok/s | first audio, s | starved, s |
+| --- | --- | --- | --- |
+| Qwen3.5-2B | 20.5–21.1 | 0.89–1.20 | 0.24–0.32 |
+| Qwen3.5-4B | 4.0–8.1 | 1.17–2.73 | 0.20–0.33 |
+
+A writer at 4–8 tok/s still leaves the speech starved under 0.33s.
+
+</div>
+</div>
+
+<div class="rules">
+
+### Rules found by listening, none visible in RTF
+
+<div class="grid">
+
+**Pin the seed** (default 101). A free seed is redrawn per `say()`: the pitch spread between pieces went from 10.1 Hz to 17.5.
+
+**Merge a short last piece back**, up to 40 characters. Alone it stops while the vowel still sounds, at −34 dBFS; folded in, it decays to −68.
+
+**Hold 2 frames past the first stop** (160ms). Without it, endings stopped mid-vowel; four frames sounded no different.
 
 </div>
 </div>
 
 ---
 
-## Rules that came from listening
+<style scoped>
+section { font-size: 18px; padding: 36px 56px; }
+h2 { font-size: 32.5px; margin-bottom: 0.2em; }   /* the other slides' size: 1.25em of 26px */
+p { margin: 0.3em 0; }
+svg.fig { margin-top: 6px; }
+table { font-size: 15px; margin: 10px auto 14px; }
+th, td { padding: 4px 10px !important; }
+.note { font-size: 14px; }
+.note li { margin: 0.15em 0; }
+</style>
 
-| rule | what it fixes |
-| --- | --- |
-| **Pin the seed** (desktop: 101) | A free seed is redrawn per `say()`. Split into pieces, the pitch spread between utterances went from 10.1 Hz to 17.5 |
-| **Piece 1 ends at a full stop from 6 characters** | "你好。" and "你觉得呢？" spoken alone come out clipped, so they join what follows |
-| **The last piece merges back to 40 characters** | A short last piece stops while the vowel still sounds, at −34 dBFS. Folded into a longer one, it decays to −68. On a stream it can merge only while the piece before it is still queued |
-| **Hold 2 frames past the first stop** (160ms) | With the streaming text layout, endings stopped mid-vowel. Four frames sounded no different |
+## Emotion: the same three axes, in and out
 
-<p class="note">Each was found by listening. None of them shows in RTF.</p>
+What is read from the user and what the reply is spoken with share one scale: −1, −0.5, 0, 0.5, 1 on each axis.
 
----
+<svg class="fig" viewBox="0 0 1250 150" role="img" aria-label="The user's speech is read into valence, arousal and dominance: arousal from sound by prosody, valence and dominance from the words by the chat model. The chat model writes the reply and its own valence, arousal and dominance first. Qwen3-TTS speaks the reply's text with the user's voice file plus each axis times its direction.">
+<defs>
+<marker id="arrow-pad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#57606a"/></marker>
+</defs>
+<g stroke-width="2">
+<rect x="20" y="40" width="160" height="90" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+<rect x="240" y="40" width="250" height="90" rx="10" fill="#fff1e5" stroke="#bc4c00"/>
+<rect x="550" y="40" width="200" height="90" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+<rect x="810" y="40" width="270" height="90" rx="10" fill="#dafbe1" stroke="#1a7f37"/>
+<rect x="1130" y="40" width="100" height="90" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+</g>
+<g text-anchor="middle" fill="#24292f">
+<text x="100" y="80" font-size="20" font-weight="700">user speech</text>
+<text x="100" y="104" font-size="14" fill="#57606a">microphone</text>
+<text x="365" y="72" font-size="20" font-weight="700">the user's V, A, D</text>
+<text x="365" y="96" font-size="14" fill="#57606a">A: prosody/, from the sound</text>
+<text x="365" y="116" font-size="14" fill="#57606a">V, D: chat model, from the words</text>
+<text x="650" y="72" font-size="20" font-weight="700">chat model</text>
+<text x="650" y="96" font-size="14" fill="#57606a">writes the reply,</text>
+<text x="650" y="116" font-size="14" fill="#57606a">its own V, A, D first</text>
+<text x="945" y="72" font-size="20" font-weight="700">Qwen3-TTS</text>
+<text x="945" y="96" font-size="14" fill="#57606a">the user's voice file</text>
+<text x="945" y="116" font-size="15" fill="#57606a">+ V·d<tspan font-size="11" dy="3">V</tspan><tspan dy="-3"> + A·d</tspan><tspan font-size="11" dy="3">A</tspan><tspan dy="-3"> + D·d</tspan><tspan font-size="11" dy="3">D</tspan></text>
+<text x="1180" y="80" font-size="20" font-weight="700">speech</text>
+<text x="1180" y="104" font-size="14" fill="#57606a">24 kHz</text>
+</g>
+<g font-size="13" fill="#57606a" text-anchor="middle">
+<text x="520" y="76">V, A, D</text>
+<text x="780" y="76">reply</text>
+<text x="780" y="104">V, A, D</text>
+</g>
+<g stroke="#57606a" stroke-width="2" fill="none" marker-end="url(#arrow-pad)">
+<line x1="182" y1="85" x2="236" y2="85"/>
+<line x1="492" y1="85" x2="546" y2="85"/>
+<line x1="752" y1="85" x2="806" y2="85"/>
+<line x1="1082" y1="85" x2="1126" y2="85"/>
+</g>
+</svg>
 
-## Measured in the app
-
-Desktop, speech on the Arc iGPU, the chat model on the CPU. First audio is from the message being sent, including prefill.
-
-| model | mode | decode while reading, tok/s | first audio, s | starved, s |
+| axis | from | to | the user: read from | the reply: made by |
 | --- | --- | --- | --- | --- |
-| Qwen3.5-2B | pieces | 20.5–21.1 | 0.89–1.20 | 0.24–0.32 |
-| Qwen3.5-2B | **whole reply** | 20.0–21.9 | **0.44–1.15** | 0–0.31 |
-| Qwen3.5-4B | pieces | 4.0–8.1 | 1.17–2.73 | 0.20–0.33 |
-| Qwen3.5-4B | whole reply | 5.7–6.5 | 1.10–2.05 | **0.38–2.11** |
+| **Valence** V | unpleasant | pleasant | the words: the chat model reads the transcript | direction d<sub>V</sub> |
+| **Arousal** A | deactivated | activated | the sound: pitch, loudness, continuity; no model | direction d<sub>A</sub>, checked by prosody/ |
+| **Dominance** D | acted upon | in control | the grammar: who is the subject of the verbs | direction d<sub>D</sub> |
 
-- The 2B writes fast enough: whole reply starts earlier and has no seams.
-- The 4B does not: whole reply runs dry for up to 2.1s, while pieces stay under 0.33s.
-
----
-
-## Choosing a mode: proposed, not built
-
-- Today `WHOLE_REPLY = true` is fixed in `desktop/src/main/reader.ts`. With the 4B it runs dry.
-- **Decide per turn, before `begin()`**, from the writer's rate while speech runs, in **characters a second** rather than the provider's tokens. Fast enough → whole reply; otherwise pieces.
-- **Never switch within a reply.** A whole reply cut into pieces midway gains a seam.
-- **Remote providers deliver text in bursts**, and whole reply turns every gap into silence. Not measured: pieces until it is.
+<ul class="note">
+<li>Heard: a style's voice file changes the reading, at no cost per frame; on the user's own voice, how far it can go is capped by the speaker (next slide). Not yet: fitting d<sub>V</sub>, d<sub>A</sub>, d<sub>D</sub> from eight labeled CustomVoice instructions.</li>
+<li>Checked offline: A by prosody/; V and D by audeering's dimensional model, research only.</li>
+<li>A named style is a point plus delivery: 郑重 = (0, 0, 1), slower. emotion2vec's labels are points too.</li>
+<li>CustomVoice takes the nearest instruction instead.</li>
+<li>To the user: only change from their own baseline, never a verdict.</li>
+</ul>
 
 ---
 
-## Outside the desktop: `yoai-server`
+<style scoped>
+section { font-size: 18px; padding: 36px 56px; }
+h2 { font-size: 32.5px; margin-bottom: 0.2em; }   /* the other slides' size: 1.25em of 26px */
+p { margin: 0.3em 0; }
+svg.fig { margin-top: 4px; }
+table { font-size: 15px; margin: 8px auto 12px; }
+th, td { padding: 4px 10px !important; }
+.note { font-size: 14px; }
+.note li { margin: 0.15em 0; }
+</style>
 
-The same `Reader` behind a WebSocket. Any client can feed it, for example a service relaying a remote model's deltas.
+## Style on the user's voice: the speaker caps the step
 
-```text
-→ {"type":"start"}
-← {"type":"started","sample_rate":24000,"channels":1,"format":"s16"}
-→ {"type":"text","text":"我查了一下，"}          (any number of these)
-← binary PCM, mono 24 kHz, in reading order
-→ {"type":"finish"}
-← {"type":"done", "first_audio_seconds": ..., "starved_seconds": ...}
-```
+CustomVoice reads one passage calm and in each style; style − calm, in the speaker encoder's space, is the direction. Base reads with 01_female's voice file + α × direction.
 
-- **One passage at a time, server-wide**: a second `start` gets `busy`.
-- The reading settings are the desktop's. Clients cannot change them.
-- It reads "你好。" before opening the port: a GPU compiles its shaders on the first synthesis, and the first client waited 13.7s for audio against 1.9s afterwards.
+<svg class="fig" viewBox="0 0 1250 160" role="img" aria-label="Distances in voice-file space on a line from 0 to 6. The cleaned mixed directions move the voice file 1.1 to 1.4 at alpha 1, and the speaker holds; 2.2 to 2.8 at alpha 2, and the speaker changes. Serena's directions move it 2.0 to 3.3 at alpha 2, borderline. The two closest built-in speakers are 2.85 apart, the median between two is 4.72, and serena is 5.00 from 01_female.">
+<g stroke="#8c959f" stroke-width="1.5" stroke-dasharray="4 4">
+<line x1="606" y1="24" x2="606" y2="112"/>
+<line x1="965" y1="24" x2="965" y2="112"/>
+<line x1="1018" y1="24" x2="1018" y2="112"/>
+</g>
+<g font-size="14" fill="#57606a">
+<text x="600" y="18" text-anchor="end">two closest speakers, 2.85</text>
+<text x="959" y="18" text-anchor="end">median between two speakers, 4.72</text>
+<text x="1024" y="18">serena to 01_female, 5.00</text>
+</g>
+<g stroke-width="2">
+<rect x="271" y="32" width="57" height="14" rx="3" fill="#dafbe1" stroke="#1a7f37"/>
+<rect x="482" y="56" width="115" height="14" rx="3" fill="#fff1e5" stroke="#bc4c00"/>
+<rect x="443" y="80" width="249" height="14" rx="3" fill="#fff8f2" stroke="#bc4c00" stroke-dasharray="5 3"/>
+</g>
+<g font-size="15" fill="#24292f">
+<text x="338" y="44">α = 1, cleaned mix: speaker holds</text>
+<text x="616" y="68">α = 2, cleaned mix: speaker changes</text>
+<text x="702" y="92">α = 2, serena's: borderline</text>
+</g>
+<line x1="60" y1="112" x2="1210" y2="112" stroke="#57606a" stroke-width="2"/>
+<g stroke="#57606a" stroke-width="2">
+<line x1="60" y1="112" x2="60" y2="118"/>
+<line x1="252" y1="112" x2="252" y2="118"/>
+<line x1="443" y1="112" x2="443" y2="118"/>
+<line x1="635" y1="112" x2="635" y2="118"/>
+<line x1="827" y1="112" x2="827" y2="118"/>
+<line x1="1018" y1="112" x2="1018" y2="118"/>
+<line x1="1210" y1="112" x2="1210" y2="118"/>
+</g>
+<g font-size="14" fill="#57606a" text-anchor="middle">
+<text x="60" y="134">0</text>
+<text x="252" y="134">1</text>
+<text x="443" y="134">2</text>
+<text x="635" y="134">3</text>
+<text x="827" y="134">4</text>
+<text x="1018" y="134">5</text>
+<text x="1210" y="134">6</text>
+</g>
+<text x="1210" y="154" font-size="14" fill="#57606a" text-anchor="end">how far the voice file moved (Euclidean)</text>
+</svg>
 
----
+| direction from | length | α = 1 | α = 2 |
+| --- | --- | --- | --- |
+| serena, vivian, uncle_fu, two breathy caring takes in | 1.2–2.3 | caring and sorry change the speaker | – |
+| the same, outlying pairs dropped | 1.1–1.4 | holds; sorry −0.7 st, fast +0.65 c/s | changes |
+| mostly serena's own pairs | 1.0–1.7 | holds; the styles faint | slight change, borderline |
 
-## Open questions
-
-- **Remote writers**: how bursty delivery interacts with whole reply. Unmeasured.
-- **Whole reply's first audio** waits for the second pre-tokenizer chunk: 0.25–0.57s of `TextWait` in Chinese.
-- **Pieces sound read aloud.** Two levers are unbuilt: give each piece the previous one's last seconds as a reference in the prompt, and a per-piece time-stretch from a pace plan.
-- **Emotion and pace on Base.** Candidates, none measured: style carried in the voice file, and a reference recording in the prompt to steer by example.
-- **The code predictor** is the largest stage on the GPU, and nothing tried so far reaches it.
+<ul class="note">
+<li>serena is the built-in speaker nearest 01_female (5.00), uncle_fu the farthest (6.96): a direction from a nearer speaker carries less identity. Two variants, one listener: a lead.</li>
+<li>Seeds alone move pace up to 0.7 c/s and pitch up to 1.6 st, so the α = 1 changes are near the noise.</li>
+<li>Next: directions from the built-in speakers nearest the user's voice; or mode B with the user's voice file and another speaker's styled reading.</li>
+</ul>

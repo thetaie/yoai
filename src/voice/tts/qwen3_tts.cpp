@@ -89,7 +89,7 @@ void unset_env(const char* name) {
 //
 // An environment variable is a poor interface and it is the interface that
 // exists: qwen.h has no thread parameter, and the count is read once inside
-// qt_init. harmony/patches/qwentts-thread-count-override.patch is what makes
+// qt_init. third/patches/qwentts-thread-count-override.patch is what makes
 // this variable mean anything; without it this is a no-op, which is the right
 // behaviour for a build made from an unpatched checkout.
 //
