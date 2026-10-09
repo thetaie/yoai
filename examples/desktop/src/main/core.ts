@@ -224,7 +224,7 @@ export function core(): YoaiNative {
   const found = tried.find((p) => existsSync(p))
   if (found === undefined) {
     throw new Error(
-      'yoai.node was not found. Build it with `npm run build:native` ' +
+      'yoai.node was not found. Build it with `python build.py native` in examples/desktop ' +
         '(or set YOAI_ADDON). Looked in:\n  ' +
         tried.join('\n  ')
     )

@@ -36,14 +36,16 @@ Environment:
   ANDROID_SDK_ROOT  the SDK. Default: ANDROID_HOME, then sdk.dir in
                     examples/android/local.properties
   ANDROID_NDK_ROOT  the NDK (default: the version in examples/android/gradle.properties)
-These also read as YOAI_<NAME>, from the environment or from .env at the
-repository root, which wins -- see .env.example:
-  VCPKG_ROOT        vcpkg checkout (default: a sibling of the repo)
-  LLAMA_SRC         llama.cpp checkout (default: a sibling of the repo)
-  QTTS_SRC          qwentts.cpp checkout (default: a sibling of the repo)
+These, each read from .env at the repository root -- see .env.example --
+or the environment, .env winning; YOAI_<NAME> in the environment wins over
+both, for one run:
+  VCPKG_ROOT        vcpkg checkout (default: ../../third/vcpkg)
+  LLAMA_SRC         llama.cpp checkout (default: ../../third/llama.cpp)
+  QTTS_SRC          qwentts.cpp checkout (default: ../../third/qwentts.cpp)
 
-`python ../../third/sync.py clone` fetches the checkouts at their pinned
-commits, with the patches this script expects already applied.
+`python ../../third/sync.py clone` fetches the source checkouts at their
+pinned commits, with the patches this script expects already applied. `deps`
+clones vcpkg itself, at vcpkg.json's builtin-baseline.
 """
 
 # The Android counterpart of examples/harmony/build.py, and deliberately the same shape:
@@ -145,9 +147,8 @@ def main(argv):
         fail('[build] no toolchain file at "%s"' % toolchain)
     cmake, ninja = cmake_ninja(sdk_root)
 
-    vcpkg_root = b.env("VCPKG_ROOT", b.sibling("vcpkg"))
-    llama_src = b.env("LLAMA_SRC", b.sibling("llama.cpp"))
-    qtts_src = b.env("QTTS_SRC", b.sibling("qwentts.cpp"))
+    llama_src = b.env("LLAMA_SRC", b.third_dir("llama.cpp"))
+    qtts_src = b.env("QTTS_SRC", b.third_dir("qwentts.cpp"))
 
     say("[build] abi=%s  api=%d  arch=%s" % (o.abi, API_LEVEL, arch or "baseline"))
     say("[build] ndk=%s" % ndk_root)
@@ -180,7 +181,7 @@ def main(argv):
         # and x64-android, and they are already static. The NDK reaches vcpkg's
         # port builds through the environment.
         os.environ["ANDROID_NDK_HOME"] = ndk_root
-        b.vcpkg_deps(vcpkg_root, TRIPLETS[o.abi], os.path.join(HERE, "prebuilt", o.abi))
+        b.vcpkg_deps(b.vcpkg_tree(), TRIPLETS[o.abi], os.path.join(HERE, "prebuilt", o.abi))
     if o.llama:
         build_llama(o, cmake, ndk_cfg, arch, llama_src)
     if o.qtts:
@@ -275,6 +276,7 @@ def build_llama(o, cmake, ndk_cfg, arch, src):
     #
     # It also fails to link if left on: the archives reference __kmpc_* and
     # nothing pulls the runtime into libyoai.so.
+    b.fresh_tree(lbuild, src)
     cfg = ndk_cfg + ["-S", src, "-B", lbuild,
                      "-DBUILD_SHARED_LIBS=OFF",
                      "-DLLAMA_CURL=OFF",
@@ -316,12 +318,12 @@ def build_qtts(o, cmake, ndk_cfg, arch, llama_src, src):
         fail('[qtts] no qwentts.cpp at "%s".' % src,
              "[qtts]   " + b.sync_cmd("clone", "qwentts.cpp"))
 
-    # third/patches/ has two for this checkout. qwentts-ggml-ohos-affinity.patch
-    # is for musl's missing pthread_setaffinity_np and does NOT apply here --
-    # bionic has it. The thread-count one is not platform-specific: qwentts.cpp
-    # picks hardware_concurrency()/2 reasoning about hyperthreads a phone does
-    # not have. It is applied through the SAME patch file as the other lanes,
-    # so they cannot drift into overriding the thread count differently.
+    # The thread-count patch is not platform-specific: qwentts.cpp picks
+    # hardware_concurrency()/2 reasoning about hyperthreads a phone does not
+    # have. It is applied through the SAME patch file as the other lanes, so
+    # they cannot drift into overriding the thread count differently. The
+    # OHOS affinity header in third/patches/ is not needed here: ggml already
+    # takes the sched_setaffinity branch on Android.
     b.qpatch(src, "qwentts-thread-count-override.patch")
 
     # ONE ggml for both lanes, and llama.cpp's is the one. This used to compile
@@ -344,6 +346,7 @@ def build_qtts(o, cmake, ndk_cfg, arch, llama_src, src):
 
     qbuild = os.path.join(HERE, ".qtts-build", o.abi)
     sdk = os.path.join(HERE, "prebuilt", "qtts-sdk", o.abi)
+    b.fresh_tree(qbuild, src)
     cfg = ndk_cfg + ["-S", src, "-B", qbuild,
                      "-DGGML_SOURCE_DIR=" + b.fwd(llama_src) + "/ggml",
                      "-DBUILD_SHARED_LIBS=OFF",

@@ -76,12 +76,13 @@ which is why the ABI stays this small.
 
 ### Desktop (to exercise the core)
 
-Needs CMake, a C++11 compiler, and libcurl / OpenSSL; RapidJSON, SQLite and
-sqlite-vec are vendored in `third/`. On macOS and Linux the build takes the two
-libraries from vcpkg when a checkout is there and from the system's own
-packages when it is not — `apt install libcurl4-openssl-dev libssl-dev`, or
-`brew install openssl@3`. On Windows it wants vcpkg, which is where a Windows
-machine gets both anyway.
+Needs git, CMake and a C++11 compiler. curl and OpenSSL come from vcpkg on every
+platform: the first run clones it into `third/vcpkg` at the baseline
+`vcpkg.json` pins, and builds the two for this machine, which takes a few
+minutes once. RapidJSON, SQLite and sqlite-vec are vendored in `third/`. On
+Linux vcpkg has prerequisites of its own — on Debian/Ubuntu,
+`apt install build-essential curl zip unzip tar pkg-config`; on macOS, the Xcode
+command-line tools.
 
 ```
 python build.py      # python3 on macOS / Linux
@@ -89,6 +90,12 @@ python build.py      # python3 on macOS / Linux
 
 Every build script is Python 3.8 or newer, standard library only, and the same
 file on every platform.
+
+A first build also fetches the llama.cpp and qwentts.cpp checkouts into
+`third/`, at the commits `third/manifest.json` pins, and adds speech
+recognition and speech output from them — so it needs git and the network that
+once. [third/README.md](third/README.md) says why they live there and how to
+move them.
 
 `--help` lists the options: `asr` for speech recognition, `llama` for the
 on-device engine (chat and embedding on a GGUF), `tts` for speech output, and
@@ -98,7 +105,7 @@ Paths that differ per machine -- Visual Studio, vcpkg, the llama.cpp checkout
 -- go in `.env` at the root, which git ignores and every C/C++ build script
 reads (root, `examples/harmony/`, `examples/desktop/`, `examples/android/`, `third/sync.py`) by the
 rules in the root `build.py`. Copy
-[.env.example](.env.example); it lists every `YOAI_*` setting.
+[.env.example](.env.example); it lists every setting.
 
 Then talk to a real provider without a phone in the loop:
 
@@ -157,7 +164,7 @@ python build.py       # dependencies, on-device engine, the app
 python build.py hap   # just repackage, every run after that
 ```
 
-The bare command expects a llama.cpp checkout beside the repo (see below). For
+The bare command expects a llama.cpp checkout (see below). For
 the app without the on-device engine, name the other two targets:
 `python build.py deps hap`.
 
@@ -175,7 +182,7 @@ part of the default build; the one thing the script will not fetch for you is
 llama.cpp:
 
 ```
-git clone --depth 1 https://github.com/ggml-org/llama.cpp ../llama.cpp
+python third/sync.py clone llama.cpp
 cd harmony
 python build.py       # or `python build.py llama` for just the engine
 ```
@@ -183,9 +190,9 @@ python build.py       # or `python build.py llama` for just the engine
 It costs about 4.3 MiB in `libyoai.so`, a ~200 MB checkout, and a few minutes of
 cross-compile. `python build.py deps hap` builds the app without it.
 
-The checkout goes beside the repo (`YOAI_LLAMA_SRC` moves it) and is never updated
-for you: this build wants a source you can pin and re-measure against, not one
-that changes under you between two runs.
+The checkout goes into `third/llama.cpp` at the commit `third/manifest.json`
+pins (`LLAMA_SRC` in `.env` moves it) and is never updated for you: this build wants a source you can pin and re-measure against, not one that
+changes under you between two runs.
 
 That assembles `examples/harmony/prebuilt/llama-sdk/<abi>/`, which the app's CMakeLists
 finds by itself — **building it is what turns the lane on**, and deleting it
@@ -229,14 +236,15 @@ HarmonyOS app and this bench. `cli/` above is still the fastest way to exercise
 the core; this is the same core with a window on it.
 
 ```
-cd desktop
+cd examples/desktop
 python build.py
 ```
 
-That builds the Node-API addon and the Electron bundles; `npm run dev` after
-that is the loop while writing UI. The on-device lane is off by default for the
-same reason it is everywhere else and turns on the same way: `python build.py
-clean llama`, with a llama.cpp checkout beside the repo.
+That builds the Node-API addon, with the on-device engine and speech output,
+and the Electron bundles, and on Windows the app as one directory that runs on
+its own: `examples/desktop/dist-win-x64/YoAI.exe`. The first run fetches
+llama.cpp and qwentts.cpp into `third/`. `npm run dev` after that is the loop
+while writing UI.
 
 One directory rather than an `electron/` and a `web/`, and
 [examples/desktop/README.md](examples/desktop/README.md) argues it: a browser cannot mmap a GGUF

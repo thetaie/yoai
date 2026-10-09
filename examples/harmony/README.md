@@ -104,7 +104,9 @@ wants anyway.
 
 The script finds DevEco by reading the `.home` marker it leaves in its own
 config directory, and derives the NDK, node and `DEVECO_SDK_HOME` from there, so
-none of that needs to be in your environment. `DEVECO_HOME` overrides it.
+none of that needs to be in your environment. With the command-line tools
+instead, which leave no marker, it takes the install from the `DEVECO_SDK_HOME`
+their setup has you set.
 
 Two things worth knowing if you ever run hvigor by hand: `DEVECO_SDK_HOME` must
 point at the SDK *root* (the directory holding `default/`), not at the
@@ -116,7 +118,8 @@ DevEco ships at `tools/node`.
 ## On-device models
 
 Built by default, but the one thing the script will not fetch for you is
-llama.cpp itself — clone it once (beside the repo, or set `LLAMA_SRC`) and the
+llama.cpp itself — clone it once with `python ../../third/sync.py clone
+llama.cpp` (into the repo's `third/`, or set `LLAMA_SRC`) and the
 bare `python build.py` covers the rest. To build only this part:
 
 ```

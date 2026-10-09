@@ -3,14 +3,48 @@
 #include <curl/curl.h>
 
 #include <cctype>
+#include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
 
 namespace yoai { namespace utils {
+
+namespace {
+
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__OHOS__)
+// The distro's CA bundle, looked for once per process. nullptr when
+// SSL_CERT_FILE or SSL_CERT_DIR is set -- somebody chose, and OpenSSL reads
+// both itself -- or when none of these exists, which leaves OpenSSL's default.
+const char* linux_ca_bundle() {
+    static const char* const found = []() -> const char* {
+        if (std::getenv("SSL_CERT_FILE") || std::getenv("SSL_CERT_DIR")) return nullptr;
+        static const char* const bundles[] = {
+            "/etc/ssl/certs/ca-certificates.crt",                 // Debian, Ubuntu, Arch
+            "/etc/pki/tls/certs/ca-bundle.crt",                   // Fedora, RHEL
+            "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",  // CentOS, RHEL 7+
+            "/etc/ssl/ca-bundle.pem",                             // openSUSE
+            "/etc/ssl/cert.pem",                                  // Alpine
+        };
+        for (const char* path : bundles) {
+            if (FILE* f = std::fopen(path, "rb")) {
+                std::fclose(f);
+                return path;
+            }
+        }
+        return nullptr;
+    }();
+    return found;
+}
+#endif
+
+}
 
 void configure_tls_trust(void* handle) {
     CURL* curl = static_cast<CURL*>(handle);
 #if defined(__OHOS__)
     curl_easy_setopt(curl, CURLOPT_CAINFO, "/etc/ssl/certs/cacert.pem");
+#elif defined(__linux__) && !defined(__ANDROID__)
+    if (const char* bundle = linux_ca_bundle()) curl_easy_setopt(curl, CURLOPT_CAINFO, bundle);
 #elif defined(CURLSSLOPT_NATIVE_CA)
     curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, static_cast<long>(CURLSSLOPT_NATIVE_CA));
 #else

@@ -24,8 +24,9 @@ python build.py        # python3 on macOS / Linux
 
 `yoai-asr` is always built, but it can only transcribe when speech
 recognition is compiled in. That needs ggml, which the `asr` argument builds
-from a llama.cpp checkout (by default one next to this repo; set
-`YOAI_LLAMA_SRC` in `.env` otherwise -- see [.env.example](../.env.example)):
+from a llama.cpp checkout (by default `third/llama.cpp`, which the first
+build fetches; set `LLAMA_SRC` in `.env` otherwise -- see
+[.env.example](../.env.example)):
 
 ```
 python build.py asr
@@ -41,8 +42,8 @@ python build.py llama
 
 `tts` compiles speech output (Qwen3-TTS) into the core the same way, without
 the desktop app. It needs a qwentts.cpp checkout as well as llama.cpp, whose
-ggml it compiles; both default to checkouts beside this repo (`YOAI_QTTS_SRC`,
-`YOAI_LLAMA_SRC`). It uses the GPU through Vulkan when `VULKAN_SDK` is set and
+ggml it compiles; both default to checkouts in `third/` (`QTTS_SRC`,
+`LLAMA_SRC` in `.env` move them). It uses the GPU through Vulkan when `VULKAN_SDK` is set and
 otherwise builds for the CPU, with a warning. No tool here drives it yet;
 `yoai-reader-test` with a talker and a codec GGUF reads a passage aloud.
 

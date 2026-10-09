@@ -8,8 +8,9 @@ says what each of its fields means.
   check    (default) say what is there, whether it is on the pinned commit,
            whether the patches are applied, whether anything else is in the
            tree. Changes nothing.
-  clone    clone whatever is missing at its pinned commit, init submodules,
-           apply patches. Existing checkouts are left alone.
+  clone    fetch whatever is missing: the pinned commit alone, without its
+           history, submodules the same way, then the patches. Existing
+           checkouts are left alone.
   update   move each checkout to its branch tip and rewrite the commit values
            in manifest.json with the new pins. Patches come off first and go
            back on after, so one that no longer fits STOPS that dependency
@@ -23,18 +24,16 @@ says what each of its fields means.
   name ... limit to these (the manifest's top-level names, case-insensitive).
            No name means all of them.
 
-Checkouts are siblings of this repo, not children of it. That is not taste:
-they are multi-gigabyte trees carrying their own build output, and one
-`git clean -xdf` in here would delete them. Each one's location can be
-overridden by the same variable the build scripts already read -- LLAMA_SRC,
-MNN_SRC, QTTS_SRC, COSYVOICE_SRC, VCPKG_ROOT -- so this script and the builds
-cannot end up pointing at different trees.
+Checkouts live in this directory, third/<name>, which .gitignore keeps out of
+the repo -- README.md has why. Each one's location can be overridden by the
+same variable the build scripts read, by the same rules, so this script and
+the builds cannot end up pointing at different trees.
 
-Env overrides:
-  THIRD_ROOT   where checkouts live (default: this repo's parent directory)
+Settings:
   <dep>_SRC    one checkout's exact path; see each entry's env in manifest.json
-  Each <dep>_SRC also reads as YOAI_<dep>_SRC, from the environment or from
-  .env at the repository root -- the same rules the build scripts load by.
+  Read from .env at the repository root or the environment, .env winning, and
+  YOAI_<dep>_SRC in the environment over both -- the same rules the build
+  scripts load by.
 
 Python 3.8 or newer, standard library only.
 """
@@ -203,33 +202,68 @@ def do_patches(dep, act):
 
 
 # --- Clone ---------------------------------------------------------------------
-# At the pinned commit. Not --depth 1 and not --branch: the pin is a commit
-# rather than a tag, and it is usually behind the tip, so neither shortcut can
-# check it out.
+# The pinned commit alone, not its history: an empty repository, then one
+# `fetch --depth 1` of the hash. A host that serves a commit by hash -- GitHub
+# does -- sends just that tree, a fraction of a full clone; one that refuses
+# gets a full fetch, so the pin is still reached, only slower. Not
+# `clone --depth 1`: that takes the branch tip, and the pin is usually behind
+# it. `git fetch --unshallow` in a checkout brings its history back.
+#
+# A fetch that fails takes the half-made repository with it: left behind, its
+# .git would read as a checkout already there, and the next clone would skip it.
 def do_clone(dep):
-    say("    cloning...")
-    if not git("clone", dep.url, dep.dir):
+    if os.path.isdir(dep.dir) and os.listdir(dep.dir):
+        warn("    %s exists and is not empty; nothing is cloned into it" % dep.dir)
         return False
-    if not git("-C", dep.dir, "checkout", "--detach", dep.commit):
-        return False
-    if dep.submodules and not git("-C", dep.dir, "submodule", "update", "--init", "--recursive"):
+    say("    fetching %s..." % dep.commit[:12])
+    try:
+        ok = (git("init", "--quiet", dep.dir)
+              and git("-C", dep.dir, "remote", "add", "origin", dep.url)
+              and (git("-C", dep.dir, "fetch", "--depth", "1", "origin", dep.commit)
+                   or full_fetch(dep))
+              and git("-C", dep.dir, "checkout", "--quiet", "--detach", dep.commit)
+              and (not dep.submodules or submodules(dep.dir, shallow=True)))
+    except KeyboardInterrupt:
+        build.rmtree(dep.dir)
+        raise
+    if not ok:
+        build.rmtree(dep.dir)
         return False
     return do_patches(dep, "apply")
+
+
+def full_fetch(dep):
+    say("    the host would not send the commit alone; fetching the history")
+    return git("-C", dep.dir, "fetch", "origin")
+
+
+def submodules(tree, shallow):
+    """Every submodule at the commit its parent records: alone when `shallow`
+    and the host allows it, with the history otherwise."""
+    args = ("-C", tree, "submodule", "update", "--init", "--recursive")
+    if shallow and git(*(args + ("--depth", "1"))):
+        return True
+    return git(*args)
 
 
 # --- Update --------------------------------------------------------------------
 # Move to the branch tip. The patches come off before the fetch: pulling over
 # a patched file either conflicts or silently merges, and neither is a thing
 # to discover during a build three days later.
+#
+# A shallow checkout, which is what clone makes, stays shallow. One with its
+# history keeps it: --depth on a full repository would cut the history off.
 def do_update(dep):
     if not do_patches(dep, "reverse"):
         return False
+    shallow = git_out("-C", dep.dir, "rev-parse", "--is-shallow-repository").strip() == "true"
     say("    fetching...")
-    if not git("-C", dep.dir, "fetch", "origin", dep.branch):
+    depth = ("--depth", "1") if shallow else ()
+    if not git(*(("-C", dep.dir, "fetch") + depth + ("origin", dep.branch))):
         return False
     if not git("-C", dep.dir, "checkout", "--detach", "FETCH_HEAD"):
         return False
-    if dep.submodules and not git("-C", dep.dir, "submodule", "update", "--init", "--recursive"):
+    if dep.submodules and not submodules(dep.dir, shallow):
         return False
     dep.commit = git_out("-C", dep.dir, "rev-parse", "HEAD").strip()
     return do_patches(dep, "apply")
@@ -330,7 +364,6 @@ def main(argv):
     # No names: a clone target does not exist yet, and a missing checkout is
     # what check and verify report.
     build.load_env()
-    third_root = os.environ.get("THIRD_ROOT") or os.path.dirname(REPO)
 
     if shutil.which("git") is None:
         warn("need git on PATH")
@@ -358,7 +391,7 @@ def main(argv):
         return 1
 
     if mode != "verify":
-        say("[third] root=%s  mode=%s" % (third_root, mode))
+        say("[third] mode=%s" % mode)
         say()
 
     failed = []
@@ -367,7 +400,7 @@ def main(argv):
             continue
         # Where it lives: the build scripts' own variable wins, so the two can
         # never disagree about which tree is being built.
-        dep.dir = os.environ.get(dep.env) or os.path.join(third_root, dep.name)
+        dep.dir = os.environ.get(dep.env) or build.third_dir(dep.name)
         present = os.path.isdir(os.path.join(dep.dir, ".git"))
 
         if mode == "verify":

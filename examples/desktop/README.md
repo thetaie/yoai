@@ -47,18 +47,24 @@ other should.
 
 ## Building
 
-Needs what the root build needs — CMake, a C++11 compiler, curl / OpenSSL —
-plus Node 20 or newer.
+Needs what the root build needs — git, CMake, a C++11 compiler — plus Node 20
+or newer.
 
 ```
 python build.py      # python3 on macOS / Linux
 ```
 
-That builds the addon into `build/Release/yoai.node` and the Electron
-bundles into `out/`. The two are separate arguments (`native`, `app`) because the
-C++ half is minutes and rarely changes while the UI half is seconds. After a
-change under `src/` or `native/`, `python build.py native` rebuilds the addon alone;
-close the app first, since a running one holds `yoai.node` open.
+That builds the addon into `build/yoai.node`, with the on-device engine and
+speech output, and the Electron bundles into `out/`, and on Windows puts the app
+together in `dist-win-x64/` — run `YoAI.exe` there. The first run also fetches
+the llama.cpp and qwentts.cpp checkouts into `../../third/` and builds both
+engines, which takes a while; later runs are incremental.
+
+The halves are also separate arguments (`native`, `app`), because the C++ half
+is minutes and rarely changes while the UI half is seconds, and naming either
+leaves the package out. After a change under `src/` or `native/`,
+`python build.py native` rebuilds the addon alone; close the app first, since a
+running one holds `yoai.node` open.
 
 While writing UI, the loop is:
 
@@ -76,19 +82,35 @@ and ships an `install-electron` bin instead. Without this line, `npm install`
 leaves `node_modules/electron/dist` missing and every command that starts the app
 fails with `Error: Electron uninstall`, which names neither npm nor a download.
 
+### The app on its own
+
+On Windows the bare build ends by packaging the app with electron-builder
+([electron-builder.yml](electron-builder.yml)) into `dist-win-x64/`: one
+directory holding everything the app runs with, which runs where it is put —
+`YoAI.exe`. There is no installer; to hand it on, copy or zip the directory.
+`python build.py dist` is the same thing named. It takes a few seconds, and a
+running `YoAI.exe` has to be closed first.
+
+`yoai.node` cannot load from inside the asar, so it goes into the package's
+`resources/`, with every DLL it needs that a fresh Windows may lack: curl,
+OpenSSL and zlib from vcpkg; `vcruntime140.dll` and `vcomp140.dll` from Visual
+Studio's redistributable; and `vulkan-1.dll`, the Vulkan loader, without which
+the addon would not load on a machine with no GPU driver. They are found by
+reading the imports, and an import nothing supplies stops the build rather
+than the app. The speaker's voice files go into `resources/speaker/`.
+
 ### On-device models
 
-The GGUF lane is off by default here for the same reason it is off in the root
-build: it is a few hundred megabytes of static archives, and `src/llm/chat/local.cpp`
-compiles to a truthful stub without them. Turning it on:
+The GGUF lane is on by default: a bare `python build.py` builds it, fetching
+llama.cpp first when it is not there. Speech output (`qtts`) comes along the
+same way, on the GPU through Vulkan where there is one, and on the CPU, with a
+warning that says what to install, where there is none. Naming lanes builds
+those instead — `python build.py native llama` — and MNN's omni lane only ever
+comes that way.
 
-```
-git clone --depth 1 https://github.com/ggml-org/llama.cpp ../../../llama.cpp
-python build.py clean llama
-```
-
-`clean` is not optional when changing the lane set — CMake caches it, so adding
-`llama` to a tree configured without it silently builds the same addon again.
+Adding a lane to an existing tree needs nothing more: the addon is configured
+again on every run. Dropping one is what needs `clean` — a lane not asked for is
+not passed at all, so CMake keeps the value the tree had.
 
 The settings screen asks `yoai_local_available()` before offering the
 file picker, so a build without the lane says so rather than failing later. The
@@ -133,9 +155,10 @@ npm run palettes
 
 ## What is not here
 
-- **Packaging.** `npm run build` produces `out/`, which `npm run preview` runs.
-  There is no installer configuration: signing and per-platform packaging is its
-  own job and an untested config would be worse than none.
+- **Packaging off Windows, and signing.** `python build.py dist` packages for
+  Windows only so far; macOS and Linux follow once the Windows package has run
+  on a machine that never built anything. Nothing is signed, so Windows
+  SmartScreen warns the first time a downloaded copy of `YoAI.exe` is run.
 - **Voice, TTS and bundles.** They are in the C ABI and deliberately not bound
   in [native/src/binding.cpp](native/src/binding.cpp) — nothing here calls them
   yet, and an export nobody uses is a second place to keep correct.

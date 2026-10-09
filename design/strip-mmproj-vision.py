@@ -34,21 +34,23 @@ import sys
 from pathlib import Path
 
 # gguf-py travels with llama.cpp rather than pip, so find it the way the rest of
-# this repo finds llama.cpp: a sibling checkout, overridable.
+# this repo finds llama.cpp: through the root build.py's settings, loaded by
+# path as the build scripts load it.
 def _import_gguf():
-    import os
-    candidates = []
-    if os.environ.get("LLAMA_SRC"):
-        candidates.append(Path(os.environ["LLAMA_SRC"]) / "gguf-py")
-    here = Path(__file__).resolve()
-    candidates.append(here.parents[2] / "llama.cpp" / "gguf-py")
-    for c in candidates:
-        if (c / "gguf" / "__init__.py").exists():
-            sys.path.insert(0, str(c))
-            return
+    import importlib.util
+    sys.dont_write_bytecode = True
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("yoai_build", str(root / "build.py"))
+    b = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(b)
+    b.load_env()
+    c = Path(b.env("LLAMA_SRC", b.third_dir("llama.cpp"))) / "gguf-py"
+    if (c / "gguf" / "__init__.py").exists():
+        sys.path.insert(0, str(c))
+        return
     raise SystemExit(
-        "gguf-py not found. Set LLAMA_SRC to a llama.cpp checkout, or clone one "
-        "beside this repository."
+        "gguf-py not found under %s. Set LLAMA_SRC in .env to a llama.cpp checkout, "
+        "or fetch one: python third/sync.py clone llama.cpp" % c.parent
     )
 
 

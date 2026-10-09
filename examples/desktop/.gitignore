@@ -10,3 +10,9 @@ node_modules/.tmp
 # the note above SDK in build.py -- so the root .gitignore's `build` does not
 # reach them.
 sdk
+
+# `build.py dist`: what goes into the package's resources/, electron-builder's
+# scratch directory, and the app, one directory per platform.
+stage
+stage-out
+dist-*

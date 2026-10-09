@@ -38,21 +38,25 @@ checkout (~200 MB, which this script will not clone for you) plus a few
 minutes of cross-compile. To build the app WITHOUT the engine, name the two
 targets you do want: python build.py deps hap
 
-Environment, each also as YOAI_<NAME> in the environment or in .env at the
-repository root, which wins -- see .env.example:
-  DEVECO_HOME     DevEco Studio / command-line-tools install (default: read
-                  from DevEco's own .home marker, else common locations)
-  VCPKG_ROOT      vcpkg checkout (default: a sibling of the repo)
-  OHOS_SDK_ROOT   the SDK dir CONTAINING native/ (default: from DEVECO_HOME)
-  LLAMA_SRC       llama.cpp checkout (default: a sibling of the repo).
+DevEco Studio, or the command-line tools, is found without a setting: from the
+DEVECO_SDK_HOME their setup puts in the environment (the install is the
+directory above it), else from the .home marker DevEco Studio leaves in its
+config directory, else at the usual install locations. The OpenHarmony SDK,
+node and hvigor all come from that one install.
+
+Settings, each read from .env at the repository root -- see .env.example --
+or the environment, .env winning; YOAI_<NAME> in the environment wins over
+both, for one run:
+  VCPKG_ROOT      vcpkg checkout (default: ../../third/vcpkg)
+  LLAMA_SRC       llama.cpp checkout (default: ../../third/llama.cpp).
                   Read by `llama` AND by `qtts`, which compiles its ggml.
-  LLAMA_SDK_DIR   where to assemble the llama SDK (default: auto-detected)
-  MNN_SRC         MNN checkout (default: a sibling of the repo), `mnn` only
-  QTTS_SRC        qwentts.cpp checkout (default: a sibling), `qtts` only
+  MNN_SRC         MNN checkout (default: ../../third/MNN), `mnn` only
+  QTTS_SRC        qwentts.cpp checkout (default: in ../../third), `qtts` only
   VULKAN_SDK      a host Vulkan SDK, required by `vulkan`
 
-`python ../../third/sync.py clone` fetches all of these at their pinned commits,
-with the patches this script expects already applied.
+`python ../../third/sync.py clone` fetches the source checkouts above at their
+pinned commits, with the patches this script expects already applied. `deps`
+clones vcpkg itself, at vcpkg.json's builtin-baseline.
 """
 
 # Python 3.8 or newer, standard library only.
@@ -135,8 +139,7 @@ def main(argv):
     o = parse(argv)
     # After the arguments, so the help text still prints when a configured
     # path is wrong. The names are the paths this script reads.
-    if not b.load_env("DEVECO_HOME", "VCPKG_ROOT", "OHOS_SDK_ROOT", "LLAMA_SRC", "MNN_SRC",
-                      "QTTS_SRC", "VULKAN_SDK"):
+    if not b.load_env("VCPKG_ROOT", "LLAMA_SRC", "MNN_SRC", "QTTS_SRC", "VULKAN_SDK"):
         return 1
 
     o.abi = o.abi or "arm64-v8a"
@@ -167,7 +170,6 @@ def main(argv):
 
     deveco = deveco_home()
     sdk = ohos_sdk(deveco)
-    vcpkg_root = b.env("VCPKG_ROOT", b.sibling("vcpkg"))
 
     say("[build] abi=%s" % o.abi)
     say("[build] sdk=%s" % sdk)
@@ -181,6 +183,9 @@ def main(argv):
     say()
 
     if o.deps:
+        # The tree before the alias: space_free() puts the alias inside it,
+        # and a clone needs the directory not to exist yet.
+        vcpkg_root = b.vcpkg_tree()
         sdk = space_free(sdk, vcpkg_root)
         b.vcpkg_deps(vcpkg_root, TRIPLETS[o.abi], os.path.join(HERE, "prebuilt", o.abi),
                      overlay=os.path.join(HERE, "vcpkg-triplets"))
@@ -211,16 +216,27 @@ def main(argv):
 def deveco_home():
     """DevEco Studio, or the command-line tools. Everything below comes out of
     that one install: the NDK for the native halves, and node + hvigor for
-    `hap`.
+    `hap`. There is no setting for it; it is found, first match wins:
 
-    Found by reading the `.home` file DevEco leaves in its per-version config
-    directory, which holds the install path as one line. That beats guessing
-    at install locations -- this repo's own author installs to
-    D:\\Huawei\\DevEco Studio, which no hardcoded list would have found. The
-    newest version's marker wins."""
-    home = b.env("DEVECO_HOME")
-    if home:
-        return home
+      DEVECO_SDK_HOME  hvigor's own variable, which the command-line tools'
+                       setup puts in the environment: the install's sdk/, so
+                       the install is the directory above. Taken only when it
+                       holds an SDK this script can build with, so one left
+                       over from an older layout falls through.
+      .home            the file DevEco Studio leaves in its per-version config
+                       directory, holding the install path as one line. That
+                       beats guessing at install locations -- this repo's own
+                       author installs to D:\\Huawei\\DevEco Studio, which no
+                       hardcoded list would have found. The newest version's
+                       marker wins.
+      the usual install locations, for a layout with neither."""
+    sdk_home = b.env("DEVECO_SDK_HOME")
+    if sdk_home:
+        sdk_home = os.path.normpath(sdk_home)
+        if (os.path.basename(sdk_home).lower() == "sdk"
+                and os.path.isfile(toolchain_file(os.path.join(sdk_home, "default", "openharmony")))):
+            return os.path.dirname(sdk_home)
+
     if b.WINDOWS:
         config = [os.path.join(b.env("LOCALAPPDATA"), "Huawei")]
     else:
@@ -249,29 +265,29 @@ def deveco_home():
 
 
 def ohos_sdk(deveco):
-    """OHOS_SDK_ROOT, which must name the directory CONTAINING native/ (vcpkg's
-    scripts/toolchains/ohos.cmake appends /native itself). Exported, because
-    vcpkg's OHOS toolchain reads it from the environment of the port builds
-    it spawns, not from anything passed on the command line."""
-    sdk = b.env("OHOS_SDK_ROOT")
-    if not sdk:
-        candidates = []
-        if deveco:
-            candidates.append(os.path.join(deveco, "sdk", "default", "openharmony"))
-        if b.WINDOWS:
-            candidates.append(os.path.join(b.env("LOCALAPPDATA"), "OpenHarmony", "Sdk",
-                                           "default", "openharmony"))
-        for d in candidates:
-            if os.path.isfile(toolchain_file(d)):
-                sdk = d
-                break
-    if not sdk:
-        fail("[build] OpenHarmony SDK not found. Set OHOS_SDK_ROOT to the directory containing native/,",
-             "[build] or DEVECO_HOME to the DevEco Studio / command-line-tools install.")
-    if not os.path.isfile(toolchain_file(sdk)):
-        fail('[build] No native/build/cmake/ohos.toolchain.cmake under "%s".' % sdk)
-    os.environ["OHOS_SDK_ROOT"] = sdk
-    return sdk
+    """The OpenHarmony SDK, the directory CONTAINING native/: the one inside
+    the DevEco install `hap` builds with, so the native halves and the app
+    cannot end up on two different SDK versions.
+
+    Exported as OHOS_SDK_ROOT, because vcpkg's OHOS toolchain
+    (scripts/toolchains/ohos.cmake, which appends /native itself) reads it
+    from the environment of the port builds it spawns, not from anything
+    passed on the command line. A value already in the environment is
+    replaced, not read."""
+    candidates = []
+    if deveco:
+        candidates.append(os.path.join(deveco, "sdk", "default", "openharmony"))
+    if b.WINDOWS:
+        candidates.append(os.path.join(b.env("LOCALAPPDATA"), "OpenHarmony", "Sdk",
+                                       "default", "openharmony"))
+    for sdk in candidates:
+        if os.path.isfile(toolchain_file(sdk)):
+            os.environ["OHOS_SDK_ROOT"] = sdk
+            return sdk
+    fail("[build] OpenHarmony SDK not found -- no native/build/cmake/ohos.toolchain.cmake in:",
+         *["[build]   " + d for d in candidates],
+         "[build] Install DevEco Studio, or for the command-line tools set DEVECO_SDK_HOME",
+         "[build] to their sdk/ directory, as their setup instructions do.")
 
 
 def toolchain_file(sdk):
@@ -292,8 +308,9 @@ def space_free(sdk, vcpkg_root):
     if " " not in sdk:
         return sdk
     if " " in vcpkg_root:
-        fail('[deps] SDK path contains a space ["%s"] and so does VCPKG_ROOT;' % sdk,
-             "[deps] point OHOS_SDK_ROOT at an SDK under a space-free path.")
+        fail('[deps] the SDK path has a space ["%s"], and so does the vcpkg path' % sdk,
+             '[deps] ["%s"] that would hold a space-free alias to it. Put the' % vcpkg_root,
+             "[deps] repository, or VCPKG_ROOT, on a path without spaces.")
     link = os.path.join(vcpkg_root, "ohos-sdk")
     if not os.path.isfile(toolchain_file(link)):
         say("[deps] SDK path has a space; linking a space-free alias: %s" % link)
@@ -338,12 +355,27 @@ def tools(sdk, tag):
 
 
 def cross(src, build, toolchain, ninja, abi):
-    """The configure arguments every cross build here starts with."""
+    """The configure arguments every cross build here starts with -- after
+    discarding `build` if it was configured from another source tree, which
+    CMake would refuse."""
+    b.fresh_tree(build, src)
     return ["-S", src, "-B", build, "-G", "Ninja",
             "-DCMAKE_MAKE_PROGRAM=" + ninja,
             "-DCMAKE_TOOLCHAIN_FILE=" + toolchain,
             "-DOHOS_ARCH=" + abi,
             "-DCMAKE_BUILD_TYPE=Release"]
+
+
+# Force-included into the C files of every ggml this script compiles -- the
+# llama lane's and the qtts lane's, which are the same llama.cpp tree. The
+# header says what OHOS lacks and why this beats a patch to ggml-cpu.c.
+GGML_OHOS = os.path.join(b.PATCHES, "ggml-ohos-affinity.h")
+
+
+def ggml_flags():
+    """What ggml needs on OHOS, passed as C flags rather than patched in. The
+    OHOS toolchain file keeps a CMAKE_C_FLAGS given on the command line."""
+    return ['-DCMAKE_C_FLAGS=-include "%s"' % b.fwd(GGML_OHOS)]
 
 
 # -----------------------------------------------------------------------------
@@ -375,21 +407,15 @@ def build_llama(o, sdk):
 
     # Not cloned for you, unlike vcpkg: this build wants a checkout you can pin
     # and re-measure against, not one silently refreshed underneath it.
-    src = b.env("LLAMA_SRC", b.sibling("llama.cpp"))
+    src = b.env("LLAMA_SRC", b.third_dir("llama.cpp"))
     if not os.path.isfile(os.path.join(src, "include", "llama.h")):
         fail('[llama] no llama.cpp at "%s".' % src,
-             "[llama] clone it at the pinned commit, with its patch applied:",
+             "[llama] clone it at the pinned commit:",
              "[llama]   " + b.sync_cmd("clone", "llama.cpp"),
              "[llama] or set LLAMA_SRC to an existing checkout.")
     say("[llama] arch=%s" % (arch or "baseline armv8-a"))
     say("[llama] src=%s" % src)
 
-    # The OHOS affinity patch, which this lane needs and never used to apply.
-    # It was in the checkout by hand, undocumented, for long enough that
-    # nothing here knew it was load-bearing -- found only when third/ went to
-    # record what these trees contain. Now it is a file and this is the line
-    # that applies it.
-    b.qpatch(src, "llama-ggml-ohos-affinity.patch")
     b.third_verify("llama.cpp", "LLAMA_SRC", src)
 
     _native, toolchain, cmake, ninja = tools(sdk, "llama")
@@ -397,8 +423,7 @@ def build_llama(o, sdk):
     # In-tree under prebuilt/, for the same reason the vcpkg deps are: the
     # app's CMakeLists resolves it by repo-relative path, so there is no
     # machine-local absolute path to paste into a tracked file.
-    default_lsdk = os.path.join(HERE, "prebuilt", "llama-sdk", o.abi)
-    lsdk = b.env("LLAMA_SDK_DIR", default_lsdk)
+    lsdk = os.path.join(HERE, "prebuilt", "llama-sdk", o.abi)
 
     if o.clean:
         say("[llama] cleaning")
@@ -417,7 +442,7 @@ def build_llama(o, sdk):
         "-DLLAMA_BUILD_TESTS=OFF",
         "-DLLAMA_BUILD_EXAMPLES=OFF",
         "-DLLAMA_BUILD_SERVER=OFF",
-        "-DLLAMA_BUILD_TOOLS=OFF"]
+        "-DLLAMA_BUILD_TOOLS=OFF"] + ggml_flags()
     if arch:
         cfg.append("-DGGML_CPU_ARM_ARCH=" + arch)
     run([cmake] + cfg)
@@ -443,10 +468,6 @@ def build_llama(o, sdk):
     b.copy_all(libs, libdir)
 
     say("[llama] done -> %s" % lsdk)
-    if os.path.normcase(os.path.abspath(lsdk)) != os.path.normcase(default_lsdk):
-        say("[llama] that is NOT the auto-detected location, so name it in")
-        say("[llama] entry/build-profile.json5:")
-        say('[llama]   "arguments": "-DLLAMA_CPP_DIR=%s"' % b.fwd(lsdk))
 
 
 # -----------------------------------------------------------------------------
@@ -468,7 +489,7 @@ def build_llama(o, sdk):
 # that whatever links it later resolves it by repo-relative path.
 # -----------------------------------------------------------------------------
 def build_mnn(o, sdk):
-    src = b.env("MNN_SRC", b.sibling("MNN"))
+    src = b.env("MNN_SRC", b.third_dir("MNN"))
     if not os.path.isfile(os.path.join(src, "CMakeLists.txt")):
         fail('[mnn] no MNN at "%s".' % src,
              "[mnn] clone it at the pinned commit:",
@@ -590,7 +611,7 @@ def build_mnn(o, sdk):
 # SDKs so the app's CMakeLists finds it the same way.
 # -----------------------------------------------------------------------------
 def build_qtts(o, sdk):
-    src = b.env("QTTS_SRC", b.sibling("qwentts.cpp"))
+    src = b.env("QTTS_SRC", b.third_dir("qwentts.cpp"))
     if not os.path.isfile(os.path.join(src, "CMakeLists.txt")):
         fail('[qtts] no qwentts.cpp at "%s".' % src,
              "[qtts] clone it at the pinned commit, submodule and patches included:",
@@ -618,7 +639,7 @@ def build_qtts(o, sdk):
     #
     # So this target needs a llama.cpp checkout even when `llama` is not being
     # built, which is the reason for the check.
-    llama_src = b.env("LLAMA_SRC", b.sibling("llama.cpp"))
+    llama_src = b.env("LLAMA_SRC", b.third_dir("llama.cpp"))
     if not os.path.isfile(os.path.join(llama_src, "ggml", "CMakeLists.txt")):
         fail('[qtts] qtts compiles llama.cpp\'s ggml and there is none at "%s".'
              % os.path.join(llama_src, "ggml"),
@@ -626,23 +647,12 @@ def build_qtts(o, sdk):
              "[qtts] or set LLAMA_SRC to an existing checkout.")
     say("[qtts] ggml=%s" % os.path.join(llama_src, "ggml"))
 
-    # Patches, applied to somebody else's checkouts. third/patches/ carries the
-    # full reasoning for each; in one line:
-    #
-    #   ggml-cpu.c   OHOS takes the __linux__ affinity branch, where musl needs
-    #                _GNU_SOURCE for cpu_set_t and has no pthread_setaffinity_np.
-    #                Applied to LLAMA_SRC, because that is the ggml being
-    #                compiled now. qwentts-ggml-ohos-affinity.patch is the same
-    #                fix for the submodule, kept in third/patches for whoever
-    #                points GGML_SOURCE_DIR back at it, and deliberately not
-    #                applied here.
-    #   backend.h    the CPU thread count is fixed at hardware_concurrency()/2
-    #                with no parameter, and that heuristic is about SMT, not
-    #                phones.
-    #
-    # Applied here rather than committed there because the checkouts are
-    # upstream's and get updated.
-    b.qpatch(llama_src, "llama-ggml-ohos-affinity.patch")
+    # A patch, applied to somebody else's checkout rather than committed there
+    # because the checkout is upstream's and gets updated. third/patches/ has
+    # the full reasoning: the CPU thread count is fixed at
+    # hardware_concurrency()/2 with no parameter, and that heuristic is about
+    # SMT, not phones. What ggml itself needs on OHOS is not a patch -- see
+    # ggml_flags().
     b.qpatch(src, "qwentts-thread-count-override.patch")
     b.third_verify("llama.cpp", "LLAMA_SRC", llama_src)
     b.third_verify("qwentts.cpp", "QTTS_SRC", src)
@@ -661,19 +671,14 @@ def build_qtts(o, sdk):
     # below.
     #
     # GGML_NATIVE=OFF because -march=native is meaningless cross-compiling and
-    # the probe runs on the host. No -D_GNU_SOURCE on the command line: the
-    # affinity patch puts the #define in the one file that needs it. Both
-    # errors are real and both are fixed there -- cpu_set_t and CPU_ZERO, which
-    # musl hides behind _GNU_SOURCE (the OHOS toolchain passes
-    # -D_XOPEN_SOURCE=600), and pthread_setaffinity_np, which musl does not
-    # have at all and which the patch routes to sched_setaffinity, the same
-    # call the Android branch already makes.
+    # the probe runs on the host. ggml_flags() for the same ggml the llama lane
+    # compiles, so the two builds of it see the same definitions.
     cfg = cross(src, qbuild, toolchain, ninja, o.abi) + [
         "-DGGML_SOURCE_DIR=" + b.fwd(llama_src) + "/ggml",
         "-DBUILD_SHARED_LIBS=OFF",
         "-DQWEN_SHARED=OFF",
         "-DGGML_NATIVE=OFF",
-        "-DGGML_OPENMP=OFF"]
+        "-DGGML_OPENMP=OFF"] + ggml_flags()
     # The same feature set the llama lane uses, and set the same way -- these
     # two are the same ggml compiled twice, so a difference here would be an
     # accident rather than a decision. `arch=` / `baseline` steer both.
@@ -785,7 +790,8 @@ def vulkan_args(native, ninja):
 # -----------------------------------------------------------------------------
 def build_hap(deveco):
     if not deveco:
-        fail("[hap] DevEco Studio not found. Set DEVECO_HOME to its install directory.")
+        fail("[hap] DevEco Studio not found. Install it, or for the command-line tools",
+             "[hap] set DEVECO_SDK_HOME to their sdk/ directory.")
     name = "hvigorw.bat" if b.WINDOWS else "hvigorw"
     # The standalone command-line-tools package lays hvigorw out at bin/.
     for hvigorw in (os.path.join(deveco, "tools", "hvigor", "bin", name),
@@ -793,7 +799,7 @@ def build_hap(deveco):
         if os.path.isfile(hvigorw):
             break
     else:
-        fail('[hap] no hvigorw under "%s" -- is DEVECO_HOME right?' % deveco)
+        fail('[hap] no hvigorw under "%s", the DevEco install found.' % deveco)
 
     node = os.path.join(deveco, "tools", "node")
     os.environ["NODE_HOME"] = node

@@ -33,6 +33,15 @@ namespace yoai { namespace utils {
 // /etc/ssl/certs/cacert.pem, so point CAINFO straight at it. Without this every
 // HTTPS request fails the handshake with the same "SSL peer certificate or SSH
 // remote key was not OK".
+//
+// On desktop Linux the OpenSSL is vcpkg's, linked in statically and built with
+// OPENSSLDIR /etc/ssl. That finds Debian's hashed /etc/ssl/certs/ and Alpine's
+// /etc/ssl/cert.pem, and nothing on a distro that keeps its roots elsewhere --
+// Fedora and RHEL under /etc/pki, openSUSE in /etc/ssl/ca-bundle.pem. NATIVE_CA
+// does not help: Linux has no native store for it to read. So CAINFO is set to
+// the first bundle found at the paths the distros use, looked for once per
+// process. SSL_CERT_FILE or SSL_CERT_DIR in the environment is left to
+// OpenSSL, which reads both.
 void configure_tls_trust(void* curl);
 
 //------------------------------------------------------------------------------

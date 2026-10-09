@@ -17,3 +17,10 @@ __pycache__
 
 # Local build settings: paths on this machine. See .env.example.
 .env
+
+# The checkouts third/sync.py fetches, one per entry in third/manifest.json.
+/third/llama.cpp/
+/third/qwentts.cpp/
+/third/cosyvoice.cpp/
+/third/MNN/
+/third/vcpkg/

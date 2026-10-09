@@ -1,24 +1,35 @@
 #!/usr/bin/env python3
-"""Usage: python build.py [clean] [native] [llama] [qtts] [mnn] [app]
+"""Usage: python build.py [clean] [native] [llama] [qtts] [mnn] [app] [dist]
 
-Desktop client build: the Node-API addon, then the Electron bundles.
+Desktop client build: the Node-API addon, the Electron bundles, and on Windows
+the app as a directory that runs on its own.
 
-  (no args)  native + app
+  (no args)  native + app + dist, with llama and qtts; dist on Windows only
+             so far, elsewhere `npm run preview` runs what was built. With no
+             lane named, the llama.cpp and qwentts.cpp checkouts are fetched
+             into third/ when they are not there (git and the network, once),
+             and each lane is built when its checkouts are on what
+             third/manifest.json pins. mnn only when named.
   native     just the C++ side: the Node-API addon built from native/
              (build/yoai.node). Rebuild it after any change under src/ or
              native/, with the app closed -- a running app holds the file.
   llama      assemble a desktop llama.cpp SDK and build the addon WITH the
              on-device lane. Implies native. Recognition rides along: it
              links ggml and never libllama, so the same SDK turns it on.
-  qtts       assemble a desktop qwentts.cpp SDK with the platform's GPU
-             backend and build the addon with speech output. Implies native.
-             Needs a llama.cpp checkout too, whether or not `llama` is asked
-             for: it compiles llama.cpp's ggml.
+  qtts       assemble a desktop qwentts.cpp SDK and build the addon with
+             speech output, on the GPU where there is one -- Metal on macOS,
+             Vulkan elsewhere -- and on the CPU, with a warning, where there
+             is none. Implies native. Needs a llama.cpp checkout too, whether
+             or not `llama` is asked for: it compiles llama.cpp's ggml.
   mnn        assemble a desktop MNN SDK and build the addon with the omni
              lane: audio in, a spoken answer out, no text in between.
              Implies native. A second inference engine and 3.8 GB of
              weights -- see design/voice.md before turning it on.
   app        just the Electron bundles (out/)
+  dist       native + app, then the app as one directory that runs where it
+             is put: dist-win-x64/, YoAI.exe in it. Windows only so far. Lanes
+             as for a bare build: llama and qtts unless others are named. A
+             few seconds on top of the rest; close a running YoAI.exe first.
   clean      discard build/ first. ADDING a lane does not need it -- the
              addon is reconfigured every run, so `llama` on an existing tree
              takes effect by itself. DROPPING one does: a lane that is not
@@ -28,18 +39,18 @@ Desktop client build: the Node-API addon, then the Electron bundles.
              are NOT discarded either way.
   help       this text; also -h or --help
 
-Environment, each also as YOAI_<NAME> in the environment or in .env at the
-repository root, which wins -- see .env.example:
+Settings, each read from .env at the repository root -- see .env.example --
+or the environment, .env winning; YOAI_<NAME> in the environment wins over
+both, for one run:
   VS_DIR            Windows: Visual Studio install root
   NINJA             Windows: ninja.exe (default: the one Visual Studio bundles)
-  VCPKG_ROOT        vcpkg checkout. Windows default: the one Visual Studio
-                    bundles. Elsewhere ../../../vcpkg, used only if it exists
-  OPENSSL_ROOT_DIR  macOS/Linux: where to find OpenSSL, when the default
-                    search misses it
-  LLAMA_SRC         llama.cpp checkout (default: a sibling of the repo).
+  VCPKG_ROOT        vcpkg checkout, for curl and OpenSSL (default:
+                    ../../third/vcpkg, cloned on the first run at vcpkg.json's
+                    builtin-baseline)
+  LLAMA_SRC         llama.cpp checkout (default: ../../third/llama.cpp).
                     Read by `llama` AND by `qtts`, which compiles its ggml.
-  QTTS_SRC          qwentts.cpp checkout (default: a sibling), `qtts` only
-  MNN_SRC           MNN checkout (default: a sibling), `mnn` only
+  QTTS_SRC          qwentts.cpp checkout (default: in ../../third), `qtts` only
+  MNN_SRC           MNN checkout (default: in ../../third), `mnn` only
   VULKAN_SDK        Vulkan SDK, for `qtts` off macOS
 """
 
@@ -49,8 +60,10 @@ repository root, which wins -- see .env.example:
 #
 # Python 3.8 or newer, standard library only.
 
+import glob
 import importlib.util
 import os
+import shutil
 import sys
 
 # What every build script shares is in the root build.py. Loaded by path, under
@@ -72,7 +85,13 @@ BUILD = os.path.join(DESKTOP, "build")
 # SDKs survive a lane change too, which is the other thing that used to
 # rebuild them for nothing.
 SDK = os.path.join(DESKTOP, "sdk")
-WORDS = ("clean", "native", "llama", "qtts", "mnn", "app")
+# What `dist` puts in the package's resources/, laid out as it will be there.
+STAGE = os.path.join(DESKTOP, "stage")
+WORDS = ("clean", "native", "llama", "qtts", "mnn", "app", "dist")
+LANES = {"llama", "qtts", "mnn"}
+# What an addon build with no lane named adds by itself, and the checkouts
+# each needs. mnn wants asking for: a second engine and 3.8 GB of weights.
+DEFAULT = (("llama", ("llama.cpp",)), ("qtts", ("qwentts.cpp", "llama.cpp")))
 
 
 def main(argv):
@@ -88,18 +107,28 @@ def main(argv):
         if t not in WORDS:
             fail('Unknown argument "%s". Run %s --help for the options.' % (tok, b.script_cmd(__file__)))
         want.add(t)
-    if want & {"llama", "qtts", "mnn"}:
+    if "dist" in want:
+        # Said before anything is built, rather than after minutes of it.
+        if not b.WINDOWS:
+            fail("[dist] packaging is Windows-only so far; on this platform: %s, then npm run preview"
+                 % b.script_cmd(__file__))
+        want |= {"native", "app"}
+    if want & LANES:
         want.add("native")
-    # No target named means both, which is what a first run wants.
+    # No target named means all of them, which is what a first run wants: an
+    # app that runs. Naming native or app is the quick way round while
+    # working, and leaves dist out.
     if not want & {"native", "app"}:
         want |= {"native", "app"}
+        if b.WINDOWS:
+            want.add("dist")
 
     # After the arguments, so the help text still prints when a configured path
     # is wrong. The names are the paths this script reads.
     if b.WINDOWS:
         names = ("VS_DIR", "NINJA", "VCPKG_ROOT", "LLAMA_SRC", "QTTS_SRC", "MNN_SRC", "VULKAN_SDK")
     else:
-        names = ("VCPKG_ROOT", "OPENSSL_ROOT_DIR", "LLAMA_SRC", "QTTS_SRC", "MNN_SRC", "VULKAN_SDK")
+        names = ("VCPKG_ROOT", "LLAMA_SRC", "QTTS_SRC", "MNN_SRC", "VULKAN_SDK")
     if not b.load_env(*names):
         return 1
 
@@ -111,10 +140,14 @@ def main(argv):
         run(["npm", "install"], cwd=DESKTOP)
 
     if "native" in want:
+        if not want & LANES:
+            want |= b.pick_lanes(DEFAULT, __file__, "the addon", "mnn")
         native(want)
     if "app" in want:
         say("[build] electron-vite")
         run(["npm", "run", "build"], cwd=DESKTOP)
+    if "dist" in want:
+        package()
     return 0
 
 
@@ -188,19 +221,27 @@ def native(want):
     for step in ("configure", "build"):
         run(["node", cmake_js, step] + common)
 
-    # A single-config generator writes it at the root of the output directory,
-    # a multi-config one under Release/. Both are checked because the module
-    # loader in src/main/core.ts searches both, and this message is the one
-    # place that can say which one actually happened.
+    addon = addon_path()
+    if not addon:
+        fail("[build] cmake-js reported success but there is no yoai.node under %s" % BUILD)
+    say("[build] addon at %s" % addon)
+
+
+def addon_path():
+    """The addon this tree built, or None. A single-config generator writes it
+    at the root of the output directory, a multi-config one under Release/.
+    Both are checked because the module loader in src/main/core.ts searches
+    both, and the build's message is the one place that can say which one
+    actually happened."""
     for addon in (os.path.join(BUILD, "yoai.node"), os.path.join(BUILD, "Release", "yoai.node")):
         if os.path.isfile(addon):
-            say("[build] addon at %s" % addon)
-            return
-    fail("[build] cmake-js reported success but there is no yoai.node under %s" % BUILD)
+            return addon
+    return None
 
 
 def vcpkg_args():
-    """The vcpkg toolchain for the addon, when there is one to use.
+    """The vcpkg toolchain for the addon, on every platform, from the tree
+    the root build uses -- the root build's policy, vcpkg_args() there.
 
     VCPKG_MANIFEST_DIR because the source directory cmake-js configures is
     native/, and the vcpkg toolchain looks for vcpkg.json only in the source
@@ -209,21 +250,7 @@ def vcpkg_args():
     to install them into the shared vcpkg_installed/ first -- on a fresh clone,
     where nothing has, find_package(CURL) would fail. MANIFEST_MODE is passed
     as well because it is a cached option."""
-    vcpkg_root = b.env("VCPKG_ROOT")
-    explicit = bool(vcpkg_root)
-    if not b.WINDOWS:
-        # Same policy as the root build: vcpkg is one way to get curl and
-        # openssl, not a requirement off Windows. A VCPKG_ROOT the caller set
-        # is a request, not a hint, so a wrong path is an error.
-        vcpkg_root = vcpkg_root or b.sibling("vcpkg")
-    toolchain = os.path.join(vcpkg_root, "scripts", "buildsystems", "vcpkg.cmake")
-    if not os.path.isfile(toolchain):
-        if b.WINDOWS:
-            fail('[build] no vcpkg at "%s". Set VCPKG_ROOT, or install the vcpkg '
-                 "component of Visual Studio." % vcpkg_root)
-        if explicit:
-            fail("vcpkg not found at %s (from VCPKG_ROOT)." % vcpkg_root)
-        return openssl_args()
+    toolchain = os.path.join(b.vcpkg_tree(), "scripts", "buildsystems", "vcpkg.cmake")
 
     # It does NOT rescue a tree first configured without the manifest: vcpkg
     # refuses to switch an existing build directory to manifest mode, and
@@ -245,17 +272,6 @@ def vcpkg_args():
                    "--CDVCPKG_MANIFEST_MODE=ON"]
 
 
-def openssl_args():
-    # macOS ships libcurl but no OpenSSL headers, and Homebrew leaves openssl@3
-    # unlinked on purpose, so find_package(OpenSSL) comes up empty on a machine
-    # that has it installed.
-    if b.MACOS and not b.env("OPENSSL_ROOT_DIR"):
-        prefix = b.output(["brew", "--prefix", "openssl@3"])
-        if prefix and os.path.isdir(prefix):
-            return ["--CDOPENSSL_ROOT_DIR=" + prefix]
-    return []
-
-
 # The C runtime, on Windows, and it is not a preference. cmake-js forces /MT on
 # the addon unconditionally (cMake.js: "MD builds will crash upon attempting to
 # free memory"), CMake's own default is /MD, and MSVC records the choice in
@@ -271,7 +287,7 @@ STATIC_CRT = ["-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"] if b.WINDOWS else []
 # libllama as well as ggml, so it is the long build -- minutes, not one.
 # -----------------------------------------------------------------------------
 def llama_sdk():
-    src = b.env("LLAMA_SRC", b.sibling("llama.cpp"))
+    src = b.env("LLAMA_SRC", b.third_dir("llama.cpp"))
     if not os.path.isfile(os.path.join(src, "ggml", "include", "ggml.h")):
         fail("no llama.cpp at %s." % src,
              "clone it at the pinned commit, with its patch applied:",
@@ -289,8 +305,9 @@ def llama_sdk():
     # keeps succeeding and the addon keeps failing to link. CMake is idempotent
     # and quick when nothing changed. No generator named, as before: this tree
     # keeps whichever one it was first configured with.
+    b.fresh_tree(lbuild, src)
     run(["cmake", "-S", src, "-B", lbuild,
-         "-DCMAKE_BUILD_TYPE=Release"] + STATIC_CRT + [
+         "-DCMAKE_BUILD_TYPE=Release"] + STATIC_CRT + b.QUIET_THIRD + [
          "-DBUILD_SHARED_LIBS=OFF",
          "-DLLAMA_BUILD_TESTS=OFF",
          "-DLLAMA_BUILD_EXAMPLES=OFF",
@@ -343,7 +360,7 @@ def llama_sdk():
 # short enough; a build directory nested much deeper is not.
 # -----------------------------------------------------------------------------
 def qtts_sdk(gen):
-    src = b.env("QTTS_SRC", b.sibling("qwentts.cpp"))
+    src = b.env("QTTS_SRC", b.third_dir("qwentts.cpp"))
     if not os.path.isfile(os.path.join(src, "src", "qwen.h")):
         fail("no qwentts.cpp at %s." % src,
              "clone it at the pinned commit, submodule and patches included:",
@@ -370,27 +387,37 @@ def qtts_sdk(gen):
     # llama's ggml has no such fusion, so those five ops run unfused -- same
     # output, some unknown amount slower, in the codec stage that is already
     # 45% of the bill. design/voice.md has the symbol tables.
-    ggml = b.env("LLAMA_SRC", b.sibling("llama.cpp"))
+    ggml = b.env("LLAMA_SRC", b.third_dir("llama.cpp"))
     if not os.path.isfile(os.path.join(ggml, "ggml", "CMakeLists.txt")):
         fail("qtts compiles llama.cpp's ggml, and there is none at %s." % os.path.join(ggml, "ggml"),
              "  " + b.sync_cmd("clone", "llama.cpp"))
     b.third_verify("llama.cpp", "LLAMA_SRC", ggml)
 
+    # Without a GPU backend the lane builds for the CPU and says so, as the
+    # root build's does: it works, only slower than real time, and a first
+    # build that stops for want of a Vulkan SDK is worse than one that warns.
+    # GGML_VULKAN is passed either way off macOS, and the tree is configured
+    # every run, so the backend follows the machine rather than the first run.
     vulkan_sdk = b.env("VULKAN_SDK")
-    vulkan = not b.MACOS
+    vulkan = False
     backend = []
     if b.MACOS:
         say("[build] qtts backend: Metal (ggml enables it for APPLE by itself)")
-    elif b.WINDOWS and not vulkan_sdk:
-        fail("qtts needs a Vulkan SDK (VULKAN_SDK is unset) for glslc and vulkan.hpp.")
-    elif not vulkan_sdk and not b.on_path("glslc"):
-        fail("qtts needs Vulkan: the loader, the headers, and glslc.",
-             "  Debian/Ubuntu: apt install libvulkan-dev glslc",
-             "  Fedora:        dnf install vulkan-loader-devel glslc",
-             "or set VULKAN_SDK if you installed the LunarG SDK somewhere else.")
-    else:
+    elif vulkan_sdk or (not b.WINDOWS and b.on_path("glslc")):
+        vulkan = True
         backend = ["-DGGML_VULKAN=ON"] + b.spirv_args(vulkan_sdk)
         say("[build] qtts backend: Vulkan" + (", from " + vulkan_sdk if vulkan_sdk else ""))
+    else:
+        backend = ["-DGGML_VULKAN=OFF"]
+        b.warn("[build] warning: no Vulkan found, so qtts is built for the CPU only.")
+        b.warn("[build]   It works, slower: RTF 1.13 against 0.63 on the GPU where measured.")
+        if b.WINDOWS:
+            b.warn("[build]   For the GPU, install the LunarG Vulkan SDK, which sets VULKAN_SDK,")
+            b.warn("[build]   or set VULKAN_SDK in .env; then run this again.")
+        else:
+            b.warn("[build]   For the GPU: apt install libvulkan-dev glslc (Debian/Ubuntu),")
+            b.warn("[build]   dnf install vulkan-loader-devel glslc (Fedora), or set VULKAN_SDK")
+            b.warn("[build]   in .env; then run this again.")
 
     qbuild = os.path.join(SDK, "qtts")
     sdk = os.path.join(SDK, "qtts-sdk")
@@ -403,12 +430,14 @@ def qtts_sdk(gen):
     # CMAKE_CXX_FLAGS_RELEASE and CMAKE_MSVC_RUNTIME_LIBRARY is read by nobody.
     # llama.cpp asks for a newer CMake, so it obeyed the flag and qwentts
     # silently did not; the link error then named only the three ggml
-    # archives, which look like the common half.
+    # archives, which look like the common half. The same 3.14 is why
+    # QUIET_THIRD matters most here; see it in the root build.py.
     #
     # Configured every run, for the reason given under llama_sdk().
     crt = ["-DCMAKE_POLICY_DEFAULT_CMP0091=NEW"] + STATIC_CRT if b.WINDOWS else []
+    b.fresh_tree(qbuild, src)
     run(["cmake", "-S", src, "-B", qbuild] + gen + [
-        "-DCMAKE_BUILD_TYPE=Release"] + crt + [
+        "-DCMAKE_BUILD_TYPE=Release"] + crt + b.QUIET_THIRD + [
         "-DGGML_SOURCE_DIR=" + b.fwd(ggml) + "/ggml",
         "-DBUILD_SHARED_LIBS=OFF",
         "-DQWEN_SHARED=OFF"] + backend)
@@ -428,7 +457,12 @@ def qtts_sdk(gen):
     # default and all want a main(), which the addon has no use for.
     run(["cmake", "--build", qbuild, "--config", "Release", "--parallel", "--target", "qwen-core"])
 
+    # lib/ is laid out from empty every run, and a tree once built with Vulkan
+    # keeps that archive after the backend is turned off: the core links
+    # whatever this directory holds, so it is taken out. include/ is kept, so
+    # that copy_headers() can tell which headers changed.
     inc, libdir = os.path.join(sdk, "include"), os.path.join(sdk, "lib")
+    b.rmtree(libdir)
     b.mkdirs(inc, libdir)
     b.copy_headers_glob(os.path.join(src, "src", "qwen*.h"), inc)
     # Collected by search rather than by name because ggml splits its archives
@@ -436,6 +470,10 @@ def qtts_sdk(gen):
     # missing one surfaces as an undefined symbol at the addon's link step.
     patterns = ["*.lib"] if b.WINDOWS else ["libqwen-core.*", "libggml*.*"]
     count = b.copy_all(b.find(qbuild, *patterns), libdir)
+    if not vulkan:
+        for p in b.find(libdir, b.lib("ggml-vulkan")):
+            os.remove(p)
+            count -= 1
     if not b.has(libdir, b.lib("qwen-core")):
         fail("[build] qwentts built but no qwen-core library is in %s" % libdir)
     if vulkan and not b.has(libdir, b.lib("ggml-vulkan")):
@@ -491,7 +529,7 @@ def qtts_sdk(gen):
 # MNN_WIN_RUNTIME_MT.
 # -----------------------------------------------------------------------------
 def mnn_sdk(gen):
-    src = b.env("MNN_SRC", b.sibling("MNN"))
+    src = b.env("MNN_SRC", b.third_dir("MNN"))
     if not os.path.isfile(os.path.join(src, "CMakeLists.txt")):
         fail("no MNN at %s." % src,
              "clone it at the pinned commit:",
@@ -504,8 +542,9 @@ def mnn_sdk(gen):
     say("[build] MNN from %s" % src)
 
     # Configured every run, for the reason given under llama_sdk().
+    b.fresh_tree(mbuild, src)
     run(["cmake", "-S", src, "-B", mbuild] + gen + [
-        "-DCMAKE_BUILD_TYPE=Release"] +
+        "-DCMAKE_BUILD_TYPE=Release"] + b.QUIET_THIRD +
         (["-DMNN_WIN_RUNTIME_MT=ON"] if b.WINDOWS else []) + [
         "-DBUILD_SHARED_LIBS=OFF",
         "-DMNN_BUILD_SHARED_LIBS=OFF",
@@ -545,6 +584,135 @@ def mnn_sdk(gen):
         fail("[build] MNN built but no MNN library is in %s" % libdir)
     say("[build] MNN SDK at %s" % sdk)
     return sdk
+
+
+# -----------------------------------------------------------------------------
+# The package: electron-builder, with electron-builder.yml, over out/ and what
+# is staged here.
+#
+# stage/ is the package's resources/ directory, laid out as it will be there:
+# yoai.node, every DLL it loads that a fresh Windows does not have, and the
+# speaker voice files. Node loads a .node with the search path altered to its
+# own directory, so the DLLs beside it are the ones found -- before any copy in
+# System32, which a machine with the Visual C++ redistributable installed has
+# and a fresh one does not.
+# -----------------------------------------------------------------------------
+def package():
+    addon = addon_path()
+    if not addon:
+        fail("[dist] no yoai.node under %s" % BUILD)
+    b.rmtree(STAGE)
+    b.mkdirs(STAGE)
+    shutil.copy2(addon, STAGE)
+    # curl, OpenSSL and zlib: vcpkg's x64-windows triplet is dynamic, and its
+    # toolchain has already copied them beside the addon.
+    b.copy_glob(os.path.join(os.path.dirname(addon), "*.dll"), STAGE)
+    bundle_runtime()
+
+    # Every speaker's voice files; src/main/reader.ts picks one by name.
+    for spk in sorted(glob.glob(os.path.join(b.ROOT, "speaker", "*", "*.spk"))):
+        dest = os.path.join(STAGE, "speaker", os.path.basename(os.path.dirname(spk)))
+        b.mkdirs(dest)
+        shutil.copy2(spk, dest)
+
+    # electron-builder writes into a scratch directory, stage-out/ (see
+    # electron-builder.yml); the app is moved out of it to dist-win-x64/ and
+    # the rest, its own debug notes, goes. Both from empty, so nothing of an
+    # earlier package is left in either. `node <cli>` rather than npx, for the
+    # reason given under native().
+    scratch = os.path.join(DESKTOP, "stage-out")
+    app_dir = os.path.join(DESKTOP, "dist-win-x64")
+    b.rmtree(scratch)
+    # Moved aside before it is deleted: a running YoAI.exe holds its files,
+    # and a delete would stop halfway through, leaving half an app. Windows
+    # refuses to move a directory with a running program in it, whole.
+    if os.path.isdir(app_dir):
+        old = app_dir + ".old"
+        b.rmtree(old)
+        try:
+            os.rename(app_dir, old)
+        except OSError:
+            fail("[dist] %s is in use -- close YoAI.exe and run this again." % b.shown(app_dir))
+        b.rmtree(old)
+    say("[dist] electron-builder")
+    cli = os.path.join(DESKTOP, "node_modules", "electron-builder", "cli.js")
+    run(["node", cli, "--win", "--config", "electron-builder.yml"], cwd=DESKTOP)
+    os.rename(os.path.join(scratch, "win-unpacked"), app_dir)
+    b.rmtree(scratch)
+    b.rmtree(STAGE)  # copied into the app's resources/, and nothing else reads it
+    say("[dist] the app, everything it runs with, in %s" % b.shown(app_dir))
+
+
+def bundle_runtime():
+    """Copy into stage/ the DLLs that what is staged imports and a fresh
+    Windows may not have, and stop the build on an import nothing will supply.
+
+    Found by reading the imports, not by naming DLLs here, so a dependency that
+    changes changes the list by itself. Today that is:
+
+      vcruntime140.dll  the vcpkg libraries are built against it
+      vcomp140.dll      ggml's OpenMP
+                        -- both from Visual Studio's redistributable
+                        directory, whose files are licensed for shipping
+                        beside an application;
+      vulkan-1.dll      the Vulkan loader, which a GPU driver installs into
+                        System32 and a machine without one lacks. Without it
+                        the addon does not load at all, where with it and no
+                        driver it finds no device and reads on the CPU. Taken
+                        from beside electron.exe, which ships the same
+                        Khronos loader: that copy is not found from here, as
+                        Node loads a .node with the search path altered to
+                        its own directory, which leaves the exe's out.
+
+    An import counts as supplied otherwise only when it is part of the
+    Universal CRT (api-ms-win-*, in Windows since 10) or in System32. Anything
+    else would be "The specified module could not be found" on a machine that
+    did not build this, so it is said here instead."""
+    if not b.env("VCToolsRedistDir"):
+        b.visual_studio()  # dumpbin, and where the redistributable files are
+    redist = {}
+    for d in sorted(glob.glob(os.path.join(b.env("VCToolsRedistDir"), "x64", "Microsoft.VC*.*"))):
+        for f in glob.glob(os.path.join(d, "*.dll")):
+            redist.setdefault(os.path.basename(f).lower(), f)
+    if "vcruntime140.dll" not in redist:
+        fail('[dist] no Visual C++ redistributable under "%s"' % b.env("VCToolsRedistDir"),
+             "[dist] Install the MSVC build tools' redistributable component.")
+    electron = os.path.join(DESKTOP, "node_modules", "electron", "dist")
+    for f in glob.glob(os.path.join(electron, "*.dll")):
+        redist.setdefault(os.path.basename(f).lower(), f)
+    system32 = os.path.join(b.env("SystemRoot", r"C:\Windows"), "System32")
+
+    staged = {n.lower() for n in os.listdir(STAGE)}
+    todo = sorted(os.path.join(STAGE, n) for n in staged)
+    missing = {}
+    while todo:
+        path = todo.pop()
+        for name in pe_imports(path):
+            key = name.lower()
+            if key in staged or key.startswith(("api-ms-win-", "ext-ms-win-")):
+                continue
+            # Before System32, which has the redistributable ones and the
+            # Vulkan loader here and may not on the machine this is for.
+            if key in redist:
+                shutil.copy2(redist[key], STAGE)
+                staged.add(key)
+                todo.append(os.path.join(STAGE, os.path.basename(redist[key])))
+                say("[dist] bundling %s, which %s imports" % (os.path.basename(redist[key]),
+                                                              os.path.basename(path)))
+            elif not os.path.isfile(os.path.join(system32, name)):
+                missing.setdefault(name, os.path.basename(path))
+    if missing:
+        fail("[dist] imported, and nothing in the package or in Windows supplies it:",
+             *["[dist]   %s, by %s" % (n, by) for n, by in sorted(missing.items())])
+
+
+def pe_imports(path):
+    """The DLL names `path` imports, as dumpbin lists them."""
+    text = b.output(["dumpbin", "/nologo", "/dependents", path])
+    if text is None:
+        fail('[dist] dumpbin could not read "%s"' % path)
+    return [s for s in (line.strip() for line in text.splitlines())
+            if s.lower().endswith(".dll") and " " not in s]
 
 
 if __name__ == "__main__":

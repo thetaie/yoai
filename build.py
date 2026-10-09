@@ -22,17 +22,22 @@ into build/: configures if needed, then builds. This is not the desktop app
 
 They combine, e.g. python build.py clean asr tts
 
-Environment, each also as YOAI_<NAME> in the environment or in .env, which
-wins -- see .env.example:
+With no lane named, a build/ already configured is built again with the lanes
+it has. A fresh one fetches llama.cpp and qwentts.cpp into third/ if they are
+not there (third/sync.py clone: git and the network, once), then gets asr and
+tts, each when its checkouts are on what third/manifest.json pins; what is
+skipped is named. llama, server and cosyvoice are built only when named.
+
+Settings, each read from .env at the repository root -- see .env.example --
+or the environment, .env winning; YOAI_<NAME> in the environment wins over
+both, for one run:
   VS_DIR            Windows: Visual Studio install root
   NINJA             Windows: ninja.exe (default: the one Visual Studio bundles)
-  VCPKG_ROOT        vcpkg checkout. Windows default: the one Visual Studio
-                    bundles. Elsewhere ../vcpkg, used only if it exists
-  OPENSSL_ROOT_DIR  macOS/Linux: where to find OpenSSL, when the default
-                    search misses it
-  LLAMA_SRC         llama.cpp checkout for asr, llama and tts (default: ../llama.cpp)
-  QTTS_SRC          qwentts.cpp checkout for tts (default: ../qwentts.cpp)
-  COSYVOICE_SRC     cosyvoice.cpp checkout for cosyvoice (default: ../cosyvoice.cpp)
+  VCPKG_ROOT        vcpkg checkout, for curl and OpenSSL (default: third/vcpkg,
+                    cloned on the first run at vcpkg.json's builtin-baseline)
+  LLAMA_SRC         llama.cpp checkout for asr, llama and tts (default: third/llama.cpp)
+  QTTS_SRC          qwentts.cpp checkout for tts (default: third/qwentts.cpp)
+  COSYVOICE_SRC     cosyvoice.cpp checkout for cosyvoice (default: third/cosyvoice.cpp)
   VULKAN_SDK        Vulkan SDK, for tts on the GPU; optional
   CUDA_PATH         CUDA Toolkit, for tts on an NVIDIA GPU; optional. Without
                     it, nvcc on PATH, then /usr/local/cuda off Windows
@@ -64,8 +69,6 @@ import sys
 sys.dont_write_bytecode = True  # no __pycache__ in the repository
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-# Checkouts live beside the repository, not inside it -- third/sync.py has why.
-PARENT = os.path.dirname(ROOT)
 SYNC = os.path.join(ROOT, "third", "sync.py")
 PATCHES = os.path.join(ROOT, "third", "patches")
 
@@ -82,31 +85,35 @@ PY = "python" if WINDOWS else "python3"
 # =============================================================================
 
 # --- Settings ------------------------------------------------------------------
-# Every setting is named YOAI_<NAME> and fills the <NAME> the scripts read.
-# Highest wins:
+# Every setting is a <NAME> from NAMES that the scripts read. Highest wins:
 #
-#   1. YOAI_<NAME> in the environment
-#   2. YOAI_<NAME> in .env at the repository root
+#   1. YOAI_<NAME> in the environment: an override for one run, and how
+#      third_ok() hands sync.py the tree being built, past any .env
+#   2. <NAME> in .env at the repository root
 #   3. <NAME> in the environment, e.g. the VULKAN_SDK its installer sets
 #   4. the calling script's own default
 #
-# Only YOAI_ lines are taken from .env: KEY=VALUE per line, no spaces around
-# `=`, # for comments, and a value may be wrapped in double quotes. Nothing in
-# it is expanded or executed. A new setting goes in NAMES and in .env.example.
+# .env is this repository's own file, so a name in it needs no prefix to say
+# whose it is, and a line there wins over the same name in the environment:
+# that is what the file is for. KEY=VALUE per line, no spaces around `=`, #
+# for comments, and a value may be wrapped in double quotes; an empty value
+# reads as unset. Nothing in it is expanded or executed. Only names in NAMES
+# are taken; anything else is left to other tools. A new setting goes in
+# NAMES and in .env.example.
 
 NAMES = (
-    "VS_DIR", "NINJA", "VCPKG_ROOT", "OPENSSL_ROOT_DIR", "VULKAN_SDK", "CUDA_PATH",
-    "LLAMA_SRC", "LLAMA_SDK_DIR", "QTTS_SRC", "COSYVOICE_SRC", "MNN_SRC", "DEVECO_HOME",
-    "OHOS_SDK_ROOT",
+    "VS_DIR", "NINJA", "VCPKG_ROOT", "VULKAN_SDK", "CUDA_PATH",
+    "LLAMA_SRC", "QTTS_SRC", "COSYVOICE_SRC", "MNN_SRC",
 )
 
-_LINE = re.compile(r"^(YOAI_[A-Z0-9_]+)=(.*)$")
+_LINE = re.compile(r"^([A-Z][A-Z0-9_]*)=(.*)$")
 
 
 def load_env(*required):
     """Fill os.environ by the rules above. `required` are the paths the caller
     READS: each one that is set must exist, or it is named on stderr and this
     returns False. A name left unset is the caller's to default."""
+    dotenv = {}
     env_file = os.path.join(ROOT, ".env")
     if os.path.isfile(env_file):
         with open(env_file, encoding="utf-8-sig") as f:
@@ -117,21 +124,22 @@ def load_env(*required):
                 key, val = m.group(1), m.group(2)
                 if len(val) >= 2 and val[0] == '"' and val[-1] == '"':
                     val = val[1:-1]
-                if key not in os.environ:
-                    os.environ[key] = val
+                if key in NAMES:
+                    dotenv[key] = val
 
     for name in NAMES:
         val = os.environ.get("YOAI_" + name)
         if val:
             os.environ[name] = val
+        elif name in dotenv:
+            os.environ[name] = dotenv[name]
 
     ok = True
     for name in required:
         val = os.environ.get(name)
         if val and not os.path.exists(val):
-            print('[env] %s is "%s", which does not exist. Fix YOAI_%s in .env, '
-                  "or %s / YOAI_%s in the environment." % (name, val, name, name, name),
-                  file=sys.stderr)
+            print('[env] %s is "%s", which does not exist. Fix %s in .env, or YOAI_%s / %s '
+                  "in the environment." % (name, val, name, name, name), file=sys.stderr)
             ok = False
     return ok
 
@@ -141,9 +149,12 @@ def env(name, default=""):
     return os.environ.get(name) or default
 
 
-def sibling(name):
-    """The default location of a checkout: beside the repository."""
-    return os.path.join(PARENT, name)
+def third_dir(name):
+    """The default location of one checkout, before its own setting moves it:
+    third/<name>, which .gitignore keeps out of the repository. Not the
+    repository's parent: a llama.cpp/ already there is somebody's own, on its
+    own commit, and the builds patch the trees they are given."""
+    return os.path.join(ROOT, "third", name)
 
 
 # --- Output and exit -------------------------------------------------------------
@@ -292,6 +303,20 @@ def configured(build_dir):
             or os.path.isfile(os.path.join(build_dir, "Makefile")))
 
 
+def fresh_tree(build_dir, src):
+    """Discard `build_dir` when its cache was generated from another source
+    tree than `src`. CMake refuses to configure such a tree at all -- "does
+    not match the source used to generate cache" -- and that is what a moved
+    checkout leaves behind: LLAMA_SRC changed, or the checkouts moved into
+    third/. The tree is build output, so it is configured again from `src`."""
+    m = re.search(r"^CMAKE_HOME_DIRECTORY:INTERNAL=(.*)$",
+                  read(os.path.join(build_dir, "CMakeCache.txt")), re.M)
+    if m and os.path.normcase(os.path.abspath(m.group(1))) != os.path.normcase(os.path.abspath(src)):
+        say("[build] %s was configured from %s; starting it over from %s"
+            % (shown(build_dir), m.group(1), src))
+        rmtree(build_dir)
+
+
 def cached_lib(build_dir, var):
     """Did the last configure of `build_dir` find the library its find_library
     stored in `var`? A miss is cached too, as <var>-NOTFOUND."""
@@ -388,8 +413,9 @@ def visual_studio():
     if r is None or r.returncode != 0:
         fail('Could not run vcvarsall.bat under "%s". Set VS_DIR.' % vs_dir)
 
-    # vcvarsall overwrites VCPKG_ROOT with the copy bundled with Visual Studio;
-    # the user's own value, when they set one, is kept.
+    # vcvarsall sets VCPKG_ROOT to the copy bundled with Visual Studio. That
+    # one is not used -- vcpkg_tree() has why -- so the user's own value is put
+    # back, or the variable taken out, rather than left for vcpkg to read.
     user_vcpkg = env("VCPKG_ROOT")
     for line in r.stdout.decode("utf-16-le", errors="replace").splitlines():
         key, eq, val = line.partition("=")
@@ -398,7 +424,20 @@ def visual_studio():
             os.environ[key] = val
     if user_vcpkg:
         os.environ["VCPKG_ROOT"] = user_vcpkg
+    else:
+        os.environ.pop("VCPKG_ROOT", None)
     return ninja
+
+
+# Somebody else's tree, compiled by MSVC at the compiler's own warning level.
+# A project that declares cmake_minimum_required below 3.15 -- qwentts.cpp
+# says 3.14 -- gets CMP0092 OLD, under which CMake writes /W3 into the default
+# flags, and then compiles llama.cpp's ggml through GGML_SOURCE_DIR at that
+# level: pages of C4244 in code that is not ours to fix. NEW leaves the level
+# to the project, and llama.cpp's own tree, which asks for 3.28 policies, is
+# already there. The flags are cached at a tree's first configure, so one
+# configured before this keeps /W3 until it is deleted.
+QUIET_THIRD = ["-DCMAKE_POLICY_DEFAULT_CMP0092=NEW"] if WINDOWS else []
 
 
 def spirv_args(vulkan_sdk):
@@ -436,7 +475,7 @@ def nvcc():
         path = os.path.join(cuda, "bin", exe)
         if not os.path.isfile(path):
             fail('[build] CUDA_PATH is "%s", which has no bin/%s.' % (cuda, exe),
-                 "[build] Repair the CUDA Toolkit install, or set YOAI_CUDA_PATH in .env.")
+                 "[build] Repair the CUDA Toolkit install, or set CUDA_PATH in .env.")
         return path
     found = which("nvcc")
     if found:
@@ -456,23 +495,97 @@ def cmake_at_least(major, minor):
 _verified = set()
 
 
-def third_verify(name, var, tree):
+def third_ok(name, var, tree):
     """Is this checkout what third/manifest.json records? `name` the manifest
     section, `var` its variable there, `tree` the tree about to be compiled.
+    What is not, sync.py names on stderr.
 
-    A WARNING, never a stop: a tree ahead of its pin is a normal state while
-    trying something (third/README.md), and a missing patch matters to some
-    lanes and not others. The tree goes over as YOAI_<var>, the one name
-    sync.py's own loader will not override, so the tree checked is the tree
-    built. Once per name per run."""
+    The tree goes over as YOAI_<var>, the one name sync.py's own loader will
+    not override, so the tree checked is the tree built."""
+    child = dict(os.environ)
+    child["YOAI_" + var] = tree
+    return subprocess.run([sys.executable, SYNC, "verify", name], env=child).returncode == 0
+
+
+def third_verify(name, var, tree):
+    """third_ok(), as a WARNING, never a stop: a tree ahead of its pin is a
+    normal state while trying something (third/README.md), and a missing
+    patch matters to some lanes and not others. Once per name per run."""
     if name in _verified:
         return
     _verified.add(name)
-    child = dict(os.environ)
-    child["YOAI_" + var] = tree
-    if subprocess.run([sys.executable, SYNC, "verify", name], env=child).returncode != 0:
+    if not third_ok(name, var, tree):
         warn("[build] warning: %s differs from third/manifest.json (above) -- building anyway. "
              "Details: %s" % (name, sync_cmd("check", name)))
+
+
+# The checkouts a build with no lane named fetches by itself: per name, the
+# variable that moves it, and the file its lanes look for.
+CHECKOUTS = {
+    "llama.cpp": ("LLAMA_SRC", os.path.join("ggml", "include", "ggml.h")),
+    "qwentts.cpp": ("QTTS_SRC", os.path.join("src", "qwen.h")),
+}
+
+
+def ready_checkouts():
+    """CHECKOUTS made ready for a build with no lane named, and how that went.
+
+    What is not there is fetched first, through `third/sync.py clone` -- the
+    pinned commit, patched. That needs git and the network, once; a fetch
+    that fails ends the build, as any failed command does. Then each is
+    checked against third/manifest.json. A tree moved past its pin on purpose
+    is built only when its lane is named, as a named lane builds on whatever
+    tree is there, with a warning.
+
+    Returns (missing, moved), each a list of (name, tree): missing even after
+    the fetch -- a checkout that is there to git but not whole, which clone
+    leaves alone -- and present but not what the manifest records."""
+    trees = {name: env(var, third_dir(name)) for name, (var, _) in CHECKOUTS.items()}
+    fetch = sorted(name for name, (_, probe) in CHECKOUTS.items()
+                   if not os.path.isfile(os.path.join(trees[name], probe)))
+    if fetch:
+        say("[build] fetching %s: %s" % (" ".join(fetch), sync_cmd("clone", *fetch)))
+        run([sys.executable, SYNC, "clone"] + fetch)
+
+    missing, moved = [], []
+    for name, (var, probe) in sorted(CHECKOUTS.items()):
+        tree = trees[name]
+        if not os.path.isfile(os.path.join(tree, probe)):
+            missing.append((name, tree))
+        elif third_ok(name, var, tree):
+            _verified.add(name)  # so third_verify does not ask again
+        else:
+            moved.append((name, tree))
+    return missing, moved
+
+
+def pick_lanes(table, script, what, only_named):
+    """The lanes of `table` -- (lane, checkouts it needs) pairs -- whose
+    checkouts ready_checkouts() makes ready, said before anything compiles.
+    `script` is the build script, for the commands it prints; `what` is what
+    it builds; `only_named` names the lanes it never picks by itself."""
+    missing, moved = ready_checkouts()
+    gone = {name for name, _ in missing}
+    off = gone | {name for name, _ in moved}
+    lanes = {lane for lane, needs in table if not off & set(needs)}
+
+    def blocked(name):
+        return " ".join(lane for lane, needs in table if name in needs)
+
+    say("[build] no lane named; building %s %s"
+        % (what, "with " + " ".join(sorted(lanes)) if lanes else "alone"))
+    for name, tree in missing:
+        say("[build]   no %s at %s, so no %s -- %s"
+            % (name, shown(tree), blocked(name), sync_cmd("check", name)))
+    for name, _ in moved:
+        say("[build]   %s differs from third/manifest.json (above), so no %s"
+            % (name, blocked(name)))
+    # Lanes held back only by a moved tree can still be had by naming them.
+    named = lanes | {lane for lane, needs in table if not gone & set(needs)}
+    if moved and named != lanes:
+        say("[build]   to build on it anyway: %s %s" % (script_cmd(script), " ".join(sorted(named))))
+    say("[build]   %s only when named; %s --help" % (only_named, script_cmd(script)))
+    return lanes
 
 
 def qpatch(tree, name):
@@ -494,10 +607,81 @@ def qpatch(tree, name):
              "[patch] the checkout moved under it; re-read the patch and rebase it.")
 
 
-# --- vcpkg, for the mobile lanes -------------------------------------------------
+# --- vcpkg -----------------------------------------------------------------------
+def vcpkg_baseline():
+    """vcpkg.json's "builtin-baseline": the one pin of both the vcpkg tree and
+    every port version it installs. READ from there rather than repeated
+    anywhere else, third/manifest.json included: two copies of a pin is one
+    copy that silently goes stale."""
+    manifest = os.path.join(ROOT, "vcpkg.json")
+    try:
+        with open(manifest, encoding="utf-8-sig") as f:
+            baseline = json.load(f).get("builtin-baseline", "")
+    except (OSError, ValueError) as e:
+        fail("[vcpkg] could not read %s: %s" % (manifest, e))
+    if not baseline:
+        fail('[vcpkg] no "builtin-baseline" in "%s"' % manifest)
+    return baseline
+
+
+def vcpkg_tree():
+    """The vcpkg checkout every build takes its C++ dependencies from, desktop
+    and mobile alike: VCPKG_ROOT, or third/vcpkg. Fetched the first time,
+    moved to the baseline whenever it is anywhere else -- fetching first when
+    the baseline is newer than what it holds -- and bootstrapped after either,
+    since the tool's version is the checkout's. Returns its root.
+
+    The first fetch is the baseline commit alone, without vcpkg's history, as
+    third/sync.py fetches the source checkouts: with the tree AT the baseline,
+    every port version vcpkg.json resolves to is the one in the tree. A
+    shallow tree stays shallow when the baseline moves; one with its history
+    keeps it, since --depth would cut it off.
+
+    Not Visual Studio's bundled copy, although that one needs no clone: it is
+    an optional component, and its version is whatever that install updated
+    to, so two Windows machines would resolve the same baseline with two
+    different tools."""
+    root = env("VCPKG_ROOT", third_dir("vcpkg"))
+    baseline = vcpkg_baseline()
+    fresh = not os.path.isdir(os.path.join(root, ".git"))
+    if fresh:
+        if os.path.isdir(root) and os.listdir(root):
+            fail('[vcpkg] "%s" is not empty and not a git checkout; nothing is fetched into it.'
+                 % root)
+        say("[vcpkg] fetching the baseline %s into %s" % (baseline[:12], root))
+        run(["git", "init", "--quiet", root])
+    try:
+        if fresh:
+            run(["git", "-C", root, "remote", "add", "origin", "https://github.com/microsoft/vcpkg"])
+        head = output(["git", "-C", root, "rev-parse", "HEAD"])
+        moved = head != baseline
+        if moved:
+            if not succeeds(["git", "-C", root, "cat-file", "-e", baseline + "^{commit}"]):
+                # No commit at all is a fetch that never finished: shallow too.
+                shallow = head is None or output(["git", "-C", root, "rev-parse",
+                                                  "--is-shallow-repository"]) == "true"
+                fetched = shallow and subprocess.run(
+                    ["git", "-C", root, "fetch", "--depth", "1", "origin", baseline]).returncode == 0
+                if not fetched:
+                    run(["git", "-C", root, "fetch", "origin"])
+            if not fresh:
+                say("[vcpkg] checking out the baseline %s" % baseline[:12])
+            run(["git", "-C", root, "checkout", "--detach", "--quiet", baseline])
+    except (Stop, KeyboardInterrupt):
+        # A half-made repository would read as a checkout next time.
+        if fresh:
+            rmtree(root)
+        raise
+    if moved or not os.path.isfile(os.path.join(root, "vcpkg" + EXE)):
+        boot = "bootstrap-vcpkg." + ("bat" if WINDOWS else "sh")
+        run([os.path.join(root, boot), "-disableMetrics"], cwd=root)
+    return root
+
+
 def vcpkg_deps(vcpkg_root, triplet, dest, overlay=None):
     """The core's C++ dependencies for one triplet, via vcpkg, laid out in
-    `dest` as include/, lib/, share/ and debug/.
+    `dest` as include/, lib/, share/ and debug/. `vcpkg_root` is what
+    vcpkg_tree() returned.
 
     Manifest mode, from the repository's vcpkg.json. The dependency list lives
     there and nowhere else, so a port the core starts to need is added once
@@ -509,28 +693,8 @@ def vcpkg_deps(vcpkg_root, triplet, dest, overlay=None):
 
     Re-running is idempotent: vcpkg skips ports already built, and `dest` is
     replaced."""
-    # READ from vcpkg.json's "builtin-baseline" rather than repeating the hash
-    # here: two copies of a pin is one copy that silently goes stale.
-    manifest = os.path.join(ROOT, "vcpkg.json")
-    try:
-        with open(manifest, encoding="utf-8-sig") as f:
-            baseline = json.load(f).get("builtin-baseline", "")
-    except (OSError, ValueError) as e:
-        fail("[deps] could not read %s: %s" % (manifest, e))
-    if not baseline:
-        fail('[deps] no "builtin-baseline" in "%s"' % manifest)
-
-    say("[deps] triplet=%s  vcpkg=%s  baseline=%s" % (triplet, vcpkg_root, baseline))
-
-    # Bootstrapped at the pinned baseline.
-    if not os.path.isdir(os.path.join(vcpkg_root, ".git")):
-        say("[deps] cloning vcpkg ...")
-        run(["git", "clone", "https://github.com/microsoft/vcpkg", vcpkg_root])
-    run(["git", "-C", vcpkg_root, "checkout", baseline])
+    say("[deps] triplet=%s  vcpkg=%s" % (triplet, vcpkg_root))
     vcpkg = os.path.join(vcpkg_root, "vcpkg" + EXE)
-    if not os.path.isfile(vcpkg):
-        boot = "bootstrap-vcpkg." + ("bat" if WINDOWS else "sh")
-        run([os.path.join(vcpkg_root, boot), "-disableMetrics"], cwd=vcpkg_root)
 
     install_root = os.path.join(vcpkg_root, "installed-" + triplet)
     say("[deps] installing from vcpkg.json into %s" % install_root)
@@ -579,6 +743,10 @@ WORDS = ("clean", "asr", "llama", "tts", "server", "cosyvoice")
 # CMake caches which lanes are on; these are the cache entries that say so.
 CACHED = (("asr", "YOAI_ASR"), ("llama", "YOAI_ONDEVICE_LLM"), ("tts", "YOAI_QTTS"),
           ("server", "YOAI_SERVER"))
+# What a fresh build with no lane named adds by itself, and the checkouts each
+# needs. The others are built only when named: llama takes twenty minutes,
+# server needs libwebsockets, cosyvoice downloads its own dependencies.
+AUTO = (("asr", ("llama.cpp",)), ("tts", ("qwentts.cpp", "llama.cpp")))
 
 
 def main(argv):
@@ -598,13 +766,15 @@ def main(argv):
         names = ("VS_DIR", "NINJA", "VCPKG_ROOT", "LLAMA_SRC", "QTTS_SRC", "COSYVOICE_SRC",
                  "VULKAN_SDK", "CUDA_PATH")
     else:
-        names = ("VCPKG_ROOT", "OPENSSL_ROOT_DIR", "LLAMA_SRC", "QTTS_SRC", "COSYVOICE_SRC",
+        names = ("VCPKG_ROOT", "LLAMA_SRC", "QTTS_SRC", "COSYVOICE_SRC",
                  "VULKAN_SDK", "CUDA_PATH")
     if not load_env(*names):
         return 1
 
     if "clean" in want:
         rmtree(BUILD)
+    if not want - {"clean"}:
+        want |= default_lanes()
 
     # The generator: Ninja from Visual Studio on Windows, whatever CMake picks
     # everywhere else.
@@ -653,8 +823,7 @@ def main(argv):
         if configured(BUILD) and cached_lib(BUILD, "GGML_CUDA_LIB") != with_cuda:
             reconfigure = True
     if "server" in want:
-        # The manifest feature is what makes vcpkg install libwebsockets; with
-        # no vcpkg in play the variable is ignored and a distro package serves.
+        # The manifest feature is what makes vcpkg install libwebsockets.
         args += ["-DYOAI_SERVER=ON", "-DVCPKG_MANIFEST_FEATURES=server"]
     if "cosyvoice" in want:
         cosyvoice(gen)
@@ -665,55 +834,40 @@ def main(argv):
     return 0
 
 
+def default_lanes():
+    """The lanes a build with none named gets, said before anything compiles.
+
+    A build/ already configured keeps the lanes it has: adding or dropping one
+    takes `clean` anyway. A fresh one gets AUTO, each lane whose checkouts
+    pick_lanes() makes ready."""
+    if configured(BUILD):
+        cache = read(os.path.join(BUILD, "CMakeCache.txt"))
+        lanes = {lane for lane, var in CACHED if var + ":BOOL=ON" in cache}
+        if configured(os.path.join(BUILD, "cosyvoice")):
+            lanes.add("cosyvoice")
+        say("[build] no lane named; building what build/ was configured with: %s"
+            % (" ".join(sorted(lanes)) or "the core alone"))
+        say("[build]   to choose again: %s clean [lanes]" % script_cmd(__file__))
+        return lanes
+    return pick_lanes(AUTO, __file__, "the core", "llama, server and cosyvoice")
+
+
 def vcpkg_args():
-    """The vcpkg toolchain, when there is one to use."""
-    vcpkg_root = env("VCPKG_ROOT")
+    """The vcpkg toolchain, on every platform: curl and OpenSSL come from
+    vcpkg.json through the tree vcpkg_tree() fetches, so a desktop build has
+    the versions a phone build has, and needs no system packages to start.
+    One source tree, a build per triplet -- the host's here, installed into
+    vcpkg_installed/. RapidJSON is vendored in third/."""
+    toolchain = os.path.join(vcpkg_tree(), "scripts", "buildsystems", "vcpkg.cmake")
+    args = ["-DCMAKE_TOOLCHAIN_FILE=" + toolchain]
     if WINDOWS:
-        # Required here: without it CMake has no curl and no OpenSSL to find.
-        # visual_studio() has already put the bundled copy in VCPKG_ROOT when
-        # the user did not name one.
-        toolchain = os.path.join(vcpkg_root, "scripts", "buildsystems", "vcpkg.cmake")
-        if not vcpkg_root or not os.path.isfile(toolchain):
-            fail('[build] no vcpkg at "%s". Set VCPKG_ROOT, or install the vcpkg '
-                 "component of Visual Studio." % vcpkg_root)
-        return ["-DCMAKE_TOOLCHAIN_FILE=" + toolchain,
-                "-DVCPKG_TARGET_TRIPLET=x64-windows",
-                "-DVCPKG_INSTALLED_DIR=" + os.path.join(ROOT, "vcpkg_installed")]
-
-    # Elsewhere vcpkg is one way to get curl and openssl, not a requirement:
-    # the CMakeLists resolves both with plain find_package, which a distro's own
-    # packages satisfy just as well (apt install libcurl4-openssl-dev
-    # libssl-dev). RapidJSON is vendored in third/.
-    #
-    # A VCPKG_ROOT the caller set is a request, not a hint: a wrong path is an
-    # error rather than a silent fall back to the system packages, which would
-    # build something other than what they asked for.
-    explicit = bool(vcpkg_root)
-    vcpkg_root = vcpkg_root or sibling("vcpkg")
-    toolchain = os.path.join(vcpkg_root, "scripts", "buildsystems", "vcpkg.cmake")
-    if os.path.isfile(toolchain):
-        return ["-DCMAKE_TOOLCHAIN_FILE=" + toolchain,
-                "-DVCPKG_INSTALLED_DIR=" + os.path.join(ROOT, "vcpkg_installed")]
-    if explicit:
-        fail("vcpkg not found at %s (from VCPKG_ROOT)." % vcpkg_root)
-    return openssl_args()
-
-
-def openssl_args():
-    # macOS ships libcurl but no OpenSSL headers, and Homebrew leaves openssl@3
-    # unlinked on purpose (it would shadow the system LibreSSL), so
-    # find_package(OpenSSL) comes up empty on a machine that has it installed.
-    # Only without vcpkg: with vcpkg in play, OpenSSL comes from there.
-    if MACOS and not env("OPENSSL_ROOT_DIR"):
-        prefix = output(["brew", "--prefix", "openssl@3"])
-        if prefix and os.path.isdir(prefix):
-            return ["-DOPENSSL_ROOT_DIR=" + prefix]
-    return []
+        args.append("-DVCPKG_TARGET_TRIPLET=x64-windows")
+    return args + ["-DVCPKG_INSTALLED_DIR=" + os.path.join(ROOT, "vcpkg_installed")]
 
 
 def llama_src(what):
     """The llama.cpp checkout whose ggml `what` compiles."""
-    src = env("LLAMA_SRC", sibling("llama.cpp"))
+    src = env("LLAMA_SRC", third_dir("llama.cpp"))
     if not os.path.isfile(os.path.join(src, "ggml", "CMakeLists.txt")):
         fail("%s compiles llama.cpp's ggml, and there is none at %s." % (what, os.path.join(src, "ggml")),
              "  " + sync_cmd("clone", "llama.cpp"),
@@ -727,7 +881,7 @@ def ggml_sdk(gen, with_llama):
     ABI: include/ plus lib/. Recognition links ggml and nothing else, so for
     `asr` alone only the three ggml targets are built. `llama` adds libllama
     and llama.h, built in the same tree on the same ggml."""
-    src = env("LLAMA_SRC", sibling("llama.cpp"))
+    src = env("LLAMA_SRC", third_dir("llama.cpp"))
     if not os.path.isfile(os.path.join(src, "ggml", "include", "ggml.h")):
         fail("no llama.cpp at %s." % src,
              "clone it at the pinned commit, with its patch applied:",
@@ -742,8 +896,9 @@ def ggml_sdk(gen, with_llama):
         targets.insert(0, "llama")
     say("[build] %s from %s" % (" ".join(targets), src))
 
+    fresh_tree(gbuild, src)
     if not configured(gbuild):
-        run(["cmake", "-S", src, "-B", gbuild] + gen + [
+        run(["cmake", "-S", src, "-B", gbuild] + gen + QUIET_THIRD + [
             "-DCMAKE_BUILD_TYPE=Release",
             "-DBUILD_SHARED_LIBS=OFF",
             "-DLLAMA_BUILD_TESTS=OFF",
@@ -783,7 +938,7 @@ def qtts_sdk(gen):
     The GPU is not required. Without one this builds for the CPU and says so:
     the desktop measured the lane at RTF 1.13 on a laptop CPU against 0.63 on
     its integrated GPU, so it works, only slower than real time."""
-    src = env("QTTS_SRC", sibling("qwentts.cpp"))
+    src = env("QTTS_SRC", third_dir("qwentts.cpp"))
     if not os.path.isfile(os.path.join(src, "src", "qwen.h")):
         fail("no qwentts.cpp at %s." % src,
              "clone it at the pinned commit, submodule and patch included:",
@@ -819,10 +974,10 @@ def qtts_sdk(gen):
             warn("[build] warning: no Vulkan found, so tts is built for the CPU only.")
             warn("[build]   It works, slower: RTF 1.13 against 0.63 on the GPU where measured.")
             if WINDOWS:
-                warn("[build]   For the GPU, install the Vulkan SDK or set YOAI_VULKAN_SDK in .env,")
+                warn("[build]   For the GPU, install the Vulkan SDK or set VULKAN_SDK in .env,")
             else:
                 warn("[build]   For the GPU: apt install libvulkan-dev glslc (Debian/Ubuntu), or set")
-                warn("[build]   YOAI_VULKAN_SDK in .env;")
+                warn("[build]   VULKAN_SDK in .env;")
             warn("[build]   then %s clean tts -- the core only looks for it when configured."
                  % script_cmd(__file__))
 
@@ -845,7 +1000,8 @@ def qtts_sdk(gen):
     qbuild = os.path.join(BUILD, "qtts")
     sdk = os.path.join(BUILD, "qtts-sdk")
     say("[build] qwentts.cpp from %s, ggml from %s" % (src, os.path.join(ggml, "ggml")))
-    run(["cmake", "-S", src, "-B", qbuild] + gen + [
+    fresh_tree(qbuild, src)
+    run(["cmake", "-S", src, "-B", qbuild] + gen + QUIET_THIRD + [
         "-DCMAKE_BUILD_TYPE=Release",
         "-DGGML_SOURCE_DIR=" + fwd(ggml) + "/ggml",
         "-DBUILD_SHARED_LIBS=OFF",
@@ -889,7 +1045,7 @@ def cosyvoice(gen):
     CPU only, and GGML_METAL off on every platform: with Metal on,
     cosyvoice.cpp patches the ggml it is given, which here is llama.cpp's
     tree."""
-    src = env("COSYVOICE_SRC", sibling("cosyvoice.cpp"))
+    src = env("COSYVOICE_SRC", third_dir("cosyvoice.cpp"))
     if not os.path.isfile(os.path.join(src, "CMakeLists.txt")):
         fail("no cosyvoice.cpp at %s." % src,
              "  " + sync_cmd("clone", "cosyvoice.cpp"),
@@ -898,7 +1054,8 @@ def cosyvoice(gen):
     ggml = llama_src("cosyvoice")
 
     cbuild = os.path.join(BUILD, "cosyvoice")
-    run(["cmake", "-S", src, "-B", cbuild] + gen + [
+    fresh_tree(cbuild, src)
+    run(["cmake", "-S", src, "-B", cbuild] + gen + QUIET_THIRD + [
         "-DCMAKE_BUILD_TYPE=Release",
         "-DGGML_SOURCE_DIR=" + fwd(ggml) + "/ggml",
         "-DGGML_VULKAN=OFF",
