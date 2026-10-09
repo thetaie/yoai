@@ -515,6 +515,29 @@ macro(yoai_require_ggml _why)
         message(STATUS "yoai_core: ggml CUDA backend ON -> ${GGML_CUDA_LIB}, "
                        "CUDA ${CUDAToolkit_VERSION}")
     endif()
+
+    # OpenMP's runtime, which the archives need and do not carry, for the same
+    # reason as CUDA's: ggml-cpu links it PRIVATE. ggml turns OpenMP on exactly
+    # when find_package(OpenMP) succeeds, and the SDKs of a host build were
+    # compiled by this compiler on this machine, so the same question gets the
+    # same answer here -- GCC on Linux says yes, Apple's clang says no. MSVC
+    # needs nothing: /openmp names vcomp in the objects, and the linker takes
+    # it from there. Not for a cross build: examples/android/ and
+    # examples/harmony/ build their ggml with GGML_OPENMP=OFF, and a runtime
+    # named on their link line would be one more library the app has to ship.
+    # After the archives, as a single-pass linker needs.
+    if(NOT MSVC AND NOT CMAKE_CROSSCOMPILING)
+        find_package(OpenMP QUIET COMPONENTS C)
+        if(OpenMP_C_FOUND)
+            if(OpenMP_C_LIBRARIES)
+                set(_yoai_omp ${OpenMP_C_LIBRARIES})
+            else()
+                set(_yoai_omp ${OpenMP_C_FLAGS})
+            endif()
+            list(APPEND YOAI_GGML_LIBS ${_yoai_omp})
+            message(STATUS "yoai_core: ggml's OpenMP runtime -> ${_yoai_omp}")
+        endif()
+    endif()
 endmacro()
 
 #-------------------------------------------------------------------------------
