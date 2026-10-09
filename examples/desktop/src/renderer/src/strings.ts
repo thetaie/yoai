@@ -93,6 +93,7 @@ export const S = {
   settingsTtsTemperature: '语调变化（采样温度）',
   settingsTtsTemperatureNote:
     '默认 1.3（模型自身默认 0.9）。调高后语速和语调更多变，读起来不那么像念稿；调得太高会漏字、念错或跑调。改动从下一段开始生效。',
+  settingsTtsTemperatureCustomNote: '内置说话人固定用模型自身的 0.9，调高后听感不如克隆音色自然。这里的设置只对克隆音色生效。',
   settingsTtsTest: '试听',
   settingsTtsTestText: '你好，我是 YoAI。这是本机合成的语音。',
   ttsSpeak: '朗读',
@@ -142,11 +143,9 @@ export const S = {
 
   // Speech output, reading a reply while it is still being written
   settingsReaderRef: '参考音色',
-  settingsReaderRefNone: '未使用',
-  settingsReaderRefDefault: '默认',
+  settingsReaderRefOwn: '自选文件',
   settingsReaderRefPick: '选择文件',
   settingsReaderRefBusy: '处理中…',
-  settingsReaderRefReset: '恢复默认',
   settingsReaderRefRecord: '录制',
   recordTitle: '录一段自己的声音',
   recordScript:
@@ -163,7 +162,7 @@ export const S = {
   recordTooShort: '太短了，至少录 10 秒。',
   recordClipped: '声音过载（削波），离麦克风远一点再录一遍。',
   settingsReaderRefNote:
-    '可选 .wav 录音（单声道、16 位、24 kHz；实测用过 17 秒和 22 秒的录音）或 .spk 向量。录音首次使用时提取一次，约需数秒，之后直接读缓存；.spk 须与模型尺寸一致（1.7B 为 2048 维，0.6B 为 1024 维）。默认读取 speaker/01_female。',
+    '下拉框列出应用自带的音色（speaker 目录），默认 01_female，载入时按模型尺寸自动选用对应的 .spk。也可以录制自己的声音，或选择 .wav 录音（单声道、16 位、24 kHz；实测用过 17 秒和 22 秒的录音）或 .spk 向量。录音首次使用时提取一次，约需数秒，之后直接读缓存；.spk 须与模型尺寸一致（1.7B 为 2048 维，0.6B 为 1024 维）。',
   settingsReaderMin: '攒够多少字再开口',
   settingsReaderMinNote:
     '0 表示用默认的 12。这个数决定的不是引擎快慢（出声都在 0.2 秒左右），而是大模型要先写多少字——本机模型实测 3.7 到 9.1 tok/s，36 个字就要等 6.4 秒。调大更自然（实测 30 比 12 好听），调小出声更早。',

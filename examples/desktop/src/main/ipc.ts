@@ -459,7 +459,9 @@ export function registerHandlers(): void {
     }
     return reader.setReference(result.filePaths[0])
   })
-  handle<[], string>(CHANNELS.readerResetReference, () => reader.setReference(''))
+  handle<[string], string>(CHANNELS.readerUseBundled, (name) =>
+    typeof name === 'string' ? reader.useBundled(name) : Promise.resolve('not a voice name')
+  )
   handle<[Uint8Array], string>(CHANNELS.readerUseRecording, (wav) =>
     wav instanceof Uint8Array ? reader.useRecording(wav) : Promise.resolve('not a recording')
   )

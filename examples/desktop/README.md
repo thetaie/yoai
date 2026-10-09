@@ -113,12 +113,15 @@ the build rather than the app. The speaker's voice files go into
   hoc: it runs where it was built, and a copy on another Mac has to be allowed
   in System Settings first.
 
+One thing is left out on purpose: the CUDA runtime, when speech output is built
+with CUDA. See "Speech output on an NVIDIA GPU" below.
+
 ### On-device models
 
 The GGUF lane is on by default: a bare `python build.py` builds it, fetching
 llama.cpp first when it is not there. Speech output (`qtts`) comes along the
-same way, on the GPU through Vulkan where there is one, and on the CPU, with a
-warning that says what to install, where there is none. Naming lanes builds
+same way, on the GPU where there is one — CUDA or Vulkan, see below — and on
+the CPU, with a warning that says what to install, where there is none. Naming lanes builds
 those instead — `python build.py native llama` — and MNN's omni lane only ever
 comes that way.
 
@@ -132,6 +135,51 @@ file picker, so a build without the lane says so rather than failing later. The
 deletes the file. A file that has moved by the next launch is dropped from the
 list at startup, because an entry in the picker that fails only when used is
 worse than one that is gone.
+
+### Speech output on an NVIDIA GPU
+
+On Windows and Linux, speech output gets one GPU backend, chosen when the addon
+is built: CUDA where the build machine has a CUDA Toolkit (`CUDA_PATH`, `nvcc`
+on `PATH`, or `/usr/local/cuda` on Linux), else Vulkan, else the CPU.
+`TTS_BACKEND` in `.env` — `cuda`, `vulkan` or `cpu` — picks one instead, and
+stops the build when that one is not there rather than building another. macOS
+always uses Metal.
+
+**A package built with CUDA needs CUDA on every machine it runs on.**
+`yoai.node` links the CUDA runtime (cudart) and cuBLAS, and the package does not
+carry them: they are several hundred megabytes, and NVIDIA ships them for any
+machine with its GPU. Where they are missing the addon does not load. The window
+opens with the load error where the composer would be, and nothing works,
+chat with a remote model included. On Windows that error does not name the
+missing DLL. It does not fall back to Vulkan, and a machine without an NVIDIA
+GPU is no exception. For a package that runs anywhere, build it with
+`TTS_BACKEND=vulkan`.
+
+The build says which CUDA it used — `qtts backend: CUDA 12.6` — and `dist`
+repeats it beside the libraries it left out. The machine the package runs on
+needs:
+
+- an NVIDIA driver that supports that CUDA version. `nvidia-smi` prints the
+  highest one it supports, top right, as `CUDA Version`;
+- cudart and cuBLAS of the same major version and not older: a package built
+  with 12.6 runs with 12.6 or a later 12.x, not with 12.4 or 13.0.
+
+To install the two:
+
+- **Windows**: NVIDIA's CUDA Toolkit installer. In a custom install, tick only
+  the runtime libraries; run silently, name only those two components, e.g.
+  `<installer>.exe -s cudart_12.6 cublas_12.6`. The DLLs land in the toolkit's
+  `bin` directory, which the installer puts on `PATH`, and the app finds them
+  there. `where cudart64_12.dll` in a new terminal should print a path.
+- **Linux**: the two runtime packages alone, from NVIDIA's CUDA repository for
+  the distribution: `sudo apt install cuda-cudart-12-6 libcublas-12-6` on Debian
+  and Ubuntu, `sudo dnf install cuda-cudart-12-6 libcublas-12-6` on Fedora and
+  RHEL. A distribution's own packages work too when they are not older than the
+  build's CUDA; on Ubuntu those are `libcudart12` and `libcublas12`. NVIDIA's
+  runfile installer puts the libraries in `/usr/local/cuda/lib64`, which the
+  loader does not search until told:
+  `echo /usr/local/cuda/lib64 | sudo tee /etc/ld.so.conf.d/cuda.conf && sudo ldconfig`.
+  Either way, `ldconfig -p | grep -E 'libcudart|libcublas'` should list both.
 
 ## Where the data lives
 

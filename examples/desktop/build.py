@@ -16,9 +16,12 @@ as a directory that runs on its own.
              links ggml and never libllama, so the same SDK turns it on.
   qtts       assemble a desktop qwentts.cpp SDK and build the addon with
              speech output, on the GPU where there is one -- Metal on macOS,
-             Vulkan elsewhere -- and on the CPU, with a warning, where there
-             is none. Implies native. Needs a llama.cpp checkout too, whether
-             or not `llama` is asked for: it compiles llama.cpp's ggml.
+             elsewhere CUDA where there is a CUDA Toolkit, else Vulkan -- and
+             on the CPU, with a warning, where there is none. TTS_BACKEND
+             picks one instead. Implies native. Needs a llama.cpp checkout
+             too, whether or not `llama` is asked for: it compiles llama.cpp's
+             ggml. A package built with CUDA needs the CUDA runtime where it
+             runs; see README.md.
   mnn        assemble a desktop MNN SDK and build the addon with the omni
              lane: audio in, a spoken answer out, no text in between.
              Implies native. A second inference engine and 3.8 GB of
@@ -52,6 +55,11 @@ both, for one run:
   QTTS_SRC          qwentts.cpp checkout (default: in ../../third), `qtts` only
   MNN_SRC           MNN checkout (default: in ../../third), `mnn` only
   VULKAN_SDK        Vulkan SDK, for `qtts` off macOS
+  CUDA_PATH         CUDA Toolkit, for `qtts` on an NVIDIA GPU (default: nvcc
+                    on PATH, then /usr/local/cuda off Windows)
+  TTS_BACKEND       cuda, vulkan or cpu: `qtts` with that backend, and an
+                    error when it is not there. Unset, the first found of the
+                    three, in that order. Off macOS only
 """
 
 # The addon is the slow half and changes rarely; the bundles are seconds. They
@@ -121,9 +129,10 @@ def main(argv):
     # After the arguments, so the help text still prints when a configured path
     # is wrong. The names are the paths this script reads.
     if b.WINDOWS:
-        names = ("VS_DIR", "NINJA", "VCPKG_ROOT", "LLAMA_SRC", "QTTS_SRC", "MNN_SRC", "VULKAN_SDK")
+        names = ("VS_DIR", "NINJA", "VCPKG_ROOT", "LLAMA_SRC", "QTTS_SRC", "MNN_SRC", "VULKAN_SDK",
+                 "CUDA_PATH")
     else:
-        names = ("VCPKG_ROOT", "LLAMA_SRC", "QTTS_SRC", "MNN_SRC", "VULKAN_SDK")
+        names = ("VCPKG_ROOT", "LLAMA_SRC", "QTTS_SRC", "MNN_SRC", "VULKAN_SDK", "CUDA_PATH")
     if not b.load_env(*names):
         return 1
 
@@ -170,7 +179,13 @@ def native(want):
     if "llama" in want:
         args += ["--CDYOAI_ONDEVICE_LLM=ON", "--CDLLAMA_CPP_DIR=" + llama_sdk()]
     if "qtts" in want:
-        args += ["--CDYOAI_QTTS=ON", "--CDQTTS_DIR=" + qtts_sdk(gen)]
+        sdk = qtts_sdk(gen)
+        args += ["--CDYOAI_QTTS=ON", "--CDQTTS_DIR=" + sdk]
+        # The core links ggml-cuda against the runtime of the toolkit that
+        # compiled it (the root CMakeLists.txt), so that toolkit is named
+        # whenever the SDK holds the archive.
+        if b.has(os.path.join(sdk, "lib"), b.lib("ggml-cuda")):
+            args.append("--CDCUDAToolkit_ROOT=" + b.fwd(os.path.dirname(os.path.dirname(b.nvcc()))))
     if "mnn" in want:
         args += ["--CDYOAI_MNN=ON", "--CDMNN_DIR=" + mnn_sdk(gen)]
         # --CDYOAI_MNN_VULKAN=ON stays off, with MNN_VULKAN under mnn_sdk and
@@ -395,23 +410,51 @@ def qtts_sdk(gen):
              "  " + b.sync_cmd("clone", "llama.cpp"))
     b.third_verify("llama.cpp", "LLAMA_SRC", ggml)
 
+    # ONE backend off macOS, the first found of CUDA, Vulkan and the CPU, or
+    # the one TTS_BACKEND names -- unlike the root build's tts, which puts CUDA
+    # beside Vulkan to compare the two on one card. A package carries one.
+    #
     # Without a GPU backend the lane builds for the CPU and says so, as the
     # root build's does: it works, only slower than real time, and a first
     # build that stops for want of a Vulkan SDK is worse than one that warns.
-    # GGML_VULKAN is passed either way off macOS, and the tree is configured
-    # every run, so the backend follows the machine rather than the first run.
+    # GGML_VULKAN and GGML_CUDA are passed either way off macOS, and the tree
+    # is configured every run, so the backend follows the machine rather than
+    # the first run.
     vulkan_sdk = b.env("VULKAN_SDK")
-    vulkan = False
+    nvcc, vulkan = (None, False) if b.MACOS else b.tts_gpu(True)
+    cuda = nvcc is not None
     backend = []
     if b.MACOS:
         say("[build] qtts backend: Metal (ggml enables it for APPLE by itself)")
-    elif vulkan_sdk or (not b.WINDOWS and b.on_path("glslc")):
-        vulkan = True
-        backend = ["-DGGML_VULKAN=ON"] + b.spirv_args(vulkan_sdk)
+        if b.tts_backend():
+            b.warn("[build] TTS_BACKEND is for Windows and Linux; macOS always uses Metal.")
+    elif cuda:
+        # No CMAKE_CUDA_ARCHITECTURES, where the root build passes `native`:
+        # that is the build machine's card alone, and a package goes to
+        # others. qwentts.cpp's own list then applies, real code for the
+        # common cards and PTX the driver compiles for the rest, picked by the
+        # toolkit's version -- which is why the toolkit is named here too.
+        # NCCL off, for the reason the root build gives.
+        root = os.path.dirname(os.path.dirname(nvcc))
+        backend = ["-DGGML_VULKAN=OFF", "-DGGML_CUDA=ON", "-DGGML_CUDA_NCCL=OFF",
+                   "-DCMAKE_CUDA_COMPILER=" + b.fwd(nvcc), "-DCUDAToolkit_ROOT=" + b.fwd(root)]
+        say("[build] qtts backend: CUDA %s, from %s" % (b.cuda_release(nvcc) or "(version unknown)", nvcc))
+        # Said every build, because the package this makes does not run
+        # everywhere and nothing else would say so: yoai.node links cudart and
+        # cuBLAS, the package does not carry them, and without them the addon
+        # does not load at all -- README.md, "Speech output on an NVIDIA GPU".
+        b.warn("[build] note: a package built with CUDA needs the CUDA runtime installed on")
+        b.warn("[build]   every machine it runs on; on one without it, nothing in the app works.")
+        b.warn("[build]   For one that runs anywhere, set TTS_BACKEND=vulkan in .env.")
+    elif vulkan:
+        backend = ["-DGGML_VULKAN=ON", "-DGGML_CUDA=OFF"] + b.spirv_args(vulkan_sdk)
         say("[build] qtts backend: Vulkan" + (", from " + vulkan_sdk if vulkan_sdk else ""))
+    elif b.tts_backend() == "cpu":
+        backend = ["-DGGML_VULKAN=OFF", "-DGGML_CUDA=OFF"]
+        say("[build] qtts backend: the CPU alone, as TTS_BACKEND asks")
     else:
-        backend = ["-DGGML_VULKAN=OFF"]
-        b.warn("[build] warning: no Vulkan found, so qtts is built for the CPU only.")
+        backend = ["-DGGML_VULKAN=OFF", "-DGGML_CUDA=OFF"]
+        b.warn("[build] warning: no CUDA Toolkit or Vulkan found, so qtts is built for the CPU only.")
         b.warn("[build]   It works, slower: RTF 1.13 against 0.63 on the GPU where measured.")
         if b.WINDOWS:
             b.warn("[build]   For the GPU, install the LunarG Vulkan SDK, which sets VULKAN_SDK,")
@@ -460,9 +503,9 @@ def qtts_sdk(gen):
     run(["cmake", "--build", qbuild, "--config", "Release", "--parallel", "--target", "qwen-core"])
 
     # lib/ is laid out from empty every run, and a tree once built with Vulkan
-    # keeps that archive after the backend is turned off: the core links
-    # whatever this directory holds, so it is taken out. include/ is kept, so
-    # that copy_headers() can tell which headers changed.
+    # or CUDA keeps that archive after the backend is turned off: the core
+    # links whatever this directory holds, so it is taken out. include/ is
+    # kept, so that copy_headers() can tell which headers changed.
     inc, libdir = os.path.join(sdk, "include"), os.path.join(sdk, "lib")
     b.rmtree(libdir)
     b.mkdirs(inc, libdir)
@@ -472,14 +515,17 @@ def qtts_sdk(gen):
     # missing one surfaces as an undefined symbol at the addon's link step.
     patterns = ["*.lib"] if b.WINDOWS else ["libqwen-core.*", "libggml*.*"]
     count = b.copy_all(b.find(qbuild, *patterns), libdir)
-    if not vulkan:
-        for p in b.find(libdir, b.lib("ggml-vulkan")):
-            os.remove(p)
-            count -= 1
+    for name, on in (("ggml-vulkan", vulkan), ("ggml-cuda", cuda)):
+        if not on:
+            for p in b.find(libdir, b.lib(name)):
+                os.remove(p)
+                count -= 1
     if not b.has(libdir, b.lib("qwen-core")):
         fail("[build] qwentts built but no qwen-core library is in %s" % libdir)
     if vulkan and not b.has(libdir, b.lib("ggml-vulkan")):
         fail("[build] qwentts built WITHOUT the Vulkan backend -- check that cmake found it")
+    if cuda and not b.has(libdir, b.lib("ggml-cuda")):
+        fail("[build] qwentts built WITHOUT the CUDA backend -- check that cmake found the toolkit")
     say("[build] qtts SDK at %s (%d libraries)" % (sdk, count))
     return sdk
 
@@ -604,6 +650,12 @@ def mnn_sdk(gen):
 #            does the same for the .so files beside it.
 #   macOS    nothing is bundled: every SDK is static, and what the addon loads
 #            is the system's. Checked, not assumed -- see check_runtime_macos().
+#
+# Except, on Windows and Linux, the CUDA runtime when speech output is built
+# with CUDA: cudart and cuBLAS are several hundred megabytes, and a machine with
+# an NVIDIA GPU installs them from NVIDIA. README.md says how. Where they are
+# missing the addon does not load and nothing works, so the build says which
+# version the package needs.
 # -----------------------------------------------------------------------------
 def package():
     addon = addon_path()
@@ -618,11 +670,19 @@ def package():
         # curl, OpenSSL and zlib: vcpkg's x64-windows triplet is dynamic, and
         # its toolchain has already copied them beside the addon.
         b.copy_glob(os.path.join(os.path.dirname(addon), "*.dll"), STAGE)
-        bundle_runtime()
+        cuda = bundle_runtime()
     elif b.MACOS:
         check_runtime_macos()
+        cuda = []
     else:
-        bundle_runtime_linux()
+        cuda = bundle_runtime_linux()
+    if cuda:
+        nvcc = b.nvcc()
+        release = (b.cuda_release(nvcc) if nvcc else "") or "?"
+        b.warn("[dist] not bundled: %s." % ", ".join(cuda))
+        b.warn("[dist]   The machine this package runs on needs the CUDA %s runtime, or a later" % release)
+        b.warn("[dist]   %s.x, and an NVIDIA driver; without them nothing in the app works." % release.split(".")[0])
+        b.warn("[dist]   README.md, \"Speech output on an NVIDIA GPU\", says how to install them.")
 
     # Every speaker's voice files; src/main/reader.ts picks one by name.
     for spk in sorted(glob.glob(os.path.join(b.ROOT, "speaker", "*", "*.spk"))):
@@ -654,8 +714,11 @@ def package():
     run(["node", cli, "--" + os_name, "--" + arch, "--config", "electron-builder.yml"], cwd=DESKTOP)
     # One directory, named by electron-builder after the platform and the
     # arch: win-unpacked, linux-unpacked, linux-arm64-unpacked, mac-arm64 (with
-    # YoAI.app inside), and so on. Found rather than spelled out here.
-    built = [d for d in os.listdir(scratch) if os.path.isdir(os.path.join(scratch, d))]
+    # YoAI.app inside), and so on. Found rather than spelled out here. A
+    # dot-directory beside it is electron-builder's own scratch, such as
+    # .icon-ico, the PNG icon converted for Windows.
+    built = [d for d in os.listdir(scratch)
+             if not d.startswith(".") and os.path.isdir(os.path.join(scratch, d))]
     if len(built) != 1:
         fail("[dist] expected one app directory in %s, found: %s"
              % (b.shown(scratch), ", ".join(built) or "none"))
@@ -701,7 +764,10 @@ def bundle_runtime():
     An import counts as supplied otherwise only when it is part of the
     Universal CRT (api-ms-win-*, in Windows since 10) or in System32. Anything
     else would be "The specified module could not be found" on a machine that
-    did not build this, so it is said here instead."""
+    did not build this, so it is said here instead.
+
+    The CUDA runtime and driver (CUDA_WINDOWS) are left out on purpose and
+    returned, for package() to say so; see the note above it."""
     if not b.env("VCToolsRedistDir"):
         b.visual_studio()  # dumpbin, and where the redistributable files are
     redist = {}
@@ -719,11 +785,15 @@ def bundle_runtime():
     staged = {n.lower() for n in os.listdir(STAGE)}
     todo = sorted(os.path.join(STAGE, n) for n in staged)
     missing = {}
+    cuda = set()
     while todo:
         path = todo.pop()
         for name in pe_imports(path):
             key = name.lower()
             if key in staged or key.startswith(("api-ms-win-", "ext-ms-win-")):
+                continue
+            if key.startswith(CUDA_WINDOWS):
+                cuda.add(name)
                 continue
             # Before System32, which has the redistributable ones and the
             # Vulkan loader here and may not on the machine this is for.
@@ -738,6 +808,13 @@ def bundle_runtime():
     if missing:
         fail("[dist] imported, and nothing in the package or in Windows supplies it:",
              *["[dist]   %s, by %s" % (n, by) for n, by in sorted(missing.items())])
+    return sorted(cuda)
+
+
+# The CUDA runtime, cuBLAS and the driver, by file name: what a package built
+# with CUDA loads and does not carry. cuBLAS loads cublasLt itself.
+CUDA_WINDOWS = ("cudart64_", "cublas64_", "cublaslt64_", "nvcuda.dll")
+CUDA_LINUX = ("libcudart.so", "libcublas.so", "libcublasLt.so", "libcuda.so")
 
 
 def pe_imports(path):
@@ -770,11 +847,16 @@ def bundle_runtime_linux():
 
     The addon's RUNPATH is $ORIGIN, so these copies are found before the
     system's. What the package does not cover is glibc itself: the addon needs
-    at least the glibc of the machine that built it."""
+    at least the glibc of the machine that built it.
+
+    Nor the CUDA runtime and driver (CUDA_LINUX), left out on purpose and
+    returned, for package() to say so -- copied, the driver's libcuda would be
+    wrong for every other machine's driver."""
     electron = {}
     for f in glob.glob(os.path.join(DESKTOP, "node_modules", "electron", "dist", "*.so*")):
         electron[os.path.basename(f)] = f
     missing = {}
+    cuda = set()
     for path in sorted(glob.glob(os.path.join(STAGE, "*.node"))):
         text = b.output(["ldd", path])
         if text is None:
@@ -788,6 +870,9 @@ def bundle_runtime_linux():
             name = os.path.basename(parts[0])
             if name.startswith(LINUX_SYSTEM) or os.path.isfile(os.path.join(STAGE, name)):
                 continue
+            if name.startswith(CUDA_LINUX):
+                cuda.add(name)
+                continue
             found = parts[2] if len(parts) > 2 and parts[1] == "=>" and parts[2].startswith("/") else None
             src = electron.get(name) or found
             if src is None:
@@ -799,6 +884,7 @@ def bundle_runtime_linux():
     if missing:
         fail("[dist] loaded, and nothing on this machine supplies it:",
              *["[dist]   %s, by %s" % (n, by) for n, by in sorted(missing.items())])
+    return sorted(cuda)
 
 
 def check_runtime_macos():

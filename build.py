@@ -41,6 +41,8 @@ both, for one run:
   VULKAN_SDK        Vulkan SDK, for tts on the GPU; optional
   CUDA_PATH         CUDA Toolkit, for tts on an NVIDIA GPU; optional. Without
                     it, nvcc on PATH, then /usr/local/cuda off Windows
+  TTS_BACKEND       cuda, vulkan or cpu: tts with that backend alone, and an
+                    error when it is not there. Unset, every one found
 """
 
 # Two things in one file. The bottom half is the root build. The top half is
@@ -102,7 +104,7 @@ PY = "python" if WINDOWS else "python3"
 # NAMES and in .env.example.
 
 NAMES = (
-    "VS_DIR", "NINJA", "VCPKG_ROOT", "VULKAN_SDK", "CUDA_PATH",
+    "VS_DIR", "NINJA", "VCPKG_ROOT", "VULKAN_SDK", "CUDA_PATH", "TTS_BACKEND",
     "LLAMA_SRC", "QTTS_SRC", "COSYVOICE_SRC", "MNN_SRC",
 )
 
@@ -483,6 +485,48 @@ def nvcc():
     if not WINDOWS and os.path.isfile("/usr/local/cuda/bin/nvcc"):
         return "/usr/local/cuda/bin/nvcc"
     return None
+
+
+def cuda_release(nvcc_path):
+    """The toolkit's release, such as "12.6", as `nvcc --version` gives it; ''
+    when it does not say."""
+    m = re.search(r"release (\d+\.\d+)", output([nvcc_path, "--version"]) or "")
+    return m.group(1) if m else ""
+
+
+TTS_BACKENDS = ("cuda", "vulkan", "cpu")
+
+
+def tts_backend():
+    """TTS_BACKEND, lower-cased: one of TTS_BACKENDS, or '' when it is unset and
+    the build picks for itself. Anything else stops the build: a typo read as
+    unset would build some other backend and say nothing."""
+    val = env("TTS_BACKEND").lower()
+    if val and val not in TTS_BACKENDS:
+        fail('[build] TTS_BACKEND is "%s"; it takes %s, or nothing for the default.'
+             % (val, ", ".join(TTS_BACKENDS)))
+    return val
+
+
+def tts_gpu(first_only):
+    """The GPU backends a speech-output build compiles in, off macOS, as
+    (nvcc, vulkan): the CUDA compiler or None, and whether Vulkan is in.
+    Neither means the CPU alone.
+
+    TTS_BACKEND names one, and one that is not there stops the build rather
+    than building another. Unset, every one found -- or with `first_only`, the
+    first found of CUDA and Vulkan, in that order."""
+    choice = tts_backend()
+    has_vulkan = bool(env("VULKAN_SDK")) or (not WINDOWS and on_path("glslc"))
+    nvcc_path = nvcc() if choice in ("", "cuda") else None
+    if choice == "cuda" and nvcc_path is None:
+        fail("[build] TTS_BACKEND is cuda, and there is no CUDA Toolkit:",
+             "[build]   set CUDA_PATH in .env, or put nvcc on PATH.")
+    if choice == "vulkan" and not has_vulkan:
+        fail("[build] TTS_BACKEND is vulkan, and there is no Vulkan SDK:",
+             "[build]   set VULKAN_SDK in .env" + ("." if WINDOWS else ", or install glslc."))
+    vulkan = has_vulkan and choice in ("", "vulkan") and not (first_only and nvcc_path)
+    return nvcc_path, vulkan
 
 
 def cmake_at_least(major, minor):
@@ -957,20 +1001,23 @@ def qtts_sdk(gen):
     # hold both, so one build compares them on the same card
     # (tests/tts_rtf.py --backend Vulkan0 --backend CUDA0). ggml registers
     # CUDA first, so the engine's own pick is CUDA when both are in.
+    # TTS_BACKEND builds one of them alone, or neither; see tts_gpu().
     vulkan_sdk = env("VULKAN_SDK")
-    nvcc_path = None if MACOS else nvcc()
-    vulkan = False
+    nvcc_path, vulkan = (None, False) if MACOS else tts_gpu(False)
     cuda = nvcc_path is not None
     backend = []
     if MACOS:
         say("[build] tts backend: Metal, which ggml enables for Apple by itself")
-    elif vulkan_sdk or (not WINDOWS and on_path("glslc")):
-        vulkan = True
+        if tts_backend():
+            warn("[build] TTS_BACKEND is for Windows and Linux; macOS always uses Metal.")
+    elif vulkan:
         backend = ["-DGGML_VULKAN=ON"] + spirv_args(vulkan_sdk)
         say("[build] tts backend: Vulkan" + (", from " + vulkan_sdk if vulkan_sdk else ""))
     else:
         backend = ["-DGGML_VULKAN=OFF"]
-        if not cuda:
+        if tts_backend() == "cpu":
+            say("[build] tts backend: the CPU alone, as TTS_BACKEND asks")
+        elif not cuda:
             warn("[build] warning: no Vulkan found, so tts is built for the CPU only.")
             warn("[build]   It works, slower: RTF 1.13 against 0.63 on the GPU where measured.")
             if WINDOWS:

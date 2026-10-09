@@ -246,6 +246,12 @@ and the Electron bundles, and the app as one directory that runs on its own:
 llama.cpp and qwentts.cpp into `third/`. `npm run dev` after that is the loop
 while writing UI.
 
+Speech output runs on CUDA where the build machine has a CUDA Toolkit, else on
+Vulkan, else on the CPU; `TTS_BACKEND` in `.env` picks one. A package built
+with CUDA does not carry the CUDA runtime, and only starts where it is
+installed: [examples/desktop/README.md](examples/desktop/README.md) says how to
+install it, and how to build a package that runs anywhere.
+
 One directory rather than an `electron/` and a `web/`, and
 [examples/desktop/README.md](examples/desktop/README.md) argues it: a browser cannot mmap a GGUF
 or hold a key out of a page's reach, so a web build would be a different

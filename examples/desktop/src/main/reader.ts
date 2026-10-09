@@ -29,7 +29,7 @@ import { paths as ttsPaths, voiceSettings } from './tts'
 /**
  * The voice a Base checkpoint is anchored to when the user has not picked one:
  * a directory under speaker/ at the repository root, holding one .spk per model
- * size.
+ * size. Every other directory there is offered beside it; see bundledVoices().
  *
  * A speaker embedding WITHOUT a recording -- qwen.h's clone mode A. Base
  * checkpoints only, and the reason it is not optional: every piece is a separate
@@ -49,9 +49,12 @@ interface Stored {
 
   /**
    * The reference voice the user picked: a recording (.wav) or an embedding
-   * already extracted (.spk). '' for SPEAKER, the bundled one.
+   * already extracted (.spk). '' for a bundled one, named by `bundled`.
    */
   reference: string
+
+  /** Which voice under speaker/, while `reference` is ''. '' for SPEAKER. */
+  bundled: string
 
   /**
    * How much text must have settled before a piece is sent.
@@ -99,8 +102,24 @@ const DEFAULT_SPEAKER = 'serena'
  * and 1.3 with seed 101 (DEFAULT_SEED in tts.ts) was preferred by ear. Its
  * one fault heard: a sentence starting a little louder than its neighbours,
  * inside one piece, which 0.9 to 1.2 did not show.
+ *
+ * Base only: CustomVoice ignores it, see talkerTemperature().
  */
 const DEFAULT_TEMPERATURE = 1.3
+
+/**
+ * The temperature handed to the loaded talker: the stored one on Base, and on
+ * CustomVoice always the engine's own 0.9, whatever is stored. -1 is the
+ * engine's "back to the default".
+ *
+ * DEFAULT_TEMPERATURE was picked on Base, every piece anchored to a speaker
+ * vector (tests/tts_sweep.cpp). CustomVoice has a speaker id and no vector, and
+ * at 1.3 a listener heard it read less naturally than Base. The settings screen
+ * greys the field out on CustomVoice to match.
+ */
+function talkerTemperature(s: Stored): number {
+  return core().nativeReaderModelType() === 'custom_voice' ? -1 : s.temperature
+}
 
 /**
  * The cut this lane uses when nothing has been chosen, which is finer than the
@@ -186,6 +205,7 @@ const FILE = 'reader.json'
 const EMPTY: Stored = {
   enabled: true,
   reference: '',
+  bundled: '',
   minChars: 0,
   temperature: DEFAULT_TEMPERATURE,
   style: ''
@@ -197,6 +217,7 @@ function read(): Stored {
     // On unless turned off.
     enabled: s.enabled !== false,
     reference: typeof s.reference === 'string' ? s.reference : '',
+    bundled: typeof s.bundled === 'string' ? s.bundled : '',
     minChars: typeof s.minChars === 'number' ? s.minChars : 0,
     temperature:
       typeof s.temperature === 'number' && s.temperature >= 0 ? s.temperature : DEFAULT_TEMPERATURE,
@@ -205,14 +226,38 @@ function read(): Stored {
 }
 
 /**
- * Where SPEAKER is. Beside the addon in a packaged app; in development
+ * Where speaker/ is. Beside the addon in a packaged app; in development
  * app.getAppPath() is examples/desktop/, so the repository root is two levels up.
  */
-function speakerDir(): string {
+function speakerRoot(): string {
   if (app.isPackaged) {
-    return join(process.resourcesPath, 'speaker', SPEAKER)
+    return join(process.resourcesPath, 'speaker')
   }
-  return join(app.getAppPath(), '..', '..', 'speaker', SPEAKER)
+  return join(app.getAppPath(), '..', '..', 'speaker')
+}
+
+/**
+ * The voices that come with the app: each directory under speaker/ holding a
+ * .spk, by name.
+ *
+ * Offered in a list so a new user has a voice to choose without first finding
+ * or recording one. Which .spk of a voice is used is decided at load, by the
+ * talker's size.
+ */
+function bundledVoices(): string[] {
+  const root = speakerRoot()
+  if (!existsSync(root)) {
+    return []
+  }
+  return readdirSync(root, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && readdirSync(join(root, d.name)).some((n) => n.endsWith('.spk')))
+    .map((d) => d.name)
+    .sort()
+}
+
+/** The bundled voice in use while no file is picked: the stored one if it is still there. */
+function bundledName(s: Stored): string {
+  return s.bundled.length > 0 && bundledVoices().includes(s.bundled) ? s.bundled : SPEAKER
 }
 
 /**
@@ -281,10 +326,11 @@ function applyReference(): Promise<string> {
     return Promise.resolve('')
   }
   const hidden = core().nativeReaderTalkerHiddenSize()
-  const chosen = read().reference
+  const s = read()
+  const chosen = s.reference
 
   if (chosen.length === 0) {
-    const dir = speakerDir()
+    const dir = join(speakerRoot(), bundledName(s))
     const spk = speakerFile(dir, hidden)
     if (spk.length === 0) {
       return Promise.resolve(`${dir} has no .spk for a talker ${hidden} wide`)
@@ -348,6 +394,22 @@ export async function useRecording(wav: Uint8Array): Promise<string> {
 }
 
 /**
+ * Use the voice under speaker/ named `name` from now on, in place of any file
+ * picked, and at once if the engine is loaded. Resolves to '' or the reason it
+ * failed.
+ */
+export async function useBundled(name: string): Promise<string> {
+  // Only a name from the list: it becomes part of a path.
+  if (!bundledVoices().includes(name)) {
+    return `no voice named ${name} under speaker/`
+  }
+  const s = read()
+  s.bundled = name
+  write(s)
+  return setReference('')
+}
+
+/**
  * Use `path` -- a .wav or a .spk, or '' for the bundled voice -- from now on,
  * and at once if the engine is loaded. Resolves to '' or the reason it failed.
  */
@@ -390,6 +452,8 @@ export function status(): ReaderStatus {
     modelType: ok ? core().nativeReaderModelType() : '',
     speaker: anchoredTo,
     reference: s.reference,
+    bundled: bundledName(s),
+    bundledVoices: bundledVoices(),
     note: loadNote,
     minChars: s.minChars,
     temperature: s.temperature,
@@ -461,14 +525,17 @@ export function setMinChars(n: number): void {
   lastStatus = null
 }
 
-/** Saved, and handed to the loaded engine at once: it applies from the next piece. */
+/**
+ * Saved, and handed to the loaded engine at once: it applies from the next
+ * piece. A CustomVoice talker keeps 0.9; see talkerTemperature().
+ */
 export function setTemperature(t: number): void {
   const s = read()
   s.temperature = Number.isFinite(t) && t >= 0 ? Math.min(t, 2) : DEFAULT_TEMPERATURE
   write(s)
   lastStatus = null
   if (available() && core().nativeReaderLoaded() === 1) {
-    core().nativeReaderSetTemperature(s.temperature)
+    core().nativeReaderSetTemperature(talkerTemperature(s))
   }
 }
 
@@ -523,7 +590,7 @@ export function load(): Promise<string> {
       // and a style to CustomVoice and clears both on Base, which takes neither.
       const s = read()
       core().nativeReaderSetSeed(voiceSettings().seed)
-      core().nativeReaderSetTemperature(s.temperature)
+      core().nativeReaderSetTemperature(talkerTemperature(s))
       // Always, so 0 means this lane's default rather than the core's.
       core().nativeReaderSetSplit(
         s.minChars > 0 ? s.minChars : DEFAULT_MIN_CHARS,

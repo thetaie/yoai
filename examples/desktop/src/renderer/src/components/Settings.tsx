@@ -240,14 +240,14 @@ export function Settings({
     setReaderStatus(await window.yoai.reader.set(patch))
   }
 
-  /** Pick a .wav or .spk as the reference voice, or go back to the bundled one. */
-  const chooseReference = async (how: 'pick' | 'reset'): Promise<void> => {
+  /** Use a bundled voice by name, or pick a .wav or .spk as the reference voice (null). */
+  const chooseReference = async (bundled: string | null): Promise<void> => {
     setReaderNote(null)
     setRefBusy(true)
     const why =
-      how === 'pick'
+      bundled === null
         ? await window.yoai.reader.pickReference()
-        : await window.yoai.reader.resetReference()
+        : await window.yoai.reader.useBundled(bundled)
     setRefBusy(false)
     setReaderStatus(await window.yoai.reader.status())
     if (why !== null && why.length > 0) {
@@ -613,27 +613,34 @@ export function Settings({
                   <div className="row">
                     <span className="row-label">
                       {S.settingsReaderRef}
-                      {readerStatus !== null && readerStatus.reference.length === 0 && (
-                        <span className="row-sub"> · {S.settingsReaderRefDefault}</span>
+                      {readerStatus !== null && readerStatus.reference.length > 0 && (
+                        <div className="path">{readerStatus.reference}</div>
                       )}
-                      <div className="path">
-                        {readerStatus === null
-                          ? S.settingsReaderRefNone
-                          : readerStatus.speaker.length > 0
-                            ? readerStatus.speaker
-                            : readerStatus.reference.length > 0
-                              ? readerStatus.reference
-                              : S.settingsReaderRefNone}
-                      </div>
                     </span>
-                    {readerStatus !== null && readerStatus.reference.length > 0 && (
-                      <button
-                        className="btn"
+                    {/* The voices under speaker/, so a new user has one to choose
+                        without first finding or recording one. A picked file is
+                        the extra first entry while it is in use. */}
+                    {readerStatus !== null && readerStatus.bundledVoices.length > 0 && (
+                      <select
+                        className="control"
+                        aria-label={S.settingsReaderRef}
                         disabled={refBusy}
-                        onClick={() => void chooseReference('reset')}
+                        value={readerStatus.reference.length > 0 ? '' : readerStatus.bundled}
+                        onChange={(e) => {
+                          if (e.target.value.length > 0) {
+                            void chooseReference(e.target.value)
+                          }
+                        }}
                       >
-                        {S.settingsReaderRefReset}
-                      </button>
+                        {readerStatus.reference.length > 0 && (
+                          <option value="">{S.settingsReaderRefOwn}</option>
+                        )}
+                        {readerStatus.bundledVoices.map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
                     )}
                     <button
                       className="btn"
@@ -645,7 +652,7 @@ export function Settings({
                     <button
                       className="btn"
                       disabled={refBusy}
-                      onClick={() => void chooseReference('pick')}
+                      onClick={() => void chooseReference(null)}
                     >
                       {refBusy ? S.settingsReaderRefBusy : S.settingsReaderRefPick}
                     </button>
@@ -799,17 +806,26 @@ export function Settings({
                 {readerStatus !== null && (
                   <div className="field" style={{ marginTop: 12 }}>
                     <label htmlFor="ttsTemperature">{S.settingsTtsTemperature}</label>
+                    {/* CustomVoice always reads at the engine's 0.9 (reader.ts,
+                        talkerTemperature). Keyed by mode because the field is
+                        uncontrolled and has to show the other value on a switch. */}
                     <input
+                      key={ttsStatus?.voiceMode === 'custom' ? 'custom' : 'base'}
                       id="ttsTemperature"
                       className="control"
                       type="number"
                       step="0.1"
                       min="0"
                       max="2"
-                      defaultValue={readerStatus.temperature}
+                      disabled={ttsStatus?.voiceMode === 'custom'}
+                      defaultValue={ttsStatus?.voiceMode === 'custom' ? 0.9 : readerStatus.temperature}
                       onBlur={(e) => void setReader({ temperature: Number.parseFloat(e.target.value) })}
                     />
-                    <span className="field-note">{S.settingsTtsTemperatureNote}</span>
+                    <span className="field-note">
+                      {ttsStatus?.voiceMode === 'custom'
+                        ? S.settingsTtsTemperatureCustomNote
+                        : S.settingsTtsTemperatureNote}
+                    </span>
                   </div>
                 )}
               </>

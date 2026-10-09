@@ -140,7 +140,8 @@ const api: YoaiApi = {
     set: (patch) => ipcRenderer.invoke(CHANNELS.readerSet, patch) as Promise<ReaderStatus>,
     pickReference: () =>
       ipcRenderer.invoke(CHANNELS.readerPickReference) as Promise<string | null>,
-    resetReference: () => ipcRenderer.invoke(CHANNELS.readerResetReference) as Promise<string>,
+    useBundled: (name: string) =>
+      ipcRenderer.invoke(CHANNELS.readerUseBundled, name) as Promise<string>,
     useRecording: (wav: Uint8Array) =>
       ipcRenderer.invoke(CHANNELS.readerUseRecording, wav) as Promise<string>,
     begin: () => ipcRenderer.invoke(CHANNELS.readerBegin) as Promise<boolean>,

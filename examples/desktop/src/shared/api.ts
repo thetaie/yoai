@@ -86,7 +86,7 @@ export const CHANNELS = {
   readerFinish: 'reader:finish',
   readerCancel: 'reader:cancel',
   readerPickReference: 'reader:pickReference',
-  readerResetReference: 'reader:resetReference',
+  readerUseBundled: 'reader:useBundled',
   readerUseRecording: 'reader:useRecording',
   /** Main -> renderer: PCM chunks in reading order, then the timings. */
   readerEvent: 'reader:event',
@@ -242,8 +242,12 @@ export interface ReaderStatus {
    * out five semitones low, heard as the voice changing mid-reply.
    */
   speaker: string
-  /** The reference voice the user picked, a .wav or a .spk; '' for the bundled one. */
+  /** The reference voice the user picked, a .wav or a .spk; '' for a bundled one. */
   reference: string
+  /** The bundled voice used while `reference` is '': a name from bundledVoices. */
+  bundled: string
+  /** The voices that come with the app, the directories under speaker/. */
+  bundledVoices: string[]
   /**
    * What went wrong with the last automatic load, '' when nothing did -- a
    * talker that is not a Base checkpoint, above all, which is refused.
@@ -411,8 +415,11 @@ export interface YoaiApi {
      * recording takes seconds the first time, while its embedding is extracted.
      */
     pickReference(): Promise<string | null>
-    /** Back to the bundled reference voice. '' or why it could not be used. */
-    resetReference(): Promise<string>
+    /**
+     * Use a bundled voice, by a name from ReaderStatus.bundledVoices, in place
+     * of any file picked. '' or why it could not be used.
+     */
+    useBundled(name: string): Promise<string>
     /**
      * Keep a take recorded on this page -- a 16-bit mono WAV at 24 kHz -- and use
      * it as the reference voice. '' or why it could not be used.
