@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Usage: python build.py [clean] [native] [llama] [qtts] [mnn] [app] [dist]
 
-Desktop client build: the Node-API addon, the Electron bundles, and on Windows
-the app as a directory that runs on its own.
+Desktop client build: the Node-API addon, the Electron bundles, and the app
+as a directory that runs on its own.
 
-  (no args)  native + app + dist, with llama and qtts; dist on Windows only
-             so far, elsewhere `npm run preview` runs what was built. With no
-             lane named, the llama.cpp and qwentts.cpp checkouts are fetched
+  (no args)  native + app + dist, with llama and qtts. With no lane named, the llama.cpp and qwentts.cpp checkouts are fetched
              into third/ when they are not there (git and the network, once),
              and each lane is built when its checkouts are on what
              third/manifest.json pins. mnn only when named.
@@ -27,9 +25,11 @@ the app as a directory that runs on its own.
              weights -- see design/voice.md before turning it on.
   app        just the Electron bundles (out/)
   dist       native + app, then the app as one directory that runs where it
-             is put: dist-win-x64/, YoAI.exe in it. Windows only so far. Lanes
-             as for a bare build: llama and qtts unless others are named. A
-             few seconds on top of the rest; close a running YoAI.exe first.
+             is put: dist-<os>-<arch>/ -- YoAI.exe in dist-win-x64/, YoAI.app
+             in dist-mac-arm64/, yoai in dist-linux-x64/. For the machine it
+             runs on only; there is no cross packaging. Lanes as for a bare
+             build: llama and qtts unless others are named. A few seconds on
+             top of the rest; close a running YoAI first.
   clean      discard build/ first. ADDING a lane does not need it -- the
              addon is reconfigured every run, so `llama` on an existing tree
              takes effect by itself. DROPPING one does: a lane that is not
@@ -63,6 +63,7 @@ both, for one run:
 import glob
 import importlib.util
 import os
+import platform
 import shutil
 import sys
 
@@ -108,10 +109,6 @@ def main(argv):
             fail('Unknown argument "%s". Run %s --help for the options.' % (tok, b.script_cmd(__file__)))
         want.add(t)
     if "dist" in want:
-        # Said before anything is built, rather than after minutes of it.
-        if not b.WINDOWS:
-            fail("[dist] packaging is Windows-only so far; on this platform: %s, then npm run preview"
-                 % b.script_cmd(__file__))
         want |= {"native", "app"}
     if want & LANES:
         want.add("native")
@@ -119,9 +116,7 @@ def main(argv):
     # app that runs. Naming native or app is the quick way round while
     # working, and leaves dist out.
     if not want & {"native", "app"}:
-        want |= {"native", "app"}
-        if b.WINDOWS:
-            want.add("dist")
+        want |= {"native", "app", "dist"}
 
     # After the arguments, so the help text still prints when a configured path
     # is wrong. The names are the paths this script reads.
@@ -280,6 +275,13 @@ def vcpkg_args():
 # like, and it says nothing about the CRT in the message.
 STATIC_CRT = ["-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"] if b.WINDOWS else []
 
+# Position-independent code, off Windows, and for the same kind of reason: the
+# addon is a shared object, so every static archive linked into it must be
+# built -fPIC. ggml and llama turn it on for themselves; qwentts.cpp does not,
+# and the link then fails on a thread_local in qwen.cpp (R_X86_64_TPOFF32
+# against __tls_guard). Passed to every SDK so none depends on its own default.
+PIC = [] if b.WINDOWS else ["-DCMAKE_POSITION_INDEPENDENT_CODE=ON"]
+
 
 # -----------------------------------------------------------------------------
 # A desktop llama.cpp SDK, shaped like the ones examples/harmony/build.py assembles per
@@ -307,7 +309,7 @@ def llama_sdk():
     # keeps whichever one it was first configured with.
     b.fresh_tree(lbuild, src)
     run(["cmake", "-S", src, "-B", lbuild,
-         "-DCMAKE_BUILD_TYPE=Release"] + STATIC_CRT + b.QUIET_THIRD + [
+         "-DCMAKE_BUILD_TYPE=Release"] + STATIC_CRT + PIC + b.QUIET_THIRD + [
          "-DBUILD_SHARED_LIBS=OFF",
          "-DLLAMA_BUILD_TESTS=OFF",
          "-DLLAMA_BUILD_EXAMPLES=OFF",
@@ -437,7 +439,7 @@ def qtts_sdk(gen):
     crt = ["-DCMAKE_POLICY_DEFAULT_CMP0091=NEW"] + STATIC_CRT if b.WINDOWS else []
     b.fresh_tree(qbuild, src)
     run(["cmake", "-S", src, "-B", qbuild] + gen + [
-        "-DCMAKE_BUILD_TYPE=Release"] + crt + b.QUIET_THIRD + [
+        "-DCMAKE_BUILD_TYPE=Release"] + crt + PIC + b.QUIET_THIRD + [
         "-DGGML_SOURCE_DIR=" + b.fwd(ggml) + "/ggml",
         "-DBUILD_SHARED_LIBS=OFF",
         "-DQWEN_SHARED=OFF"] + backend)
@@ -544,7 +546,7 @@ def mnn_sdk(gen):
     # Configured every run, for the reason given under llama_sdk().
     b.fresh_tree(mbuild, src)
     run(["cmake", "-S", src, "-B", mbuild] + gen + [
-        "-DCMAKE_BUILD_TYPE=Release"] + b.QUIET_THIRD +
+        "-DCMAKE_BUILD_TYPE=Release"] + PIC + b.QUIET_THIRD +
         (["-DMNN_WIN_RUNTIME_MT=ON"] if b.WINDOWS else []) + [
         "-DBUILD_SHARED_LIBS=OFF",
         "-DMNN_BUILD_SHARED_LIBS=OFF",
@@ -591,23 +593,36 @@ def mnn_sdk(gen):
 # is staged here.
 #
 # stage/ is the package's resources/ directory, laid out as it will be there:
-# yoai.node, every DLL it loads that a fresh Windows does not have, and the
-# speaker voice files. Node loads a .node with the search path altered to its
-# own directory, so the DLLs beside it are the ones found -- before any copy in
-# System32, which a machine with the Visual C++ redistributable installed has
-# and a fresh one does not.
+# yoai.node, every library it loads that a fresh machine may not have, and the
+# speaker voice files.
+#
+#   Windows  Node loads a .node with the search path altered to its own
+#            directory, so the DLLs beside it are the ones found -- before any
+#            copy in System32, which a machine with the Visual C++
+#            redistributable installed has and a fresh one does not.
+#   Linux    the addon carries RUNPATH $ORIGIN (native/CMakeLists.txt), which
+#            does the same for the .so files beside it.
+#   macOS    nothing is bundled: every SDK is static, and what the addon loads
+#            is the system's. Checked, not assumed -- see check_runtime_macos().
 # -----------------------------------------------------------------------------
 def package():
     addon = addon_path()
     if not addon:
         fail("[dist] no yoai.node under %s" % BUILD)
+    os_name = "win" if b.WINDOWS else "mac" if b.MACOS else "linux"
+    arch = host_arch()
     b.rmtree(STAGE)
     b.mkdirs(STAGE)
     shutil.copy2(addon, STAGE)
-    # curl, OpenSSL and zlib: vcpkg's x64-windows triplet is dynamic, and its
-    # toolchain has already copied them beside the addon.
-    b.copy_glob(os.path.join(os.path.dirname(addon), "*.dll"), STAGE)
-    bundle_runtime()
+    if b.WINDOWS:
+        # curl, OpenSSL and zlib: vcpkg's x64-windows triplet is dynamic, and
+        # its toolchain has already copied them beside the addon.
+        b.copy_glob(os.path.join(os.path.dirname(addon), "*.dll"), STAGE)
+        bundle_runtime()
+    elif b.MACOS:
+        check_runtime_macos()
+    else:
+        bundle_runtime_linux()
 
     # Every speaker's voice files; src/main/reader.ts picks one by name.
     for spk in sorted(glob.glob(os.path.join(b.ROOT, "speaker", "*", "*.spk"))):
@@ -616,12 +631,12 @@ def package():
         shutil.copy2(spk, dest)
 
     # electron-builder writes into a scratch directory, stage-out/ (see
-    # electron-builder.yml); the app is moved out of it to dist-win-x64/ and
-    # the rest, its own debug notes, goes. Both from empty, so nothing of an
-    # earlier package is left in either. `node <cli>` rather than npx, for the
-    # reason given under native().
+    # electron-builder.yml); the app is moved out of it to dist-<os>-<arch>/
+    # and the rest, its own debug notes, goes. Both from empty, so nothing of
+    # an earlier package is left in either. `node <cli>` rather than npx, for
+    # the reason given under native().
     scratch = os.path.join(DESKTOP, "stage-out")
-    app_dir = os.path.join(DESKTOP, "dist-win-x64")
+    app_dir = os.path.join(DESKTOP, "dist-%s-%s" % (os_name, arch))
     b.rmtree(scratch)
     # Moved aside before it is deleted: a running YoAI.exe holds its files,
     # and a delete would stop halfway through, leaving half an app. Windows
@@ -632,15 +647,34 @@ def package():
         try:
             os.rename(app_dir, old)
         except OSError:
-            fail("[dist] %s is in use -- close YoAI.exe and run this again." % b.shown(app_dir))
+            fail("[dist] %s is in use -- close YoAI and run this again." % b.shown(app_dir))
         b.rmtree(old)
     say("[dist] electron-builder")
     cli = os.path.join(DESKTOP, "node_modules", "electron-builder", "cli.js")
-    run(["node", cli, "--win", "--config", "electron-builder.yml"], cwd=DESKTOP)
-    os.rename(os.path.join(scratch, "win-unpacked"), app_dir)
+    run(["node", cli, "--" + os_name, "--" + arch, "--config", "electron-builder.yml"], cwd=DESKTOP)
+    # One directory, named by electron-builder after the platform and the
+    # arch: win-unpacked, linux-unpacked, linux-arm64-unpacked, mac-arm64 (with
+    # YoAI.app inside), and so on. Found rather than spelled out here.
+    built = [d for d in os.listdir(scratch) if os.path.isdir(os.path.join(scratch, d))]
+    if len(built) != 1:
+        fail("[dist] expected one app directory in %s, found: %s"
+             % (b.shown(scratch), ", ".join(built) or "none"))
+    os.rename(os.path.join(scratch, built[0]), app_dir)
     b.rmtree(scratch)
     b.rmtree(STAGE)  # copied into the app's resources/, and nothing else reads it
     say("[dist] the app, everything it runs with, in %s" % b.shown(app_dir))
+
+
+def host_arch():
+    """electron-builder's name for this machine's architecture. The package is
+    always for the machine it is built on: the addon and the Electron runtime
+    npm installed are both this one's."""
+    m = platform.machine().lower()
+    if m in ("x86_64", "amd64"):
+        return "x64"
+    if m in ("arm64", "aarch64"):
+        return "arm64"
+    fail("[dist] no package for this architecture: %s" % platform.machine())
 
 
 def bundle_runtime():
@@ -713,6 +747,81 @@ def pe_imports(path):
         fail('[dist] dumpbin could not read "%s"' % path)
     return [s for s in (line.strip() for line in text.splitlines())
             if s.lower().endswith(".dll") and " " not in s]
+
+
+# glibc and the GCC runtime. Every desktop distro has them, and a copy of
+# either would be wrong: glibc's pieces must match each other and the loader,
+# and Electron itself already needs libstdc++ and libgcc_s from the system.
+LINUX_SYSTEM = ("linux-vdso.so", "ld-linux", "libc.so", "libm.so", "libdl.so",
+                "libpthread.so", "librt.so", "libstdc++.so", "libgcc_s.so")
+
+
+def bundle_runtime_linux():
+    """Copy into stage/ the shared libraries yoai.node loads that a fresh
+    Linux may not have, and stop the build on one nothing will supply.
+
+    Found with ldd, not named here, so a dependency that changes changes the
+    list by itself. Today that is:
+
+      libgomp.so.1    ggml's OpenMP, from GCC; on most desktops, not all
+      libvulkan.so.1  the Vulkan loader, when qtts is built with Vulkan.
+                      Taken from Electron's own directory, which ships the
+                      same Khronos loader, as on Windows.
+
+    The addon's RUNPATH is $ORIGIN, so these copies are found before the
+    system's. What the package does not cover is glibc itself: the addon needs
+    at least the glibc of the machine that built it."""
+    electron = {}
+    for f in glob.glob(os.path.join(DESKTOP, "node_modules", "electron", "dist", "*.so*")):
+        electron[os.path.basename(f)] = f
+    missing = {}
+    for path in sorted(glob.glob(os.path.join(STAGE, "*.node"))):
+        text = b.output(["ldd", path])
+        if text is None:
+            fail('[dist] ldd could not read "%s"' % path)
+        # "libgomp.so.1 => /lib/x86_64-linux-gnu/libgomp.so.1 (0x...)",
+        # "libfoo.so.1 => not found", or a bare path for the loader.
+        for line in text.splitlines():
+            parts = line.split()
+            if not parts:
+                continue
+            name = os.path.basename(parts[0])
+            if name.startswith(LINUX_SYSTEM) or os.path.isfile(os.path.join(STAGE, name)):
+                continue
+            found = parts[2] if len(parts) > 2 and parts[1] == "=>" and parts[2].startswith("/") else None
+            src = electron.get(name) or found
+            if src is None:
+                missing.setdefault(name, os.path.basename(path))
+                continue
+            # copy2 follows the symlink, and the copy keeps the soname.
+            shutil.copy2(src, os.path.join(STAGE, name))
+            say("[dist] bundling %s, which %s loads" % (name, os.path.basename(path)))
+    if missing:
+        fail("[dist] loaded, and nothing on this machine supplies it:",
+             *["[dist]   %s, by %s" % (n, by) for n, by in sorted(missing.items())])
+
+
+def check_runtime_macos():
+    """Stop the build if yoai.node loads anything a fresh Mac does not have.
+
+    Nothing is bundled on macOS: vcpkg's triplet and every SDK are static, and
+    Metal, Accelerate and libc++ are the system's. The one way that goes wrong
+    is an optional dependency that a CMake find_package() picked up from
+    Homebrew -- libomp for ggml's OpenMP is the likely one -- which links fine
+    here and does not load anywhere else. Said here instead."""
+    foreign = []
+    for path in sorted(glob.glob(os.path.join(STAGE, "*.node"))):
+        text = b.output(["otool", "-L", path])
+        if text is None:
+            fail('[dist] otool could not read "%s"' % path)
+        # The first line is the file itself; each after it is "<path> (...)".
+        for line in text.splitlines()[1:]:
+            dep = line.strip().split(" (")[0]
+            if dep and not dep.startswith(("/usr/lib/", "/System/Library/")):
+                foreign.append("[dist]   %s, by %s" % (dep, os.path.basename(path)))
+    if foreign:
+        fail("[dist] loaded, and not part of macOS -- a fresh Mac would not load the addon:",
+             *foreign)
 
 
 if __name__ == "__main__":

@@ -241,8 +241,8 @@ python build.py
 ```
 
 That builds the Node-API addon, with the on-device engine and speech output,
-and the Electron bundles, and on Windows the app as one directory that runs on
-its own: `examples/desktop/dist-win-x64/YoAI.exe`. The first run fetches
+and the Electron bundles, and the app as one directory that runs on its own:
+`examples/desktop/dist-<os>-<arch>/`, e.g. `dist-win-x64/YoAI.exe`. The first run fetches
 llama.cpp and qwentts.cpp into `third/`. `npm run dev` after that is the loop
 while writing UI.
 

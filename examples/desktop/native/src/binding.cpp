@@ -474,7 +474,13 @@ struct AudioEvent {
     // Which piece these samples belong to, for the reading lane. -1 on every
     // event the other two produce, and CallJsAudio then passes two arguments
     // exactly as before -- so this field costs their callbacks nothing.
-    int                sentence = -1;
+    int                sentence;
+
+    // Spelled out because C++11 does not let a struct with a default member
+    // initializer be brace-initialized as an aggregate; this keeps every
+    // AudioEvent{...} below working and the addon on the core's C++11.
+    AudioEvent(std::string t, std::string c, std::vector<float> p, int s = -1)
+        : type(std::move(t)), content(std::move(c)), pcm(std::move(p)), sentence(s) {}
 };
 
 // At most one utterance at a time. The core serialises on its own mutex, so a

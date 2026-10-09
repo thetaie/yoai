@@ -2,14 +2,15 @@
 # stage/ and then runs electron-builder with this file. Run through build.py,
 # not on its own: stage/ is what puts the addon in the package.
 #
-# Windows only so far. macOS and Linux get their targets once the Windows
-# package has been run on a machine that never built anything.
+# For the machine it runs on: build.py passes --win, --mac or --linux and the
+# host's arch. There is no cross packaging -- the addon is native code built
+# here.
 
 appId: ai.yoai.desktop   # the AppUserModelID src/main/index.ts sets
 productName: YoAI
 
 directories:
-  # A scratch directory: build.py moves the app out of it, to dist-<platform>/,
+  # A scratch directory: build.py moves the app out of it, to dist-<os>-<arch>/,
   # and deletes the rest -- electron-builder's own notes among it.
   output: stage-out
   # Not build/, electron-builder's default: that is cmake-js's output
@@ -38,9 +39,27 @@ electronDist: node_modules/electron/dist
 npmRebuild: false
 nodeGypRebuild: false
 
-# No installer and no archive: the app is a directory that runs where it is
-# put. electron-builder writes it as stage-out/win-unpacked/, which build.py
-# moves to dist-win-x64/.
+# No installer and no archive on any platform: the app is a directory that
+# runs where it is put. electron-builder writes it as stage-out/win-unpacked/,
+# stage-out/linux-unpacked/, stage-out/mac-arm64/ and so on, which build.py
+# moves to dist-<os>-<arch>/.
 win:
   target: dir
+  icon: ../harmony/AppScope/resources/base/media/app_icon.png
+
+# Signed ad hoc ("-"), not with a Developer ID: an Apple Silicon Mac does not
+# run unsigned code at all, and the Electron binary's own ad hoc signature no
+# longer matches once the app's resources are added. Ad hoc runs on the machine
+# that built it; on another, Gatekeeper refuses a downloaded copy until it is
+# allowed in System Settings, or until the app is signed and notarized.
+mac:
+  target: dir
+  icon: ../harmony/AppScope/resources/base/media/app_icon.png
+  identity: "-"
+
+# yoai rather than package.json's yoai-desktop, which is what electron-builder
+# would name the executable otherwise.
+linux:
+  target: dir
+  executableName: yoai
   icon: ../harmony/AppScope/resources/base/media/app_icon.png

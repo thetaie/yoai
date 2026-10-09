@@ -78,6 +78,14 @@ else()
     target_compile_options(yoai_addon PRIVATE -Wall -Wextra)
 endif()
 
+if(UNIX AND NOT APPLE)
+    # Look beside the addon first for the libraries it loads, as Windows does
+    # for a .node's DLLs. The package puts libgomp and libvulkan there (see
+    # bundle_runtime_linux() in build.py); in the build tree nothing is beside
+    # it and the system's copies are found as before.
+    set_target_properties(yoai_addon PROPERTIES BUILD_RPATH "$ORIGIN")
+endif()
+
 if(APPLE)
     # The Node-API symbols are resolved by the host process at load time, not by
     # anything on the link line, so the default "undefined symbols are an error"

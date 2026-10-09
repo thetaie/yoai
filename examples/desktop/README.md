@@ -55,8 +55,9 @@ python build.py      # python3 on macOS / Linux
 ```
 
 That builds the addon into `build/yoai.node`, with the on-device engine and
-speech output, and the Electron bundles into `out/`, and on Windows puts the app
-together in `dist-win-x64/` — run `YoAI.exe` there. The first run also fetches
+speech output, and the Electron bundles into `out/`, and puts the app together
+in `dist-<os>-<arch>/` — `YoAI.exe` in `dist-win-x64/`, `YoAI.app` in
+`dist-mac-arm64/`, `yoai` in `dist-linux-x64/`. The first run also fetches
 the llama.cpp and qwentts.cpp checkouts into `../../third/` and builds both
 engines, which takes a while; later runs are incremental.
 
@@ -84,20 +85,33 @@ fails with `Error: Electron uninstall`, which names neither npm nor a download.
 
 ### The app on its own
 
-On Windows the bare build ends by packaging the app with electron-builder
-([electron-builder.yml](electron-builder.yml)) into `dist-win-x64/`: one
-directory holding everything the app runs with, which runs where it is put —
-`YoAI.exe`. There is no installer; to hand it on, copy or zip the directory.
+The bare build ends by packaging the app with electron-builder
+([electron-builder.yml](electron-builder.yml)) into `dist-<os>-<arch>/`: one
+directory holding everything the app runs with, which runs where it is put.
+There is no installer; to hand it on, copy or zip the directory.
 `python build.py dist` is the same thing named. It takes a few seconds, and a
-running `YoAI.exe` has to be closed first.
+running copy has to be closed first. The package is for the machine that builds
+it — Windows on Windows, an arm64 Mac on an arm64 Mac — never cross-built.
 
 `yoai.node` cannot load from inside the asar, so it goes into the package's
-`resources/`, with every DLL it needs that a fresh Windows may lack: curl,
-OpenSSL and zlib from vcpkg; `vcruntime140.dll` and `vcomp140.dll` from Visual
-Studio's redistributable; and `vulkan-1.dll`, the Vulkan loader, without which
-the addon would not load on a machine with no GPU driver. They are found by
-reading the imports, and an import nothing supplies stops the build rather
-than the app. The speaker's voice files go into `resources/speaker/`.
+`resources/`, with every library it needs that a fresh machine may lack. They
+are found by reading what the addon loads, and one that nothing supplies stops
+the build rather than the app. The speaker's voice files go into
+`resources/speaker/`.
+
+- **Windows**: curl, OpenSSL and zlib from vcpkg; `vcruntime140.dll` and
+  `vcomp140.dll` from Visual Studio's redistributable; and `vulkan-1.dll`, the
+  Vulkan loader, without which the addon would not load on a machine with no
+  GPU driver.
+- **Linux**: `libgomp.so.1` (ggml's OpenMP), and `libvulkan.so.1` when speech
+  output is built with Vulkan. The addon looks beside itself first
+  (RUNPATH `$ORIGIN`). glibc is not bundled, so the package needs a distro at
+  least as new as the one that built it, and Electron's own dependencies (GTK,
+  NSS, ALSA) come from the desktop.
+- **macOS**: nothing — every library is static and the rest is macOS's. The
+  build checks that, and stops on anything from Homebrew. The app is signed ad
+  hoc: it runs where it was built, and a copy on another Mac has to be allowed
+  in System Settings first.
 
 ### On-device models
 
@@ -155,10 +169,11 @@ npm run palettes
 
 ## What is not here
 
-- **Packaging off Windows, and signing.** `python build.py dist` packages for
-  Windows only so far; macOS and Linux follow once the Windows package has run
-  on a machine that never built anything. Nothing is signed, so Windows
-  SmartScreen warns the first time a downloaded copy of `YoAI.exe` is run.
+- **Installers, and signing.** `python build.py dist` makes a directory, not
+  an installer, a `.dmg` or an AppImage. Nothing is signed with a real
+  certificate, so Windows SmartScreen warns the first time a downloaded copy of
+  `YoAI.exe` is run, and macOS Gatekeeper refuses a downloaded `YoAI.app`
+  until it is allowed. The macOS package has not yet been run on a Mac.
 - **Voice, TTS and bundles.** They are in the C ABI and deliberately not bound
   in [native/src/binding.cpp](native/src/binding.cpp) — nothing here calls them
   yet, and an export nobody uses is a second place to keep correct.
