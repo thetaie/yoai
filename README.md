@@ -249,8 +249,9 @@ while writing UI.
 Speech output runs on CUDA where the build machine has a CUDA Toolkit, else on
 Vulkan, else on the CPU; `TTS_BACKEND` in `.env` picks one. A package built
 with CUDA does not carry the CUDA runtime, and only starts where it is
-installed: [examples/desktop/README.md](examples/desktop/README.md) says how to
-install it, and how to build a package that runs anywhere.
+installed: [examples/desktop/README.md](examples/desktop/README.md) says which
+Visual Studio each CUDA compiles with, how to install the runtime, and how to
+build a package that runs anywhere.
 
 One directory rather than an `electron/` and a `web/`, and
 [examples/desktop/README.md](examples/desktop/README.md) argues it: a browser cannot mmap a GGUF
@@ -270,7 +271,7 @@ product rather than a second front end for this one.
 | On-device text embedding (Qwen3-Embedding) | working on the desktop; no C ABI yet |
 | Vector search (sqlite-vec, in the core's database) | working; no table in the schema yet |
 | Local personal-data storage | the day timeline, in the core's own SQLite database |
-| Desktop client (Electron) | chat and on-device models; builds, not yet packaged |
+| Desktop client (Electron) | chat, on-device models and speech output; packaged, and run on Windows with CUDA |
 | Android measurement bench | scaffolded; not yet run on a device |
 | Android app | not yet |
 | Tools / MCP, attachments, markdown rendering | not yet |

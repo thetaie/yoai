@@ -70,6 +70,7 @@ both, for one run:
 
 import glob
 import importlib.util
+import json
 import os
 import platform
 import shutil
@@ -139,8 +140,9 @@ def main(argv):
     if "clean" in want:
         b.rmtree(BUILD)
 
-    if not os.path.isdir(os.path.join(DESKTOP, "node_modules")):
-        say("[build] npm install")
+    why = npm_stale()
+    if why:
+        say("[build] npm install: %s" % why)
         run(["npm", "install"], cwd=DESKTOP)
 
     if "native" in want:
@@ -153,6 +155,33 @@ def main(argv):
     if "dist" in want:
         package()
     return 0
+
+
+def npm_stale():
+    """Why node_modules wants `npm install`, or '' when it does not.
+
+    More than whether the directory is there: an install that stopped partway
+    leaves one, and every run after it skipped the install and failed later,
+    on whichever package was missing. npm writes node_modules/.package-lock.json
+    last, once an install has finished; a package-lock.json newer than that is
+    a pull that changed the dependencies. Electron's own runtime is downloaded
+    by the postinstall, apart from the package, and `npm install <name>` drops
+    it -- path.txt is written once it is in place."""
+    modules = os.path.join(DESKTOP, "node_modules")
+    if not os.path.isdir(modules):
+        return "no node_modules yet"
+    done = os.path.join(modules, ".package-lock.json")
+    if not os.path.isfile(done):
+        return "the last install did not finish"
+    if os.path.getmtime(os.path.join(DESKTOP, "package-lock.json")) > os.path.getmtime(done):
+        return "package-lock.json is newer than the last install"
+    pkg = json.loads(b.read(os.path.join(DESKTOP, "package.json")) or "{}")
+    for name in sorted(list(pkg.get("dependencies", {})) + list(pkg.get("devDependencies", {}))):
+        if not os.path.isfile(os.path.join(modules, *name.split("/"), "package.json")):
+            return "%s is not in node_modules" % name
+    if not os.path.isfile(os.path.join(modules, "electron", "path.txt")):
+        return "the Electron runtime is not downloaded"
+    return ""
 
 
 # -----------------------------------------------------------------------------

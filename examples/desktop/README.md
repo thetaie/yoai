@@ -145,6 +145,25 @@ on `PATH`, or `/usr/local/cuda` on Linux), else Vulkan, else the CPU.
 stops the build when that one is not there rather than building another. macOS
 always uses Metal.
 
+On Windows, each CUDA release compiles only with a range of MSVC versions, and
+its nvcc refuses any other:
+
+| CUDA | Visual Studio |
+|---|---|
+| 13.2 and later | 2019, 2022, 2026 |
+| 12.4 – 13.1 | 2019, 2022 |
+| 12.0 – 12.3 | 2019, 2022 17.0 – 17.9 |
+
+17.9 is an update of Visual Studio 2022, as Help → About and the Visual Studio
+Installer show it. 17.10 moved MSVC from 19.3x to 19.40, past what CUDA 12.3
+and earlier accept.
+
+The build compiles with the Visual Studio at `VS_DIR`, 2026 by default, so with
+an older CUDA it stops while CMake checks the CUDA compiler, on
+`unsupported Microsoft Visual Studio version!`. Point `VS_DIR` in `.env` at a
+Visual Studio 2022 install, which can sit beside 2026, or install a newer CUDA.
+NVIDIA's CUDA Installation Guide for Windows lists the range of each release.
+
 **A package built with CUDA needs CUDA on every machine it runs on.**
 `yoai.node` links the CUDA runtime (cudart) and cuBLAS, and the package does not
 carry them: they are several hundred megabytes, and NVIDIA ships them for any
@@ -180,6 +199,8 @@ To install the two:
   loader does not search until told:
   `echo /usr/local/cuda/lib64 | sudo tee /etc/ld.so.conf.d/cuda.conf && sudo ldconfig`.
   Either way, `ldconfig -p | grep -E 'libcudart|libcublas'` should list both.
+
+A Windows package built with CUDA has been run, with speech output on the GPU.
 
 ## Where the data lives
 
@@ -222,7 +243,7 @@ npm run palettes
   certificate, so Windows SmartScreen warns the first time a downloaded copy of
   `YoAI.exe` is run, and macOS Gatekeeper refuses a downloaded `YoAI.app`
   until it is allowed. The macOS package has not yet been run on a Mac.
-- **Voice, TTS and bundles.** They are in the C ABI and deliberately not bound
+- **Voice input and bundles.** They are in the C ABI and deliberately not bound
   in [native/src/binding.cpp](native/src/binding.cpp) — nothing here calls them
   yet, and an export nobody uses is a second place to keep correct.
 - **Markdown rendering.** Replies are shown as text, as they are on HarmonyOS.
