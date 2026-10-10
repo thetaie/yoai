@@ -198,8 +198,7 @@ directory name, and `/third/<name>/` to the root `.gitignore`:
 
 If the build script reads an env var for the checkout, use that name for
 `env`. A new variable also goes in the `NAMES` list in the root `build.py` and
-in `.env.example`; without that, a `YOAI_` setting for it in `.env` is read
-and then ignored.
+in `.env.example`; without that, a setting for it in `.env` is ignored.
 
 JSON because it is the format everyone already reads, and `json` is in the
 standard library on 3.8. It carries no comments, which is why the fields are

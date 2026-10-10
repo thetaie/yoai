@@ -8,16 +8,11 @@
 //
 //   yoai-cli --base-url URL --key KEY --model NAME ["one question"]
 //
-// Each flag falls back to an environment variable (YOAI_BASE_URL, YOAI_API_KEY,
-// YOAI_MODEL), which is the sane way to pass a key: a flag lands in the shell
-// history and in `ps`.
-//
 // With a question argument it runs that one turn and exits. Without one it goes
 // interactive and keeps the transcript, so multi-turn context is exercised too.
 
 #include "yoai.h"
 
-#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <string>
@@ -37,19 +32,13 @@ struct Options {
     bool        show_usage    = false;
 };
 
-std::string from_env(const char* name) {
-    const char* v = std::getenv(name);
-    return v ? std::string(v) : std::string();
-}
-
 void usage() {
     std::cerr <<
         "usage: yoai-cli [options] [\"question\"]\n"
         "\n"
         "  --base-url URL   OpenAI-compatible API root, no /chat/completions\n"
-        "                   (env YOAI_BASE_URL)\n"
-        "  --key KEY        bearer token (env YOAI_API_KEY)\n"
-        "  --model NAME     model to send in the request (env YOAI_MODEL)\n"
+        "  --key KEY        bearer token\n"
+        "  --model NAME     model to send in the request\n"
         "  --system TEXT    system prompt\n"
         "  --no-thinking    drop reasoning output instead of dimming it\n"
         "  --usage          print the token/cost summary after each turn\n"
@@ -60,10 +49,6 @@ void usage() {
 
 // Returns false when the arguments are unusable, having already explained why.
 bool parse_args(int argc, char** argv, Options* opt) {
-    opt->base_url = from_env("YOAI_BASE_URL");
-    opt->api_key  = from_env("YOAI_API_KEY");
-    opt->model    = from_env("YOAI_MODEL");
-
     bool debug = false;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -109,8 +94,7 @@ bool parse_args(int argc, char** argv, Options* opt) {
     yoai_set_log_level(debug ? "debug" : "warn");
 
     if (opt->base_url.empty() || opt->api_key.empty() || opt->model.empty()) {
-        std::cerr << "yoai-cli: --base-url, --key and --model are all required "
-                     "(or their YOAI_* environment variables)\n\n";
+        std::cerr << "yoai-cli: --base-url, --key and --model are all required\n\n";
         usage();
         return false;
     }

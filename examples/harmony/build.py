@@ -45,8 +45,7 @@ config directory, else at the usual install locations. The OpenHarmony SDK,
 node and hvigor all come from that one install.
 
 Settings, each read from .env at the repository root -- see .env.example --
-or the environment, .env winning; YOAI_<NAME> in the environment wins over
-both, for one run:
+or the environment, .env winning:
   VCPKG_ROOT      vcpkg checkout (default: ../../third/vcpkg)
   LLAMA_SRC       llama.cpp checkout (default: ../../third/llama.cpp).
                   Read by `llama` AND by `qtts`, which compiles its ggml.
@@ -416,7 +415,7 @@ def build_llama(o, sdk):
     say("[llama] arch=%s" % (arch or "baseline armv8-a"))
     say("[llama] src=%s" % src)
 
-    b.third_verify("llama.cpp", "LLAMA_SRC", src)
+    b.third_verify("llama.cpp", src)
 
     _native, toolchain, cmake, ninja = tools(sdk, "llama")
     lbuild = os.path.join(HERE, ".llama-build", o.abi)
@@ -496,7 +495,7 @@ def build_mnn(o, sdk):
              "[mnn]   " + b.sync_cmd("clone", "MNN"),
              "[mnn] or set MNN_SRC to an existing checkout.")
     say("[mnn] src=%s" % src)
-    b.third_verify("MNN", "MNN_SRC", src)
+    b.third_verify("MNN", src)
 
     _native, toolchain, cmake, ninja = tools(sdk, "mnn")
     mbuild = os.path.join(HERE, ".mnn-build", o.abi)
@@ -654,8 +653,8 @@ def build_qtts(o, sdk):
     # SMT, not phones. What ggml itself needs on OHOS is not a patch -- see
     # ggml_flags().
     b.qpatch(src, "qwentts-thread-count-override.patch")
-    b.third_verify("llama.cpp", "LLAMA_SRC", llama_src)
-    b.third_verify("qwentts.cpp", "QTTS_SRC", src)
+    b.third_verify("llama.cpp", llama_src)
+    b.third_verify("qwentts.cpp", src)
 
     native, toolchain, cmake, ninja = tools(sdk, "qtts")
     qbuild = os.path.join(HERE, ".qtts-build", o.abi)

@@ -14,7 +14,7 @@
  */
 import { createRequire } from 'node:module'
 import { existsSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { app } from 'electron'
 
 /** (type, content), the C ABI's own event shape. See yoai_chat_handler. */
@@ -180,16 +180,10 @@ export type NativeReaderHandler = (
  * one of them is under this file's control: cmake-js puts the artefact under
  * build/ with a layout that depends on the generator (Ninja writes one
  * directory, Visual Studio a per-configuration one), and a packaged app has it
- * beside the asar instead. The override comes first so a bisect can point at a
- * specific build without moving files around.
+ * beside the asar instead.
  */
 function candidates(): string[] {
   const out: string[] = []
-
-  const override = process.env.YOAI_ADDON
-  if (override !== undefined && override.length > 0) {
-    out.push(resolve(override))
-  }
 
   if (app.isPackaged) {
     out.push(join(process.resourcesPath, 'yoai.node'))
@@ -224,8 +218,8 @@ export function core(): YoaiNative {
   const found = tried.find((p) => existsSync(p))
   if (found === undefined) {
     throw new Error(
-      'yoai.node was not found. Build it with `python build.py native` in examples/desktop ' +
-        '(or set YOAI_ADDON). Looked in:\n  ' +
+      'yoai.node was not found. Build it with `python build.py native` in examples/desktop. ' +
+        'Looked in:\n  ' +
         tried.join('\n  ')
     )
   }

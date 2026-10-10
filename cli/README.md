@@ -70,10 +70,6 @@ yoai-cli [options] ["question"]
   --debug          verbose core logging
 ```
 
-`--base-url`, `--key` and `--model` fall back to `YOAI_BASE_URL`,
-`YOAI_API_KEY` and `YOAI_MODEL`. Pass the key through the
-environment: a flag ends up in shell history and in the process list.
-
 With a question it runs one turn and exits. Without one it reads turns from
 stdin and keeps the transcript, so multi-turn context is exercised too. The
 root [README](../README.md) has provider examples.

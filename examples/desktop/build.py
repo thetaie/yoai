@@ -43,8 +43,7 @@ as a directory that runs on its own.
   help       this text; also -h or --help
 
 Settings, each read from .env at the repository root -- see .env.example --
-or the environment, .env winning; YOAI_<NAME> in the environment wins over
-both, for one run:
+or the environment, .env winning:
   VS_DIR            Windows: Visual Studio install root
   NINJA             Windows: ninja.exe (default: the one Visual Studio bundles)
   VCPKG_ROOT        vcpkg checkout, for curl and OpenSSL (default:
@@ -339,7 +338,7 @@ def llama_sdk():
              "clone it at the pinned commit, with its patch applied:",
              "  " + b.sync_cmd("clone", "llama.cpp"),
              "or point LLAMA_SRC at an existing checkout.")
-    b.third_verify("llama.cpp", "LLAMA_SRC", src)
+    b.third_verify("llama.cpp", src)
 
     lbuild = os.path.join(SDK, "llama")
     sdk = os.path.join(SDK, "llama-sdk")
@@ -412,7 +411,7 @@ def qtts_sdk(gen):
              "clone it at the pinned commit, submodule and patches included:",
              "  " + b.sync_cmd("clone", "qwentts.cpp"),
              "or point QTTS_SRC at an existing checkout.")
-    b.third_verify("qwentts.cpp", "QTTS_SRC", src)
+    b.third_verify("qwentts.cpp", src)
 
     # ONE ggml for both lanes, and llama.cpp's is the one. qwentts.cpp builds a
     # ggml of its own from a fork, and until 2026-09-21 that copy superset
@@ -437,7 +436,7 @@ def qtts_sdk(gen):
     if not os.path.isfile(os.path.join(ggml, "ggml", "CMakeLists.txt")):
         fail("qtts compiles llama.cpp's ggml, and there is none at %s." % os.path.join(ggml, "ggml"),
              "  " + b.sync_cmd("clone", "llama.cpp"))
-    b.third_verify("llama.cpp", "LLAMA_SRC", ggml)
+    b.third_verify("llama.cpp", ggml)
 
     # ONE backend off macOS, the first found of CUDA, Vulkan and the CPU, or
     # the one TTS_BACKEND names -- unlike the root build's tts, which puts CUDA
@@ -612,7 +611,7 @@ def mnn_sdk(gen):
              "clone it at the pinned commit:",
              "  " + b.sync_cmd("clone", "MNN"),
              "or point MNN_SRC at an existing checkout.")
-    b.third_verify("MNN", "MNN_SRC", src)
+    b.third_verify("MNN", src)
 
     mbuild = os.path.join(SDK, "mnn")
     sdk = os.path.join(SDK, "mnn-sdk")

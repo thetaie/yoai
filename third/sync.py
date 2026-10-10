@@ -22,7 +22,9 @@ says what each of its fields means.
            has some, so they are check's business, not this.
 
   name ... limit to these (the manifest's top-level names, case-insensitive).
-           No name means all of them.
+           No name means all of them. name=PATH takes the checkout at PATH,
+           over any setting below; the build scripts pass the tree they
+           compile this way.
 
 Checkouts live in this directory, third/<name>, which .gitignore keeps out of
 the repo -- README.md has why. Each one's location can be overridden by the
@@ -31,9 +33,8 @@ the builds cannot end up pointing at different trees.
 
 Settings:
   <dep>_SRC    one checkout's exact path; see each entry's env in manifest.json
-  Read from .env at the repository root or the environment, .env winning, and
-  YOAI_<dep>_SRC in the environment over both -- the same rules the build
-  scripts load by.
+  Read from .env at the repository root or the environment, .env winning --
+  the same rules the build scripts load by.
 
 Python 3.8 or newer, standard library only.
 """
@@ -376,12 +377,15 @@ def main(argv):
     # unrecognized token is an error, not a guess: quietly doing `check`
     # because somebody typed `updte` is the failure worth designing out.
     by_name = {d.name.lower(): d for d in deps}
-    mode, only, bad = "check", set(), False
+    mode, only, at, bad = "check", set(), {}, False
     for tok in argv:
+        name, eq, path = tok.partition("=")
         if tok in MODES:
             mode = tok
-        elif tok.lower() in by_name:
-            only.add(tok.lower())
+        elif name.lower() in by_name and (not eq or path):
+            only.add(name.lower())
+            if eq:
+                at[name.lower()] = path
         else:
             warn("unknown argument: %s" % tok)
             bad = True
@@ -398,9 +402,11 @@ def main(argv):
     for dep in deps:
         if only and dep.name.lower() not in only:
             continue
-        # Where it lives: the build scripts' own variable wins, so the two can
-        # never disagree about which tree is being built.
-        dep.dir = os.environ.get(dep.env) or build.third_dir(dep.name)
+        # Where it lives: a path on the command line, then the build scripts'
+        # own variable, so the two can never disagree about which tree is
+        # being built.
+        dep.dir = (at.get(dep.name.lower()) or os.environ.get(dep.env)
+                   or build.third_dir(dep.name))
         present = os.path.isdir(os.path.join(dep.dir, ".git"))
 
         if mode == "verify":

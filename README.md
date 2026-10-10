@@ -111,14 +111,12 @@ Then talk to a real provider without a phone in the loop:
 
 ```
 rem Windows
-set YOAI_API_KEY=...
-build\yoai-cli.exe --base-url https://open.bigmodel.cn/api/paas/v4 --model glm-4.7-flash
+build\yoai-cli.exe --base-url https://open.bigmodel.cn/api/paas/v4 --key ... --model glm-4.7-flash
 ```
 
 ```
 # macOS / Linux
-export YOAI_API_KEY=...
-./build/yoai-cli --base-url https://open.bigmodel.cn/api/paas/v4 --model glm-4.7-flash
+./build/yoai-cli --base-url https://open.bigmodel.cn/api/paas/v4 --key ... --model glm-4.7-flash
 ```
 
 With no question argument it goes interactive and keeps the transcript, so
@@ -142,9 +140,9 @@ the model name change. Google Gemini is worth spelling out because its
 compatibility layer sits at a path nobody guesses:
 
 ```
-export YOAI_API_KEY=...          # from https://aistudio.google.com/apikey
+# the key is from https://aistudio.google.com/apikey
 ./build/yoai-cli --base-url https://generativelanguage.googleapis.com/v1beta/openai \
-                 --model gemini-3.6-flash
+                 --key ... --model gemini-3.6-flash
 ```
 
 In the app that same key goes in under Settings → add a model → **Google
@@ -289,8 +287,8 @@ with the ring standing in for the `o` of *Body*. YoAI has its `o` in the same
 place, second letter, but the mark has not been redrawn.
 
 Where a single token is needed, it is lowercase `yoai`: `libyoai.so`, the header
-`yoai.h` and its C ABI's `yoai_` prefix, the desktop tools, and their `YOAI_*`
-environment variables. The bundle id is `com.yoai.bodyclock`.
+`yoai.h` and its C ABI's `yoai_` prefix, and the desktop tools. The bundle id
+is `com.yoai.bodyclock`.
 
 ## License
 

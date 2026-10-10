@@ -29,8 +29,7 @@ tts, each when its checkouts are on what third/manifest.json pins; what is
 skipped is named. llama, server and cosyvoice are built only when named.
 
 Settings, each read from .env at the repository root -- see .env.example --
-or the environment, .env winning; YOAI_<NAME> in the environment wins over
-both, for one run:
+or the environment, .env winning:
   VS_DIR            Windows: Visual Studio install root
   NINJA             Windows: ninja.exe (default: the one Visual Studio bundles)
   VCPKG_ROOT        vcpkg checkout, for curl and OpenSSL (default: third/vcpkg,
@@ -89,11 +88,9 @@ PY = "python" if WINDOWS else "python3"
 # --- Settings ------------------------------------------------------------------
 # Every setting is a <NAME> from NAMES that the scripts read. Highest wins:
 #
-#   1. YOAI_<NAME> in the environment: an override for one run, and how
-#      third_ok() hands sync.py the tree being built, past any .env
-#   2. <NAME> in .env at the repository root
-#   3. <NAME> in the environment, e.g. the VULKAN_SDK its installer sets
-#   4. the calling script's own default
+#   1. <NAME> in .env at the repository root
+#   2. <NAME> in the environment, e.g. the VULKAN_SDK its installer sets
+#   3. the calling script's own default
 #
 # .env is this repository's own file, so a name in it needs no prefix to say
 # whose it is, and a line there wins over the same name in the environment:
@@ -129,19 +126,15 @@ def load_env(*required):
                 if key in NAMES:
                     dotenv[key] = val
 
-    for name in NAMES:
-        val = os.environ.get("YOAI_" + name)
-        if val:
-            os.environ[name] = val
-        elif name in dotenv:
-            os.environ[name] = dotenv[name]
+    for name, val in dotenv.items():
+        os.environ[name] = val
 
     ok = True
     for name in required:
         val = os.environ.get(name)
         if val and not os.path.exists(val):
-            print('[env] %s is "%s", which does not exist. Fix %s in .env, or YOAI_%s / %s '
-                  "in the environment." % (name, val, name, name, name), file=sys.stderr)
+            print('[env] %s is "%s", which does not exist. Fix %s in .env, or in the '
+                  "environment." % (name, val, name), file=sys.stderr)
             ok = False
     return ok
 
@@ -539,26 +532,24 @@ def cmake_at_least(major, minor):
 _verified = set()
 
 
-def third_ok(name, var, tree):
+def third_ok(name, tree):
     """Is this checkout what third/manifest.json records? `name` the manifest
-    section, `var` its variable there, `tree` the tree about to be compiled.
+    section, `tree` the tree about to be compiled.
     What is not, sync.py names on stderr.
 
-    The tree goes over as YOAI_<var>, the one name sync.py's own loader will
-    not override, so the tree checked is the tree built."""
-    child = dict(os.environ)
-    child["YOAI_" + var] = tree
-    return subprocess.run([sys.executable, SYNC, "verify", name], env=child).returncode == 0
+    The tree goes over on the command line, as name=tree, which wins over
+    anything sync.py reads, so the tree checked is the tree built."""
+    return subprocess.run([sys.executable, SYNC, "verify", name + "=" + tree]).returncode == 0
 
 
-def third_verify(name, var, tree):
+def third_verify(name, tree):
     """third_ok(), as a WARNING, never a stop: a tree ahead of its pin is a
     normal state while trying something (third/README.md), and a missing
     patch matters to some lanes and not others. Once per name per run."""
     if name in _verified:
         return
     _verified.add(name)
-    if not third_ok(name, var, tree):
+    if not third_ok(name, tree):
         warn("[build] warning: %s differs from third/manifest.json (above) -- building anyway. "
              "Details: %s" % (name, sync_cmd("check", name)))
 
@@ -592,11 +583,11 @@ def ready_checkouts():
         run([sys.executable, SYNC, "clone"] + fetch)
 
     missing, moved = [], []
-    for name, (var, probe) in sorted(CHECKOUTS.items()):
+    for name, (_, probe) in sorted(CHECKOUTS.items()):
         tree = trees[name]
         if not os.path.isfile(os.path.join(tree, probe)):
             missing.append((name, tree))
-        elif third_ok(name, var, tree):
+        elif third_ok(name, tree):
             _verified.add(name)  # so third_verify does not ask again
         else:
             moved.append((name, tree))
@@ -916,7 +907,7 @@ def llama_src(what):
         fail("%s compiles llama.cpp's ggml, and there is none at %s." % (what, os.path.join(src, "ggml")),
              "  " + sync_cmd("clone", "llama.cpp"),
              "or point LLAMA_SRC at an existing checkout.")
-    third_verify("llama.cpp", "LLAMA_SRC", src)
+    third_verify("llama.cpp", src)
     return src
 
 
@@ -931,7 +922,7 @@ def ggml_sdk(gen, with_llama):
              "clone it at the pinned commit, with its patch applied:",
              "  " + sync_cmd("clone", "llama.cpp"),
              "or point LLAMA_SRC at an existing checkout.")
-    third_verify("llama.cpp", "LLAMA_SRC", src)
+    third_verify("llama.cpp", src)
 
     gbuild = os.path.join(BUILD, "ggml")
     sdk = os.path.join(BUILD, "llama-sdk")
@@ -988,7 +979,7 @@ def qtts_sdk(gen):
              "clone it at the pinned commit, submodule and patch included:",
              "  " + sync_cmd("clone", "qwentts.cpp"),
              "or point QTTS_SRC at an existing checkout.")
-    third_verify("qwentts.cpp", "QTTS_SRC", src)
+    third_verify("qwentts.cpp", src)
     ggml = llama_src("tts")
 
     # The backend, per platform, as in examples/desktop/build.py: Metal on macOS, which
@@ -1097,7 +1088,7 @@ def cosyvoice(gen):
         fail("no cosyvoice.cpp at %s." % src,
              "  " + sync_cmd("clone", "cosyvoice.cpp"),
              "or point COSYVOICE_SRC at an existing checkout.")
-    third_verify("cosyvoice.cpp", "COSYVOICE_SRC", src)
+    third_verify("cosyvoice.cpp", src)
     ggml = llama_src("cosyvoice")
 
     cbuild = os.path.join(BUILD, "cosyvoice")

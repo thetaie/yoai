@@ -15,22 +15,6 @@ project(yoai C CXX)
 # goes through examples/harmony/build.{sh,cmd}, which lays the same ports out
 # under examples/harmony/prebuilt/<abi>/ for the find_package calls below to resolve.
 
-# A build tree configured before the switches were renamed from BODYCLOCK_* to
-# YOAI_* still caches the old names, and would read every YOAI_* option at its
-# default: each lane quietly OFF, compiled to its stub, the build still green.
-# So such a tree stops here and names itself. Every host's build includes this
-# file, so the check covers harmony's and android's .cxx trees and desktop's too.
-get_cmake_property(_yoai_cached CACHE_VARIABLES)
-foreach(_v IN LISTS _yoai_cached)
-    if(_v MATCHES "^BODYCLOCK_")
-        message(FATAL_ERROR
-            "${CMAKE_BINARY_DIR} was configured before BODYCLOCK_* became YOAI_* -- "
-            "it still caches ${_v}, and reconfiguring would turn its lanes off. "
-            "Delete that directory and build again, with the build script's `clean` "
-            "where it has one, naming the lanes it had.")
-    endif()
-endforeach()
-
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)   # linked into a shared host module

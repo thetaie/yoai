@@ -37,8 +37,7 @@ Environment:
                     examples/android/local.properties
   ANDROID_NDK_ROOT  the NDK (default: the version in examples/android/gradle.properties)
 These, each read from .env at the repository root -- see .env.example --
-or the environment, .env winning; YOAI_<NAME> in the environment wins over
-both, for one run:
+or the environment, .env winning:
   VCPKG_ROOT        vcpkg checkout (default: ../../third/vcpkg)
   LLAMA_SRC         llama.cpp checkout (default: ../../third/llama.cpp)
   QTTS_SRC          qwentts.cpp checkout (default: ../../third/qwentts.cpp)
@@ -260,7 +259,7 @@ def build_llama(o, cmake, ndk_cfg, arch, src):
     if not os.path.isdir(src):
         fail('[llama] no llama.cpp at "%s".' % src,
              "[llama]   %s   (pinned commit, patch applied)" % b.sync_cmd("clone", "llama.cpp"))
-    b.third_verify("llama.cpp", "LLAMA_SRC", src)
+    b.third_verify("llama.cpp", src)
 
     lbuild = os.path.join(HERE, ".llama-build", o.abi)
     sdk = os.path.join(HERE, "prebuilt", "llama-sdk", o.abi)
@@ -341,8 +340,8 @@ def build_qtts(o, cmake, ndk_cfg, arch, llama_src, src):
              % os.path.join(llama_src, "ggml"),
              "[qtts]   " + b.sync_cmd("clone", "llama.cpp"))
     say("[qtts] ggml=%s" % os.path.join(llama_src, "ggml"))
-    b.third_verify("llama.cpp", "LLAMA_SRC", llama_src)
-    b.third_verify("qwentts.cpp", "QTTS_SRC", src)
+    b.third_verify("llama.cpp", llama_src)
+    b.third_verify("qwentts.cpp", src)
 
     qbuild = os.path.join(HERE, ".qtts-build", o.abi)
     sdk = os.path.join(HERE, "prebuilt", "qtts-sdk", o.abi)
