@@ -10,14 +10,16 @@
  * on a worker thread inside the addon; this file forwards each event to the
  * window that asked for it and drops the turn when that window goes away.
  */
-import { BrowserWindow, dialog, ipcMain, shell, WebContents } from 'electron'
-import { basename } from 'node:path'
+import { app, BrowserWindow, dialog, ipcMain, shell, WebContents } from 'electron'
+import { basename, dirname } from 'node:path'
 import {
   CHANNELS,
   ChatSettings,
   OmniStatus,
   PickedModel,
   ReaderStatus,
+  TtsDownload,
+  TtsSlot,
   TtsStatus
 } from '../shared/api'
 import { ChatMessage, WireMessage } from '../shared/chat'
@@ -32,6 +34,7 @@ import * as reader from './reader'
 import * as prefs from './prefs'
 import * as sessions from './sessions'
 import * as tts from './tts'
+import * as ttsfiles from './ttsfiles'
 
 /** Live turns, so a window closing can stop the ones it started. */
 const turnOwners = new Map<number, WebContents>()
@@ -53,6 +56,40 @@ export function cancelAllTurns(): number {
 
 function handle<A extends unknown[], R>(channel: string, fn: (...args: A) => R | Promise<R>): void {
   ipcMain.handle(channel, (_event, ...args) => fn(...(args as A)))
+}
+
+/**
+ * Load the voice again from the stored paths, letting go of what was loaded
+ * first: it was a file just replaced, or the other mode's talker. Unawaited,
+ * and a no-op while a slot the mode needs is still empty.
+ */
+function reloadVoice(): void {
+  reader.unload()
+  void reader.autoLoadVoice().then((reason) => {
+    if (reason.length > 0) {
+      console.error(`[yoai] the voice would not load: ${reason}`)
+    }
+    models.warmActive()   // whether replies are read may have changed
+  })
+}
+
+/**
+ * Store `path` in `slot`, fill the other empty slots from its folder, and load.
+ *
+ * The folder is looked in because the files usually sit together, and the
+ * second pick is a step a new user can only get wrong. A file already stored
+ * is never replaced this way, only an empty slot filled.
+ */
+function useModelFile(slot: TtsSlot, path: string): void {
+  tts.setPath(slot, path)
+  const beside = ttsfiles.findIn(dirname(path), tts.emptySlots())
+  for (const [other, p] of Object.entries(beside) as Array<[TtsSlot, string]>) {
+    tts.setPath(other, p)
+  }
+  // Picking the second of the two is the whole configuration, so it is also
+  // the moment to load -- pressing 载入 afterwards was a step that could only
+  // be forgotten.
+  reloadVoice()
 }
 
 /** A model config from the renderer, with only the fields we persist kept. */
@@ -243,7 +280,7 @@ export function registerHandlers(): void {
 
   handle<[], TtsStatus>(CHANNELS.ttsStatus, () => tts.status())
 
-  handle<['talker' | 'customTalker' | 'tokenizer'], PickedModel | null>(CHANNELS.ttsPickModel, async (which) => {
+  handle<[TtsSlot], PickedModel | null>(CHANNELS.ttsPickModel, async (which) => {
     // Validated rather than trusted: this value chooses which stored path gets
     // overwritten, and the renderer is a web page.
     //
@@ -278,20 +315,64 @@ export function registerHandlers(): void {
       return null
     }
     const path = result.filePaths[0]
-    tts.setPath(slot, path)
-    // Picking the second of the two is the whole configuration, so it is also
-    // the moment to load -- pressing 载入 afterwards was a step that could only
-    // be forgotten. Unawaited, and a no-op when only one slot is filled. What
-    // was loaded is let go first: it was the file just replaced.
-    reader.unload()
-    void reader.autoLoadVoice().then((reason) => {
-      if (reason.length > 0) {
-        console.error(`[yoai] the voice would not load: ${reason}`)
-      }
-      models.warmActive()   // whether replies are read may have changed
-    })
+    useModelFile(slot, path)
     return { path, name: basename(path) }
   })
+
+  handle<[], PickedModel | null>(CHANNELS.ttsPickAny, async () => {
+    const win = BrowserWindow.getFocusedWindow()
+    const opts = {
+      title: 'Pick one of the speech model files',
+      properties: ['openFile' as const],
+      filters: [
+        { name: 'GGUF models', extensions: ['gguf'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    }
+    const result =
+      win === null ? await dialog.showOpenDialog(opts) : await dialog.showOpenDialog(win, opts)
+    if (result.canceled || result.filePaths.length === 0) {
+      return null
+    }
+    const path = result.filePaths[0]
+    // The slot its name says, else the first one missing: the one the screen
+    // listed first. A user with the files picks whichever comes first in the
+    // folder, and the tokenizer stored as the talker fails only at load.
+    useModelFile(ttsfiles.slotOf(path) ?? tts.missingSlots()[0] ?? tts.talkerSlot(), path)
+    return { path, name: basename(path) }
+  })
+
+  handle<[], boolean>(CHANNELS.ttsDownload, async () => {
+    // Decided here, not sent by the page: which files, and so which URLs, are
+    // fetched is not a renderer's choice.
+    const slots = tts.missingSlots()
+    if (slots.length === 0 || ttsfiles.downloadStatus().running) {
+      return false
+    }
+    const win = BrowserWindow.getFocusedWindow()
+    const opts = {
+      title: 'Pick a folder to download the speech models into',
+      defaultPath: tts.downloadDir() || app.getPath('downloads'),
+      properties: ['openDirectory' as const, 'createDirectory' as const]
+    }
+    const result =
+      win === null ? await dialog.showOpenDialog(opts) : await dialog.showOpenDialog(win, opts)
+    if (result.canceled || result.filePaths.length === 0) {
+      return false
+    }
+    const dir = result.filePaths[0]
+    tts.setDownloadDir(dir)
+    void ttsfiles.download(dir, slots, (paths) => {
+      for (const [slot, p] of Object.entries(paths) as Array<[TtsSlot, string]>) {
+        tts.setPath(slot, p)
+      }
+      reloadVoice()
+    })
+    return true
+  })
+
+  handle<[], TtsDownload>(CHANNELS.ttsDownloadStatus, () => ttsfiles.downloadStatus())
+  handle<[], void>(CHANNELS.ttsCancelDownload, () => ttsfiles.cancelDownload())
 
   handle<[], string>(CHANNELS.ttsLoad, () => tts.load())
   handle<[], void>(CHANNELS.ttsUnload, () => tts.unload())
@@ -309,13 +390,7 @@ export function registerHandlers(): void {
     }
     tts.setVoiceMode(mode)
     // The other talker: what is loaded is the wrong one now.
-    reader.unload()
-    void reader.autoLoadVoice().then((reason) => {
-      if (reason.length > 0) {
-        console.error(`[yoai] the voice would not load: ${reason}`)
-      }
-      models.warmActive()
-    })
+    reloadVoice()
   })
   handle<[number], void>(CHANNELS.ttsSetSeed, (seed) => {
     tts.setSeed(Number(seed))

@@ -738,6 +738,13 @@ select.control:focus {
   background: var(--bc-sw-3);
 }
 
+/* A download's progress: the platform's bar, in the brand colour. */
+progress.meter {
+  width: 100%;
+  height: 6px;
+  accent-color: var(--bc-brand);
+}
+
 .path {
   font-family: var(--bc-mono);
   font-size: 0.75rem;

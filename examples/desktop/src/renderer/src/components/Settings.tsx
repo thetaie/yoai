@@ -20,7 +20,7 @@ import {
   modelId,
   modelLabel
 } from '@shared/provider'
-import type { ModelLoadState, ReaderStatus, OmniStatus, TtsStatus } from '@shared/api'
+import type { ModelLoadState, ReaderStatus, OmniStatus, TtsDownload, TtsStatus } from '@shared/api'
 import type { CoreStatus, InterfacePrefs } from '@shared/store'
 import { FAMILY_LABEL, S } from '../strings'
 import * as tts from '../tts'
@@ -46,6 +46,19 @@ const SCALES: Array<{ value: number; label: string }> = [
   { value: 1.4, label: '更大' }
 ]
 
+const DOWNLOAD_ERROR: Record<Exclude<TtsDownload['error'], ''>, string> = {
+  space: S.settingsTtsErrSpace,
+  network: S.settingsTtsErrNetwork,
+  checksum: S.settingsTtsErrChecksum,
+  disk: S.settingsTtsErrDisk,
+  canceled: S.settingsTtsErrCanceled
+}
+
+/** Decimal units, the way model sizes are quoted: 1.5 GB, 291 MB. */
+function formatBytes(n: number): string {
+  return n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`
+}
+
 export function Settings({
   status,
   models,
@@ -68,6 +81,9 @@ export function Settings({
   const [loadStates, setLoadStates] = useState<Record<string, ModelLoadState>>({})
   const [prompt, setPrompt] = useState<string | null>(null)
   const [ttsStatus, setTtsStatus] = useState<TtsStatus | null>(null)
+  const [download, setDownload] = useState<TtsDownload | null>(null)
+  /** Bumped when a download is started here, which starts following it. */
+  const [downloadRun, setDownloadRun] = useState(0)
   const [readerStatus, setReaderStatus] = useState<ReaderStatus | null>(null)
   /** A reference voice being picked, or extracted from a recording. */
   const [refBusy, setRefBusy] = useState(false)
@@ -170,6 +186,53 @@ export function Settings({
       void followVoice()
     }
   }
+
+  const pickAnyTts = async (): Promise<void> => {
+    if ((await window.yoai.tts.pickAny()) !== null) {
+      await refreshTts()
+      void followVoice()
+    }
+  }
+
+  const startDownload = async (): Promise<void> => {
+    if (await window.yoai.tts.download()) {
+      setDownloadRun((n) => n + 1)
+    }
+  }
+
+  // Polled while a download runs. It runs in the main process, so it may
+  // already be under way when this page opens.
+  useEffect(() => {
+    let stopped = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    // Started from here: its end matters even if it was never seen running,
+    // which is what a folder already holding every file looks like.
+    let started = downloadRun > 0
+    const poll = async (): Promise<void> => {
+      const d = await window.yoai.tts.downloadStatus()
+      if (stopped) {
+        return
+      }
+      setDownload(d)
+      if (d.running) {
+        started = true
+        timer = setTimeout(() => void poll(), 500)
+      } else if (started) {
+        // Over: show the paths it stored, and follow the load it started.
+        await refreshTts()
+        if (d.error === '') {
+          void followVoice()
+        }
+      }
+    }
+    void poll()
+    return () => {
+      stopped = true
+      if (timer !== undefined) {
+        clearTimeout(timer)
+      }
+    }
+  }, [downloadRun])
 
   const testTts = async (): Promise<void> => {
     setReaderNote(null)
@@ -578,6 +641,78 @@ export function Settings({
                   </div>
                   <span className="field-note">{S.settingsTtsModeNote}</span>
                 </div>
+                {/* What a new user sees first: the files this mode still needs,
+                    and the two ways to get them. Whether the user already has
+                    them is something only they know, so both are offered. */}
+                {ttsStatus !== null &&
+                  (ttsStatus.missing.length > 0 || download?.running === true) && (
+                    <div className="card" style={{ marginBottom: 12 }}>
+                      {download?.running === true ? (
+                        <div className="field">
+                          <label>
+                            {download.retry > 0
+                              ? S.settingsTtsRetrying
+                                  .replace('{s}', String(download.retryIn))
+                                  .replace('{n}', String(download.retry))
+                                  .replace('{max}', String(download.retries))
+                              : download.file.length === 0
+                                ? S.settingsTtsConnecting
+                                : `${download.verifying ? S.settingsTtsVerifying : S.settingsTtsDownloading} ${download.file}`}
+                          </label>
+                          <progress
+                            className="meter"
+                            max={Math.max(download.total, 1)}
+                            value={download.received}
+                          />
+                          <div className="row" style={{ padding: 0 }}>
+                            <span className="row-label row-sub">
+                              {formatBytes(download.received)} / {formatBytes(download.total)}
+                              {download.host.length > 0 && ` · ${download.host}`}
+                            </span>
+                            <button
+                              className="btn"
+                              onClick={() => void window.yoai.tts.cancelDownload()}
+                            >
+                              {S.settingsCancel}
+                            </button>
+                          </div>
+                          <div className="path">{download.dir}</div>
+                        </div>
+                      ) : (
+                        <div className="field">
+                          <label>{S.settingsTtsSetup}</label>
+                          {ttsStatus.missing.map((m) => (
+                            <div className="path" key={m.slot}>
+                              {m.name} · {formatBytes(m.size)}
+                            </div>
+                          ))}
+                          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                            <button className="btn" onClick={() => void pickAnyTts()}>
+                              {S.settingsTtsPickExisting}
+                            </button>
+                            <button className="btn btn-primary" onClick={() => void startDownload()}>
+                              {S.settingsTtsDownload}（
+                              {formatBytes(ttsStatus.missing.reduce((sum, m) => sum + m.size, 0))}）
+                            </button>
+                          </div>
+                          <span className="field-note">{S.settingsTtsSetupNote}</span>
+                          {download !== null && download.error !== '' && (
+                            <>
+                              <span
+                                className="field-note"
+                                data-tone={download.error === 'canceled' ? undefined : 'danger'}
+                              >
+                                {DOWNLOAD_ERROR[download.error]}
+                              </span>
+                              {download.detail.length > 0 && (
+                                <div className="path">{download.detail}</div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 <div className="card">
                   {[
                     ttsStatus?.voiceMode === 'custom'
@@ -604,7 +739,11 @@ export function Settings({
                           {slot.path.length > 0 ? slot.path : S.settingsTtsNotPicked}
                         </div>
                       </span>
-                      <button className="btn" onClick={() => void pickTts(slot.which)}>
+                      <button
+                        className="btn"
+                        disabled={download?.running === true}
+                        onClick={() => void pickTts(slot.which)}
+                      >
                         {S.settingsTtsPick}
                       </button>
                     </div>

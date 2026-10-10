@@ -24,9 +24,10 @@
  * page owns playback, because only the page has an AudioContext.
  */
 import { existsSync } from 'node:fs'
-import type { TtsStatus, VoiceMode } from '../shared/api'
+import type { TtsMissing, TtsSlot, TtsStatus, VoiceMode } from '../shared/api'
 import { core } from './core'
 import { dataFile, readJson, writeJson } from './jsonfile'
+import { KNOWN } from './ttsfiles'
 
 interface Stored {
   /** The Base talker, which voiceMode 'base' reads with. */
@@ -49,6 +50,8 @@ interface Stored {
   speaker: string
   /** Sampling seed. -1 draws a fresh one per call; see DEFAULT_SEED. */
   seed: number
+  /** The folder the models were last downloaded into, offered first next time. */
+  downloadDir: string
 }
 
 /**
@@ -94,7 +97,8 @@ const EMPTY: Stored = {
   voice: DEFAULT_VOICE,
   autoSpeak: false,
   speaker: '',
-  seed: DEFAULT_SEED
+  seed: DEFAULT_SEED,
+  downloadDir: ''
 }
 
 function read(): Stored {
@@ -117,7 +121,8 @@ function read(): Stored {
     voice,
     autoSpeak: s.autoSpeak === true,
     speaker: typeof s.speaker === 'string' ? s.speaker : '',
-    seed: typeof s.seed === 'number' ? s.seed : DEFAULT_SEED
+    seed: typeof s.seed === 'number' ? s.seed : DEFAULT_SEED,
+    downloadDir: typeof s.downloadDir === 'string' ? s.downloadDir : ''
   }
 }
 
@@ -145,6 +150,45 @@ export function paths(): { talkerPath: string; tokenizerPath: string } {
 export function setVoiceMode(mode: VoiceMode): void {
   const s = read()
   s.voiceMode = mode === 'custom' ? 'custom' : 'base'
+  write(s)
+}
+
+/** The talker slot the current voice mode loads. */
+export function talkerSlot(): TtsSlot {
+  return read().voiceMode === 'custom' ? 'customTalker' : 'talker'
+}
+
+function pathOf(s: Stored, slot: TtsSlot): string {
+  return slot === 'talker' ? s.talkerPath : slot === 'customTalker' ? s.customTalkerPath : s.tokenizerPath
+}
+
+/** The slots with no file: never picked, or picked and since gone. */
+export function emptySlots(): TtsSlot[] {
+  const s = read()
+  return (['talker', 'customTalker', 'tokenizer'] as const).filter((slot) => {
+    const p = pathOf(s, slot)
+    return p.length === 0 || !existsSync(p)
+  })
+}
+
+/** Of those, the ones the current voice mode loads: its talker, then the tokenizer. */
+export function missingSlots(): TtsSlot[] {
+  const empty = emptySlots()
+  return ([talkerSlot(), 'tokenizer'] as const).filter((slot) => empty.includes(slot))
+}
+
+function missing(): TtsMissing[] {
+  return missingSlots().map((slot) => ({ slot, name: KNOWN[slot].name, size: KNOWN[slot].size }))
+}
+
+/** Where the models were last downloaded to; '' before the first time. */
+export function downloadDir(): string {
+  return read().downloadDir
+}
+
+export function setDownloadDir(dir: string): void {
+  const s = read()
+  s.downloadDir = dir
   write(s)
 }
 
@@ -206,7 +250,8 @@ export function status(): TtsStatus {
       speaker: s.speaker,
       speakers: [],
       seed: s.seed,
-      lastError: ''
+      lastError: '',
+      missing: missing()
     }
   }
   lastStatus = {
@@ -225,7 +270,8 @@ export function status(): TtsStatus {
     // and a list that came out of the file cannot be stale.
     speakers: speakerNames(),
     seed: s.seed,
-    lastError: core().nativeTtsLastError()
+    lastError: core().nativeTtsLastError(),
+    missing: missing()
   }
   return lastStatus
 }
@@ -236,7 +282,7 @@ export function status(): TtsStatus {
  * something else is the kind of disagreement that shows up later as a voice
  * nobody asked for.
  */
-export function setPath(which: 'talker' | 'customTalker' | 'tokenizer', path: string): void {
+export function setPath(which: TtsSlot, path: string): void {
   const s = read()
   if (which === 'talker') {
     s.talkerPath = path

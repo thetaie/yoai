@@ -23,7 +23,9 @@ import {
   PickedModel,
   ReaderEvent,
   ReaderStatus,
+  TtsDownload,
   TtsEvent,
+  TtsSlot,
   TtsStatus
 } from '../shared/api'
 import type { ChatEvent, ChatMessage, WireMessage } from '../shared/chat'
@@ -92,8 +94,12 @@ const api: YoaiApi = {
 
   tts: {
     status: () => ipcRenderer.invoke(CHANNELS.ttsStatus) as Promise<TtsStatus>,
-    pickModel: (which: 'talker' | 'customTalker' | 'tokenizer') =>
+    pickModel: (which: TtsSlot) =>
       ipcRenderer.invoke(CHANNELS.ttsPickModel, which) as Promise<PickedModel | null>,
+    pickAny: () => ipcRenderer.invoke(CHANNELS.ttsPickAny) as Promise<PickedModel | null>,
+    download: () => ipcRenderer.invoke(CHANNELS.ttsDownload) as Promise<boolean>,
+    downloadStatus: () => ipcRenderer.invoke(CHANNELS.ttsDownloadStatus) as Promise<TtsDownload>,
+    cancelDownload: () => ipcRenderer.invoke(CHANNELS.ttsCancelDownload) as Promise<void>,
     load: () => ipcRenderer.invoke(CHANNELS.ttsLoad) as Promise<string>,
     unload: () => ipcRenderer.invoke(CHANNELS.ttsUnload) as Promise<void>,
     setVoice: (text: string) => ipcRenderer.invoke(CHANNELS.ttsSetVoice, text) as Promise<void>,

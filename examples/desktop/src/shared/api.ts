@@ -56,6 +56,10 @@ export const CHANNELS = {
 
   ttsStatus: 'tts:status',
   ttsPickModel: 'tts:pickModel',
+  ttsPickAny: 'tts:pickAny',
+  ttsDownload: 'tts:download',
+  ttsDownloadStatus: 'tts:downloadStatus',
+  ttsCancelDownload: 'tts:cancelDownload',
   ttsLoad: 'tts:load',
   ttsUnload: 'tts:unload',
   ttsSetVoice: 'tts:setVoice',
@@ -152,6 +156,59 @@ export interface TtsStatus {
   seed: number
   /** Why the last load or say failed. '' after a success. */
   lastError: string
+  /**
+   * The files the current voice mode needs and does not have -- never picked,
+   * or picked and since gone -- each with the file a download would fetch.
+   * What the settings screen offers to pick or download; [] when both are there.
+   */
+  missing: TtsMissing[]
+}
+
+/** A model slot: which stored path a file fills. */
+export type TtsSlot = 'talker' | 'customTalker' | 'tokenizer'
+
+/** One file a voice mode is missing, and what a download would fetch for it. */
+export interface TtsMissing {
+  slot: TtsSlot
+  name: string
+  /** Bytes. */
+  size: number
+}
+
+/**
+ * A download of the speech models into a folder the user chose. It runs in the
+ * main process, so it carries on while the settings screen is closed.
+ */
+export interface TtsDownload {
+  running: boolean
+  /** The folder being downloaded into. */
+  dir: string
+  /** The file being fetched or checked now. */
+  file: string
+  /** huggingface.co or hf-mirror.com, whichever answered first; '' until one has. */
+  host: string
+  /** Bytes on disk so far and in all, across every file this download fetches. */
+  received: number
+  total: number
+  /** Checking `file` against its SHA-256, which takes seconds. */
+  verifying: boolean
+  /**
+   * Waiting to retry after the connection broke: which retry comes next,
+   * 1-based, of `retries`, and in how many seconds. `retry` is 0 otherwise.
+   */
+  retry: number
+  retries: number
+  retryIn: number
+  /**
+   * Why the last download stopped, '' when it did not fail. 'space': not enough
+   * room in `dir`. 'network': no host answered, or the transfer broke off and
+   * the retries did not bring it back -- downloading again resumes it.
+   * 'checksum': the file was not the one expected and has been deleted.
+   * 'disk': `dir` could not be written. 'canceled': asked to stop.
+   */
+  error: '' | 'space' | 'network' | 'checksum' | 'disk' | 'canceled'
+  /** The underlying message behind `error`, in English; '' when there is none. */
+  detail: string
 }
 
 /**
@@ -352,8 +409,27 @@ export interface YoaiApi {
    */
   tts: {
     status(): Promise<TtsStatus>
-    /** Pick a GGUF. `which` says which slot it fills. */
-    pickModel(which: 'talker' | 'customTalker' | 'tokenizer'): Promise<PickedModel | null>
+    /**
+     * Pick a GGUF. `which` says which slot it fills; empty slots are filled
+     * from files beside it whose names say what they are.
+     */
+    pickModel(which: TtsSlot): Promise<PickedModel | null>
+    /**
+     * Pick any one of the model files. Its slot is read from its name, else it
+     * fills the first missing one, and the other empty slots are filled from
+     * beside it as with pickModel.
+     */
+    pickAny(): Promise<PickedModel | null>
+    /**
+     * Choose a folder and download into it what TtsStatus.missing lists,
+     * skipping any file already there. Resolves once it has started: false
+     * when the dialog was dismissed, nothing is missing or one is running.
+     * The voice loads by itself when it is done.
+     */
+    download(): Promise<boolean>
+    downloadStatus(): Promise<TtsDownload>
+    /** Stop the running download and delete the file it was part way through. */
+    cancelDownload(): Promise<void>
     /** Base or CustomVoice; the voice is reloaded with the other talker. */
     setVoiceMode(mode: VoiceMode): Promise<void>
     /** Read both models. Resolves to '' on success, or to the reason. */

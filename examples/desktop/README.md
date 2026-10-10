@@ -202,6 +202,84 @@ To install the two:
 
 A Windows package built with CUDA has been run, with speech output on the GPU.
 
+## First run
+
+The app opens with nothing configured. Any one of these is enough to start,
+and all three are under 设置:
+
+1. **A remote model.** 添加远程模型, pick a vendor, paste its key. Nothing to
+   download; 去获取 key › opens the vendor's sign-up page.
+2. **A model on this machine.** Download `Qwen3.5-2B-Q4_K_M.gguf` (below), then
+   添加本机模型 → 选择 GGUF 文件, and pick it as the model to talk to.
+3. **Speech output.** 语音输出 → 下载到文件夹 fetches the files it needs, and
+   选择已有文件 uses ones already on disk. Once they are in place, replies are
+   read aloud as they are written.
+
+### The model files
+
+| File | Size | For | Set in |
+|---|---|---|---|
+| `Qwen3.5-2B-Q4_K_M.gguf` | 1.28 GB | on-device chat | 添加本机模型 |
+| `qwen-talker-1.7b-base-Q4_K_M.gguf` | 1.22 GB | speech, 克隆音色（Base） | 语音输出 |
+| `qwen-talker-1.7b-customvoice-Q4_K_M.gguf` | 1.18 GB | speech, 内置说话人（CustomVoice） | 语音输出 |
+| `qwen-tokenizer-12hz-Q8_0.gguf` | 291 MB | speech, either mode | 语音输出 |
+
+The 2B rather than the 4B: [design/voice.md](../../design/voice.md) measured
+Qwen3.5-2B at 14.0 tok/s and the 4B at 6.70 tok/s, too slow for a reply.
+Speech needs the talker of the chosen mode plus the tokenizer; the default mode
+is Base, so 1.5 GB to start. The reasons for the speech files' quantizations
+are beside their URLs in [src/main/ttsfiles.ts](src/main/ttsfiles.ts).
+
+The app downloads the speech files itself, but the chat model has to be fetched
+by hand. The speech files can be fetched the same way for a machine that will
+run offline:
+
+```
+curl -L -C - -O https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/f6d5376be1edb4d416d56da11e5397a961aca8ae/Qwen3.5-2B-Q4_K_M.gguf
+curl -L -C - -O https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/resolve/b7ee2e8c7459c3bea99da23e3d178125a7d1713c/qwen-talker-1.7b-base-Q4_K_M.gguf
+curl -L -C - -O https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/resolve/b7ee2e8c7459c3bea99da23e3d178125a7d1713c/qwen-talker-1.7b-customvoice-Q4_K_M.gguf
+curl -L -C - -O https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/resolve/b7ee2e8c7459c3bea99da23e3d178125a7d1713c/qwen-tokenizer-12hz-Q8_0.gguf
+```
+
+- `-C -` resumes a download that broke off when the line is run again.
+- In Windows PowerShell type `curl.exe`: plain `curl` there is
+  Invoke-WebRequest, which takes none of these options.
+- From mainland China, put `hf-mirror.com` in place of `huggingface.co`.
+- Each URL names a commit, so the file is the one measured here. The speech
+  files' SHA-256 are `KNOWN` in [src/main/ttsfiles.ts](src/main/ttsfiles.ts);
+  the chat model's is
+  `aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223`.
+
+Keep the speech files in one folder and under these names. Picking any one of
+them then fills in the others, and 下载到文件夹 pointed at that folder fetches
+nothing.
+
+### How the speech download works
+
+Speech output needs two GGUFs, a talker and the 12 Hz tokenizer. Until the
+current voice mode has both, the speech section of the settings screen lists
+what is missing and offers two ways to get it, because only the user knows
+whether they already have the files:
+
+- **选择已有文件** picks any one of them. Its slot is read from its name, and
+  the other empty slots are filled from the same folder by name.
+- **下载到文件夹** downloads into a folder the user picks: the talker of the
+  current mode and the tokenizer, from the table above. A file already in the
+  folder under its name and size is not fetched again.
+
+A file is written as `NAME.part` and takes its real name only after its SHA-256
+matches. A transfer that breaks off, or goes 30s without a byte, is retried
+three times, after 5s, 15s and 30s, each time resuming from the `.part`; the
+count starts over once a retry brings bytes in. When the retries run out the
+`.part` stays and the next download resumes it, while 取消 deletes it.
+
+huggingface.co and hf-mirror.com are asked at once and the first to answer is
+used, so mainland China needs no setting; that path has not yet been tried from
+inside mainland China.
+
+Nothing goes under userData. The folder is the user's, and the app never moves
+or deletes the files.
+
 ## Where the data lives
 
 Under Electron's `userData` directory — `%APPDATA%\yoai-desktop` on
