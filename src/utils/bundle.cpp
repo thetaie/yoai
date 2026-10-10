@@ -4,27 +4,33 @@
 
 #include <cstdio>
 #include <cstring>
+#include <set>
 #include <string>
 #include <vector>
 
 #if defined(_WIN32)
 #include <direct.h>
 #include <io.h>
-#define YOAI_MKDIR(p) _mkdir(p)
-#define YOAI_UNLINK(p) _unlink(p)
-#define YOAI_RMDIR(p) _rmdir(p)
 #else
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-#define YOAI_MKDIR(p) mkdir(p, 0700)
-#define YOAI_UNLINK(p) unlink(p)
-#define YOAI_RMDIR(p) rmdir(p)
 #endif
 
 namespace yoai {
 namespace utils {
 namespace {
+
+// mkdir, unlink and rmdir as each platform spells them.
+#if defined(_WIN32)
+int sys_mkdir(const char* path)  { return _mkdir(path); }
+int sys_unlink(const char* path) { return _unlink(path); }
+int sys_rmdir(const char* path)  { return _rmdir(path); }
+#else
+int sys_mkdir(const char* path)  { return mkdir(path, 0700); }
+int sys_unlink(const char* path) { return unlink(path); }
+int sys_rmdir(const char* path)  { return rmdir(path); }
+#endif
 
 const char  kMagic[8]   = {'B', 'C', 'B', 'U', 'N', 'D', 'L', '1'};
 const size_t kCopyChunk = 1u << 20;   // 1 MiB: large enough to be storage-bound
@@ -86,7 +92,7 @@ bool name_is_safe(const std::string& name) {
 }
 
 bool make_dir(const std::string& path) {
-    if (YOAI_MKDIR(path.c_str()) == 0) {
+    if (sys_mkdir(path.c_str()) == 0) {
         return true;
     }
     // Already there is success: extraction runs over a tree it may have made
@@ -167,9 +173,24 @@ bool read_table(std::FILE* f, std::vector<BundleEntry>* out, unsigned long long*
 void remove_written(const std::string& dest_dir, const std::vector<BundleEntry>& entries,
                     size_t upto) {
     for (size_t i = 0; i < upto && i < entries.size(); ++i) {
-        YOAI_UNLINK((dest_dir + "/" + entries[i].name).c_str());
+        sys_unlink((dest_dir + "/" + entries[i].name).c_str());
     }
-    YOAI_RMDIR(dest_dir.c_str());
+    // Then every directory the entries name, children first: a path sorts
+    // before every path it is a prefix of, so the set read backwards reaches
+    // each directory after everything under it. rmdir takes only an empty
+    // directory, so one that holds anything else is left as it is.
+    std::set<std::string> dirs;
+    for (size_t i = 0; i < entries.size(); ++i) {
+        const std::string& name = entries[i].name;
+        for (size_t slash = name.find('/'); slash != std::string::npos;
+             slash = name.find('/', slash + 1)) {
+            dirs.insert(name.substr(0, slash));
+        }
+    }
+    for (auto it = dirs.rbegin(); it != dirs.rend(); ++it) {
+        sys_rmdir((dest_dir + "/" + *it).c_str());
+    }
+    sys_rmdir(dest_dir.c_str());
 }
 
 }  // namespace
