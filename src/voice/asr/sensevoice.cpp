@@ -51,7 +51,7 @@ bool in_list(const std::string& s, const char* const* list) {
 // are listed rather than pattern-matched because a tag that is not one of these
 // should be ignored, not guessed at -- and because the emotion list is worth
 // being able to read: every label in it is high-arousal except SAD, which is
-// why design/voice.md takes arousal from the signal instead of from here.
+// why docs/voice.md takes arousal from the signal instead of from here.
 const char* const kLanguages[] = {"zh", "en", "yue", "ja", "ko", "nospeech", nullptr};
 const char* const kEmotions[]  = {"HAPPY", "SAD", "ANGRY", "NEUTRAL", "FEARFUL",
                                   "DISGUSTED", "SURPRISED", "EMO_UNKNOWN", nullptr};

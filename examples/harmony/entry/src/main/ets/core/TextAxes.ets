@@ -1,7 +1,7 @@
 /**
  * The two axes that are read from WORDS rather than from sound.
  *
- * design/voice.md splits the axes by channel, and that split decides what has to
+ * docs/voice.md splits the axes by channel, and that split decides what has to
  * be built:
  *
  *   - arousal is acoustic, and prosody.cpp measures it with no model at all;
@@ -55,7 +55,7 @@ const GRAMMAR: string =
   'score ::= "-1" | "-0.5" | "0" | "0.5" | "1"\n';
 
 /**
- * Definitions lifted from design/voice.md rather than reinvented, because the
+ * Definitions lifted from docs/voice.md rather than reinvented, because the
  * dominance one is easy to get wrong: it is about agency, not sentiment, and the
  * same words can be identical in sentiment while the agency is reversed.
  */

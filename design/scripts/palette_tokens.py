@@ -20,7 +20,7 @@ than one with three back ends.
 import json
 import pathlib
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 SRC = ROOT / "design/palettes.json"
 
 # design name -> app token name. palettes.json names its colors the way the

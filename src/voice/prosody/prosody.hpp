@@ -5,7 +5,7 @@
 // distribution. Microphone distance, recording gain and the speaker's own pitch
 // range are constant within a take, so they cancel, and the numbers mean
 // something on the first recording anyone ever makes. The argument, and the
-// measured result this implementation reproduces, are in design/voice.md.
+// measured result this implementation reproduces, are in docs/voice.md.
 //
 // Two rules from that document are load-bearing here and are worth restating
 // where the code is:
@@ -24,7 +24,7 @@
 // What this deliberately cannot say: whether a whole recording is low. Every
 // take averages to zero by construction. Level across days needs a baseline this
 // project has decided not to build yet -- see the cross-day section of
-// design/voice.md for why the obvious ones do not survive contact with reality.
+// docs/voice.md for why the obvious ones do not survive contact with reality.
 
 #pragma once
 

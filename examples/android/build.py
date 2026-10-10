@@ -23,7 +23,7 @@ against.
   clean   discard the cached cross-build trees and SDKs first
   arch=   llama/qtts only: the -march feature set; `baseline` means armv8-a
 
-About arch=. design/voice.md measures a cross build with no -march landing on
+About arch=. docs/voice.md measures a cross build with no -march landing on
 baseline armv8-a and costing 2.9x prefill and 2.2x decode, because CMake's
 feature probes compile AND RUN a test binary and cannot run one for the phone.
 So the feature set is asserted here rather than detected. The default is the
@@ -71,7 +71,7 @@ _spec.loader.exec_module(b)
 say, fail, run = b.say, b.fail, b.run
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# The Kirin 9020's feature set, which is where every number in design/voice.md
+# The Kirin 9020's feature set, which is where every number in docs/voice.md
 # comes from. Kept as the default so a build on a new device is comparable
 # against those before it is optimised for the new one.
 DEFAULT_ARCH = "armv8.6-a+i8mm+bf16+dotprod+fp16"
@@ -267,7 +267,7 @@ def build_llama(o, cmake, ndk_cfg, arch, src):
     # GGML_OPENMP=OFF, and this is not just a link fix.
     #
     # ggml turns OpenMP on wherever find_package(OpenMP) succeeds. It fails on
-    # the OHOS sysroot, which has no libomp, so every figure in design/voice.md
+    # the OHOS sysroot, which has no libomp, so every figure in docs/voice.md
     # was taken on **ggml's own thread pool**. The NDK does ship libomp, so the
     # same source would quietly run a different scheduler here and a
     # thread-count sweep would not be comparable with the Kirin's -- which is
@@ -333,7 +333,7 @@ def build_qtts(o, cmake, ndk_cfg, arch, llama_src, src):
     # GGML_SOURCE_DIR, added upstream the same day, points the qwentts build at
     # any ggml tree -- so both lanes compile the same one from the same commit.
     # The cost is the fork's fused snake kernel for the DAC decoder; see
-    # design/voice.md. This target therefore needs a llama.cpp checkout even
+    # docs/voice.md. This target therefore needs a llama.cpp checkout even
     # when `llama` is not being built.
     if not os.path.isfile(os.path.join(llama_src, "ggml", "CMakeLists.txt")):
         fail('[qtts] qtts compiles llama.cpp\'s ggml and there is none at "%s".'
@@ -350,13 +350,13 @@ def build_qtts(o, cmake, ndk_cfg, arch, llama_src, src):
                      "-DGGML_SOURCE_DIR=" + b.fwd(llama_src) + "/ggml",
                      "-DBUILD_SHARED_LIBS=OFF",
                      # Same reason as the llama lane's: this ggml has to
-                     # schedule threads the way the one design/voice.md
+                     # schedule threads the way the one docs/voice.md
                      # measured did.
                      "-DGGML_OPENMP=OFF"]
     if arch:
         cfg.append("-DGGML_CPU_ARM_ARCH=" + arch)
     if o.vulkan:
-        # The reason this is worth a target at all: design/voice.md measures
+        # The reason this is worth a target at all: docs/voice.md measures
         # ggml's Vulkan backend at RTF 0.60 on a laptop iGPU against 1.13 on its
         # CPU, and the HarmonyOS attempt died to a platform policy
         # (GPU_LEAK_KILL) rather than to anything about the backend. Android has

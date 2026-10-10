@@ -16,7 +16,7 @@
 //   - Arousal: signal processing, no engine.
 //
 // So this file is narrow on purpose. It does not transcribe, it does not score,
-// and it must never become the place those things happen -- design/voice.md
+// and it must never become the place those things happen -- docs/voice.md
 // records what each of them costs and why they live where they do.
 //
 // What is NOT settled is whether the one capability is affordable. Measured on a
@@ -40,7 +40,7 @@ struct OmniReply {
 
     // Wall clock, split because one ratio hid the question. speech_elapsed
     // covers the Talker alone, so speech_elapsed / speech_seconds is the figure
-    // design/voice.md argues from -- but a person waits `seconds`, and the
+    // docs/voice.md argues from -- but a person waits `seconds`, and the
     // difference between the two is the thinker.
     //
     // None of these are processor time. Timed with clock() the Talker reported
@@ -164,7 +164,7 @@ public:
     // So this guard does not prevent the crash. It shortens the input, which
     // does less work and gives a memory bug in MNN's audio front end fewer
     // chances to fire. That is worth having and it is not what the name says.
-    // design/voice.md has the runs.
+    // docs/voice.md has the runs.
     bool ask(const float* pcm, size_t n_samples, const std::string& prompt,
              OmniAudioSink sink, OmniTextSink on_text, void* user_data, OmniReply* out);
 

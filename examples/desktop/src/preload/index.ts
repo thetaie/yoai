@@ -75,8 +75,8 @@ const api: YoaiApi = {
     settings: () => ipcRenderer.invoke(CHANNELS.chatSettingsGet) as Promise<ChatSettings>,
     setSettings: (patch) =>
       ipcRenderer.invoke(CHANNELS.chatSettingsSet, patch) as Promise<ChatSettings>,
-    start: (providerId: string, messages: WireMessage[], systemPrompt: string) =>
-      ipcRenderer.invoke(CHANNELS.chatStart, providerId, messages, systemPrompt) as Promise<number>,
+    start: (providerId: string, messages: WireMessage[], reading: boolean) =>
+      ipcRenderer.invoke(CHANNELS.chatStart, providerId, messages, reading) as Promise<number>,
     cancel: (turnId) => ipcRenderer.invoke(CHANNELS.chatCancel, turnId) as Promise<void>,
     forget: () => ipcRenderer.invoke(CHANNELS.chatForget) as Promise<number>,
 

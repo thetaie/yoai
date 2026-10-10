@@ -15,7 +15,8 @@ import type { Canceler, ChatEvent, ChatMessage, StreamCallbacks, WireMessage } f
  *
  * `history` is the whole conversation INCLUDING the user message just sent --
  * the core keeps no session state, so this is the only context the model gets.
- * Returns a handle the UI can stop the turn with.
+ * `reading` says the reply will be heard; the main process adds the system
+ * prompt to match. Returns a handle the UI can stop the turn with.
  *
  * cb.onDone fires exactly once, whatever happens; a failure delivers onError
  * first, so a caller that only implements onDone still ends up in a consistent
@@ -24,7 +25,7 @@ import type { Canceler, ChatEvent, ChatMessage, StreamCallbacks, WireMessage } f
 export function runTurn(
   providerId: string,
   history: ChatMessage[],
-  systemPrompt: string,
+  reading: boolean,
   cb: StreamCallbacks
 ): Canceler {
   const canceler: Canceler = { stopped: false, cancel: () => {} }
@@ -100,7 +101,7 @@ export function runTurn(
   })
 
   window.yoai.chat
-    .start(providerId, wire, systemPrompt)
+    .start(providerId, wire, reading)
     .then((id) => {
       turnId = id
 

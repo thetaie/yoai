@@ -144,7 +144,7 @@ void log_small_file(const std::string& path) {
 // something near that factor, and the one that mattered most was the worst:
 // the first phone run printed "5.18 s of speech in 87.9 s (17.0x real time)"
 // against 18.2 s on the log's own timestamps -- 3.5x. That ratio is the number
-// design/voice.md is waiting on to decide whether this lane ships at all, so
+// docs/voice.md is waiting on to decide whether this lane ships at all, so
 // the difference between 17x and 3.5x is the difference between two answers.
 //
 // A person waits wall time. Processor-seconds would be the right unit for a

@@ -462,7 +462,7 @@ void apply_vulkan_env() {
     // and a probe that could not say -- take ggml's defaults.
     //
     // The asymmetry is the whole design. Being wrong on an integrated GPU costs
-    // about 10% (design/voice.md has 78.3 against 71.0 ms a frame at `Q8_0`).
+    // about 10% (docs/voice.md has 78.3 against 71.0 ms a frame at `Q8_0`).
     // Being wrong on a discrete card costs a factor of thirty, measured here:
     // 2.8 ms a frame against 108.6. So Unknown lands on the cheap side.
     //

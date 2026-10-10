@@ -10,7 +10,7 @@
  *
  * Two files, not one. Qwen3-TTS is a talker (the autoregressive half, which
  * writes the audio codes) plus a 12 Hz audio TOKENIZER (which turns them into
- * samples). They are separate GGUFs and both are required; design/voice.md
+ * samples). They are separate GGUFs and both are required; docs/voice.md
  * measures that second stage -- it calls it the codec, being the decoding half
  * of the tokenizer -- at about 45% of the bill, which is why it is not an
  * implementation detail worth hiding.
@@ -370,7 +370,7 @@ export function unload(): void {
  * already running -- the core would serialise them, and hearing the previous
  * reply begin after asking for this one is worse than being told no.
  *
- * Streaming is ON. design/voice.md measured it costing nothing against the
+ * Streaming is ON. docs/voice.md measured it costing nothing against the
  * buffered path, and it is what lets playback start before the whole utterance
  * exists: below RTF 1 the pre-buffer is zero, and above it the wait is
  * duration x (RTF - 1) instead of the whole duration.

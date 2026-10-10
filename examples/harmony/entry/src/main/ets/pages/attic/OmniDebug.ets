@@ -132,7 +132,7 @@ struct OmniDebug {
    * Two ways in, because the model is a directory and a phone is bad at those.
    *
    *   Folder  -- the model already on the device, twenty-odd files intact.
-   *   Bundle  -- ONE file, packed by design/pack-mnn-model.py, extracted into
+   *   Bundle  -- ONE file, packed by tools/pack-mnn-model.py, extracted into
    *              this app's own storage. What to hand somebody who has to get
    *              3.4 GB onto a phone without losing a layout.
    *
@@ -160,7 +160,7 @@ struct OmniDebug {
     // after several minutes of copying.
     const listed: string = yoai.nativeBundleList(src);
     if (listed === '') {
-      this.note = 'not a bundle (or truncated) — pack it with design/pack-mnn-model.py';
+      this.note = 'not a bundle (or truncated) — pack it with tools/pack-mnn-model.py';
       return;
     }
 
@@ -312,7 +312,7 @@ struct OmniDebug {
     // person rather than to them.
     //
     // Two jobs had been merged into one prompt. Whether the model can read a
-    // speaker at all belongs to the text axes, and design/voice.md already
+    // speaker at all belongs to the text axes, and docs/voice.md already
     // settles it: the 3B was measured not to hear tone, so anything it says
     // about mood comes from the words. What this page needs is speech, and
     // speech needs something worth saying to the person who spoke.

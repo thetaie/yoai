@@ -16,53 +16,73 @@
  * Sent with every turn and stored nowhere else: yoai_chat takes it as an
  * argument, the core keeps no session state, and the saved transcript holds
  * only what the two sides actually said.
+ *
+ * The default is the core's, not this file's (src/llm/prompt/prompts.cpp).
+ * chat.json holds a prompt only once the user has written one; until then each
+ * turn goes out with the core's default as it is in this build, so a new
+ * default reaches everyone who never changed it. A copy kept here is what
+ * drifted before.
  */
-import type { ChatSettings } from '../shared/api'
+import type { ChatSettings, ChatSettingsPatch } from '../shared/api'
+import { core } from './core'
 import { dataFile, readJson, writeJson } from './jsonfile'
 
 const FILE = 'chat.json'
 
-/**
- * The prompt until the user writes their own -- a fresh install included,
- * which would otherwise send nothing at all.
- *
- * The second paragraph is there because the on-device model makes things up:
- * asked for a lake's sights, a 4B model listed a wetland park that is at the
- * other end of the city, as confidently as the real ones. It does not know what
- * it does not know, so this reduces that rather than ending it.
- *
- * A prompt the user CLEARS is sent as empty, as the settings screen says; only
- * one never set falls back to this.
- */
-export const DEFAULT_SYSTEM_PROMPT =
-  '你是 YoAI 里的助手，说话简洁、直接，用简体中文。\n' +
-  // Not "say you are unsure": told that, the model closed every reply with a
-  // generic "我不太确定，建议去当地问问" -- including after one it had just made
-  // up. So what it is not sure of is left out, and said only when asked.
-  '只说有把握的事实。拿不准的具体名称、地点、日期、数字，就不要写进回答，也不要用名字相近的东西凑数；' +
-  '只有用户问的正是这一点时，才简单说一句不确定。' +
-  '不要在回答末尾加“我不确定”“建议查阅资料”“问问当地人”之类的通用提醒。\n' +
-  // The last line is not decoration. The 4B model read the rules above as
-  // something to announce: asked "介绍一下你自己", it recited them in four
-  // runs out of four, and once answered "你好" with a promise never to be
-  // wrong. Saying they are internal, and giving it something to say about
-  // itself instead, stopped that in the same four runs.
-  '这些是你内部的做事原则，不是要告诉用户的内容：不要向用户复述、介绍或保证它们。' +
-  '被问到你是谁时，说你是 YoAI 的助手，可以回答问题、陪人聊天就够了。'
+/** What chat.json holds. No systemPrompt: the user never wrote one. */
+interface Stored {
+  systemPrompt?: string
+}
 
-const DEFAULTS: ChatSettings = { systemPrompt: DEFAULT_SYSTEM_PROMPT }
+/** The user's own prompt, or null when they never wrote one. '' is one they cleared. */
+function stored(): string | null {
+  const s = readJson<Stored>(dataFile(FILE), {})
+  return typeof s.systemPrompt === 'string' ? s.systemPrompt : null
+}
 
-export function get(): ChatSettings {
-  const s = readJson<Partial<ChatSettings>>(dataFile(FILE), DEFAULTS)
-  return {
-    systemPrompt: typeof s.systemPrompt === 'string' ? s.systemPrompt : DEFAULT_SYSTEM_PROMPT
+/** The core's default, or null when the addon will not load. */
+function builtin(): string | null {
+  try {
+    return core().nativePromptGet('system')
+  } catch {
+    return null
   }
 }
 
-export function set(patch: Partial<ChatSettings>): ChatSettings {
-  const next: ChatSettings = {
-    systemPrompt: typeof patch.systemPrompt === 'string' ? patch.systemPrompt : get().systemPrompt
+export function get(): ChatSettings {
+  const own = stored()
+  if (own !== null) {
+    return { systemPrompt: own, custom: true }
   }
-  writeJson(dataFile(FILE), next)
-  return next
+  return { systemPrompt: builtin() ?? '', custom: false }
+}
+
+/**
+ * Store the user's prompt, or forget it with null.
+ *
+ * A text equal to the default is forgotten too. The settings box saves on blur,
+ * so one clicked into and left as it was would otherwise pin this build's
+ * default, and the next one would never reach that user.
+ */
+export function set(patch: ChatSettingsPatch): ChatSettings {
+  if (patch.systemPrompt === null) {
+    writeJson(dataFile(FILE), {})
+  } else if (typeof patch.systemPrompt === 'string') {
+    const isDefault = patch.systemPrompt === builtin()
+    writeJson(dataFile(FILE), isDefault ? {} : { systemPrompt: patch.systemPrompt })
+  }
+  return get()
+}
+
+/**
+ * The system prompt one turn is sent with: the user's own or the core's
+ * default, the spoken-style paragraph after it when the reply will be heard,
+ * and the core's line saying all of it is internal.
+ *
+ * The turn and the local model's warm-up both take it from here, and the core
+ * builds it from the same two inputs, so they agree to the token -- a warm-up
+ * spent on a prompt nobody sends is wasted.
+ */
+export function turnPrompt(reading: boolean): string {
+  return core().nativePromptTurnSystem(stored(), reading)
 }

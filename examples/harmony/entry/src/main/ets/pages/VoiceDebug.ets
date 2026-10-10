@@ -2,7 +2,7 @@
  * The voice pipeline, with its working shown. Reached by typing /asr in the
  * composer -- it is a debug page, not a destination.
  *
- * Why it exists: everything design/voice.md argues for is a NUMBER, and numbers
+ * Why it exists: everything docs/voice.md argues for is a NUMBER, and numbers
  * measured on a workstation are not numbers measured on the device someone will
  * actually speak into. Microphone gain, room noise, model load time and encoder
  * speed on a phone are all unknowns that only a real recording settles.
@@ -455,7 +455,7 @@ struct VoiceDebug {
    * The same thread count, measured against memory instead of a model.
    *
    * Bench decode answers "how fast is this engine"; this answers "how fast is
-   * this chip", and the two have been conflated. design/voice.md derives its
+   * this chip", and the two have been conflated. docs/voice.md derives its
    * whole on-device throughput argument from a constant — 19.5 GB/s — that came
    * from llama.cpp's own tokens per second. The thread sweep then showed decode
    * flattening at four threads and that was read as the memory bus filling up,
@@ -603,7 +603,7 @@ struct VoiceDebug {
    * first.
    *
    * An earlier version of this comment said recognition "is already known to
-   * run at 1.6x". It was not known — design/voice.md called the encoder speed on
+   * run at 1.6x". It was not known — docs/voice.md called the encoder speed on
    * a Kirin unmeasured at the time — and it was wrong by 3.6x, in the direction
    * that would have sent the first optimisation at the wrong stage.
    *

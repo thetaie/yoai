@@ -1,5 +1,6 @@
 #include "llm/chat/mnn.hpp"
 
+#include "llm/chat/annotations.hpp"
 #include "llm/chat/local.hpp"   // ThinkSplitter, utf8_complete_len
 #include "utils/log.hpp"
 
@@ -253,8 +254,9 @@ bool MnnClient::ainvoke(const std::vector<ChatMessage>& messages,
         chat.push_back(std::make_pair(std::string("system"), system_prompt));
     }
     bool has_user = false;
-    for (std::size_t i = 0; i < messages.size(); ++i) {
-        const ChatMessage& m = messages[i];
+    const std::vector<ChatMessage> annotated = with_annotation_text(messages);
+    for (std::size_t i = 0; i < annotated.size(); ++i) {
+        const ChatMessage& m = annotated[i];
         if (m.role == "user" || m.role == "assistant") {
             chat.push_back(std::make_pair(m.role, m.content));
             has_user = has_user || m.role == "user";

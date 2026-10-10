@@ -269,7 +269,7 @@ export const nativeVoiceAnalyze: (
 //  *
 //  * Nothing else routes through it. Recognition stays with SenseVoice, the text
 //  * axes stay with the chat model and its grammar, arousal stays signal
-//  * processing. See design/voice.md.
+//  * processing. See docs/voice.md.
 //  */
 // export const nativeOmniAvailable: () => boolean;
 //
@@ -357,7 +357,7 @@ export const nativeVoiceAnalyze: (
 //
 // The voice is WRITTEN, not cloned: `nativeTtsSetVoice` takes an English
 // description and the same description gives the same speaker across different
-// passages. design/voice.md records the five other ways of pinning a voice in
+// passages. docs/voice.md records the five other ways of pinning a voice in
 // this model family that were tried first, and why each failed.
 
 /** Whether this build has qwentts.cpp compiled in. */

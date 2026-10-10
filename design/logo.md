@@ -175,9 +175,9 @@ bundle id is `com.yoai.bodyclock`.
 
 ## The HarmonyOS assets
 
-[make-harmony-icons.py](make-harmony-icons.py) regenerates all four from the
-four-segment mark: `app_icon.png`, the layered icon's `foreground.png` and
-`background.png`, and `startIcon.png`. Content is 682px on a 1024 canvas.
+[make-harmony-icons.py](scripts/make-harmony-icons.py) regenerates all four
+from the four-segment mark: `app_icon.png`, the layered icon's `foreground.png`
+and `background.png`, and `startIcon.png`. Content is 682px on a 1024 canvas.
 
 The design draws the ring pressing against the edges of its own rounded tile.
 The tile's edge and a launcher mask's edge are not the same thing, so the assets

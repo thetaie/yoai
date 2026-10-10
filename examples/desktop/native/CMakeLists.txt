@@ -31,8 +31,10 @@ add_definitions(-DNAPI_VERSION=8)
 # The root build defaults YOAI_BUILD_CLI to ON off-device, which would build
 # the CLI harness and four test executables every time the addon is rebuilt.
 # Nothing here runs them, so they are turned off before the subdirectory is read
-# -- FORCE because they are cached options and a stale ON would survive.
+# -- FORCE because they are cached options and a stale ON would survive. The
+# same for YOAI_BUILD_SHARED, the core as a DLL for examples/python/.
 set(YOAI_BUILD_CLI OFF CACHE BOOL "" FORCE)
+set(YOAI_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../.." "${CMAKE_CURRENT_BINARY_DIR}/yoai-core")
 

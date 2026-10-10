@@ -2,7 +2,7 @@
 //
 // The THIRD engine in this core, and like the second it is here for one thing.
 // omni/qwen25_omni.hpp explains what MNN buys -- the model's own voice -- and
-// design/voice.md records what it costs: 2.8x slower than real time at the
+// docs/voice.md records what it costs: 2.8x slower than real time at the
 // coarsest diffusion setting that still sounds like anything, on a chain that
 // also has to think before it speaks. This engine speaks text somebody else produced, so the
 // thinker is llama.cpp's and already measured, and the speaking measured 1.16x
@@ -46,7 +46,7 @@
 // sized by the codebook count rather than the LM, and **1.45x is there with a
 // talker costing nothing**. So the ceiling is not a tuning problem, and nothing
 // here should be written as though the next lever will cross 1x.
-// design/voice.md has all of it.
+// docs/voice.md has all of it.
 //
 // Stubs out without YOAI_QTTS, exactly like omni: available() is false,
 // load() fails with a message, and the app still builds and links.
@@ -277,7 +277,7 @@ public:
     //
     // Both arguments are needed together. The transcript is what makes this
     // in-context cloning rather than a speaker-embedding copy, and that is the
-    // difference between the two rows of design/voice.md's variant table that
+    // difference between the two rows of docs/voice.md's variant table that
     // sound alike and the two that do not -- pinning a voice through the speaker
     // encoder held the identity and flattened the prosody; carrying the audio
     // and its text in context held both.

@@ -17,8 +17,8 @@ then concatenates.
 
 Usage:
 
-    python design/pack-mnn-model.py <model-dir> <out.bundle> [--with-vision]
-    python design/pack-mnn-model.py --list <out.bundle>
+    python tools/pack-mnn-model.py <model-dir> <out.bundle> [--with-vision]
+    python tools/pack-mnn-model.py --list <out.bundle>
 """
 import os
 import struct

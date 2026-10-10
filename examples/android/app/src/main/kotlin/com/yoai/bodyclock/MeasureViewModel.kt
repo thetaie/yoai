@@ -20,7 +20,7 @@ import java.io.File
  * The rule the whole screen follows: **it reports what the core returned and
  * does not interpret it.** Each run prints the engine's own JSON alongside the
  * one derived figure worth reading at a glance, so a number on the screen can
- * always be traced to the object it came from. design/voice.md is full of
+ * always be traced to the object it came from. docs/voice.md is full of
  * conclusions drawn from figures that turned out to be something else; the
  * cheapest defence is not hiding the original.
  *
@@ -102,7 +102,7 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
      *
      * The reason this is the first panel and needs no model: it is the only
      * measurement here that is about the chip rather than about an engine
-     * running on it. design/voice.md reads 24.4 GB/s on a Kirin 9020 and uses
+     * running on it. docs/voice.md reads 24.4 GB/s on a Kirin 9020 and uses
      * it to bound decode, so the figure has a job beyond being interesting.
      */
     fun runBandwidthSweep(mib: Int = 256, passes: Int = 4) = run("memory bandwidth") {
@@ -219,7 +219,7 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
         }
         // RTF is timed here rather than taken from the core, because the core
         // does not report one for this lane -- compute over audio duration, the
-        // same definition design/voice.md uses everywhere.
+        // same definition docs/voice.md uses everywhere.
         val headline = "RTF %.3f  ·  %.2f s of audio at %d Hz in %.2f s, %d threads".format(
             elapsed / clip.seconds, clip.seconds, clip.sampleRate, elapsed, threads)
         _state.update { it.copy(asrHeadline = headline, asrJson = pretty(json)) }
@@ -236,7 +236,7 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
      *
      * Time to the first `reply` event is prefill plus one token and is read as
      * prefill; everything after it is decode, divided by the token count the
-     * `usage` event reports. That split is the one design/voice.md keeps
+     * `usage` event reports. That split is the one docs/voice.md keeps
      * returning to -- prefill is compute-bound and decode is memory-bound, and
      * they scale differently between a desktop and a phone.
      */
@@ -315,7 +315,7 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
      *
      * Serialised deliberately: two of these running together would each be
      * measuring the other's thermal and memory load, and the throttle step
-     * design/voice.md documents makes that not a small effect.
+     * docs/voice.md documents makes that not a small effect.
      */
     private fun run(what: String, block: suspend () -> Unit) {
         if (running?.isActive == true) {

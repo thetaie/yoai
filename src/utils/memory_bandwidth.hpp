@@ -1,6 +1,6 @@
 // How fast this machine can read memory, measured without a language model.
 //
-// This exists to settle one number. design/voice.md argues that on-device
+// This exists to settle one number. docs/voice.md argues that on-device
 // decode is bandwidth-bound: a model of size S cannot exceed bandwidth/S tokens
 // per second, so nothing but a smaller model helps. The constant in that
 // argument, 19.5 GB/s, was only ever derived from llama.cpp's own throughput --

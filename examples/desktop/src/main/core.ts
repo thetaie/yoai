@@ -53,6 +53,16 @@ export interface YoaiNative {
   nativeChatCancel(turnId: number): void
   nativeChatCancelAll(): number
 
+  /** A prompt's current text from the core's table; null for an unknown name. */
+  nativePromptGet(name: string): string | null
+  /**
+   * The system prompt a turn and its warm-up send. `base` is the user's own;
+   * null for one who never wrote any, which gets the core's default; '' for one
+   * who cleared it. The core adds the spoken style when `reading`, and a closing
+   * line on everything being internal whenever there is anything before it.
+   */
+  nativePromptTurnSystem(base: string | null, reading: boolean): string
+
   //--- Speech output -----------------------------------------------------------
   // Present on every build. The qtts lane is a compile option and the C ABI
   // stubs out without it, so these are always callable and nativeTtsAvailable()

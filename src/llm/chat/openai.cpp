@@ -1,5 +1,6 @@
 #include "llm/chat/openai.hpp"
 
+#include "llm/chat/annotations.hpp"
 #include "llm/chat/sse_parser.hpp"
 #include "utils/http.hpp"
 #include "utils/log.hpp"
@@ -553,7 +554,7 @@ bool OpenAIChatClient::ainvoke(const std::vector<ChatMessage>& messages,
     // appends the assistant tool-call turn and the tool results between rounds.
     std::vector<std::string> message_objs;
     if (!system_prompt.empty()) message_objs.push_back(make_message("system", system_prompt));
-    for (const auto& m : messages) message_objs.push_back(make_message(m.role, m.content));
+    for (const auto& m : with_annotation_text(messages)) message_objs.push_back(make_message(m.role, m.content));
 
     // Token counters accumulate across every round; the cost summary is emitted
     // once at the very end.

@@ -1,5 +1,6 @@
 #include "llm/chat/local.hpp"
 
+#include "llm/chat/annotations.hpp"
 #include "utils/log.hpp"
 
 #include <algorithm>
@@ -54,10 +55,15 @@ std::string build_prompt(llama_model*                    model,
                          int                             thinking) {
     // Gemma has no system role: the system prompt is folded into the first user
     // turn. Doing it here rather than per-template keeps one prompt shape.
+    //
+    // Annotations go in first, so the system prompt lands in front of the first
+    // message's annotation line, not inside it -- and warm()'s front, which ends
+    // where the first message's text begins, is still the front of this prompt.
+    const std::vector<ChatMessage> annotated = with_annotation_text(messages);
     std::vector<ChatMessage> msgs;
-    msgs.reserve(messages.size());
-    for (std::size_t i = 0; i < messages.size(); ++i) {
-        const ChatMessage& m = messages[i];
+    msgs.reserve(annotated.size());
+    for (std::size_t i = 0; i < annotated.size(); ++i) {
+        const ChatMessage& m = annotated[i];
         if (m.role == "user" || m.role == "assistant") {
             msgs.push_back(m);
         }

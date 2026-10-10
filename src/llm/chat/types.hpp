@@ -17,9 +17,34 @@
 
 namespace yoai { namespace llm {
 
+// What the app knows about a message besides its words: when it was said, and
+// how the speaker sounded. Kept as data, apart from `content`, so a host stores
+// and shows it however it likes; the model gets it as a short bracketed line in
+// front of the message, written by annotations.cpp. Every field is optional,
+// and a message with none gets no line at all.
+struct Annotations {
+    // When the message was sent, in milliseconds since the Unix epoch (UTC), and
+    // the UTC offset in force there, in minutes east -- 480 for China. 0 for
+    // `time_ms` means not given. The offset is read only with a time, and its
+    // default of 0 means UTC.
+    std::int64_t time_ms    = 0;
+    int          utc_offset = 0;
+    // The IANA zone name, e.g. "Asia/Shanghai", or empty. Shown beside the
+    // offset when given; the offset alone is enough to state the local time.
+    std::string  timezone;
+
+    // How activated the speaker sounded, -1 (much flatter than usual) to 1 (much
+    // more activated), against their own baseline -- from prosody, never from the
+    // words. Set `has_arousal` only when the measurement is one worth trusting;
+    // prosody declines below three utterances, and so should the host.
+    bool  has_arousal = false;
+    float arousal     = 0.0f;
+};
+
 struct ChatMessage {
     std::string role;       // "user" / "assistant" / "system" / "tool"
-    std::string content;
+    std::string content;    // the words, exactly as said; never rewritten here
+    Annotations annotations;
 };
 
 // Returning false from the handler aborts the in-flight HTTP transfer, which is

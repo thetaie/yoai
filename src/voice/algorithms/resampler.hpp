@@ -1,10 +1,10 @@
 // A fixed-ratio resampler: polyphase FIR, Kaiser-windowed sinc.
 //
 // **It is for the echo canceller's reference signal, and that is the only
-// reason the core has one.** The rule in src/voice/README.md still holds for
-// everything that is analyzed: recognition and prosody take 16 kHz from the
-// capture and refuse anything else, because a resampler that differs from the
-// one a measurement was taken with changes the answer quietly. The reference is
+// reason the core has one.** The core still resamples nothing that is
+// analyzed: recognition and prosody take 16 kHz from the capture and refuse
+// anything else, because a resampler that differs from the one a measurement
+// was taken with changes the answer quietly. The reference is
 // different. Qwen3-TTS speaks at 24 kHz and the microphone is opened at 16 kHz,
 // so what was played has to be brought to the capture's rate before it can be
 // subtracted -- and an error here becomes a little residual echo, never a

@@ -7,7 +7,7 @@
       Models are read from the app's own external files directory, which needs
       none and is where `adb push` puts them. Nothing here records audio yet: a
       RECORD_AUDIO prompt would be the first thing a bench asks for and the last
-      thing it needs, since every clip in design/voice.md is a file.
+      thing it needs, since every clip in docs/voice.md is a file.
     -->
 
     <application
@@ -36,7 +36,7 @@
           The measurement bench, from before there was an app; see
           examples/android/README.md. It keeps its own launcher entry rather than hiding
           behind a debug menu, because the thing it is for is being opened on a
-          device next to the app and compared against design/voice.md. Its
+          device next to the app and compared against docs/voice.md. Its
           label is what distinguishes the two icons in the drawer, and this
           whole block is what a release manifest drops.
         -->

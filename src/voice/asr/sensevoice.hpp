@@ -2,7 +2,7 @@
 //
 // Why recognition lives in the core rather than in each host app, and why it is
 // a separate model instead of an omni one that would do this and the reply in a
-// single pass, is argued in design/voice.md. The short version is that keeping
+// single pass, is argued in docs/voice.md. The short version is that keeping
 // recognition outside the language model leaves the model choice free -- voice
 // then works against a remote provider too, which it cannot when the audio has
 // to reach the weights.
@@ -37,7 +37,7 @@ namespace voice {
 // emitted each token, and encoder frames are 60 ms, so a transcript carries
 // usable timestamps at no extra cost. Prosodic segmentation wants them: a
 // boundary confirmed by both a pause and a sentence end is better than one from
-// either alone (design/voice.md).
+// either alone (docs/voice.md).
 struct Token {
     int         id    = 0;
     int         frame = 0;      // encoder frame that emitted it, audio-relative
@@ -62,7 +62,7 @@ struct Transcript {
     // The emotion label is deliberately NOT what this app reads emotion from.
     // Its label space has no word for tired, depleted or calm -- the whole
     // low-arousal band collapses into NEUTRAL -- so it is recorded and not
-    // trusted. See design/voice.md.
+    // trusted. See docs/voice.md.
     std::string language;
     std::string emotion;
     std::string event;
@@ -100,7 +100,7 @@ public:
     //
     // It is not a cosmetic preference. **A transcript with ITN applied can no
     // longer be used to count syllables**, because "567" is three characters and
-    // four spoken syllables -- and speaking rate, which design/voice.md takes
+    // four spoken syllables -- and speaking rate, which docs/voice.md takes
     // from the character count divided by the duration, is wrong at every number
     // in the clip. Anything measuring rate wants this off; anything showing text
     // to a person wants it on.

@@ -3,7 +3,7 @@
  *
  * The other two lanes are halves of a chain -- llama.cpp writes the words,
  * qwentts says them -- and this one is not. That is the only thing it is
- * carried for, and design/voice.md weighs what it costs: 3.8 GB, a second
+ * carried for, and docs/voice.md weighs what it costs: 3.8 GB, a second
  * inference framework, and a Talker that on this desktop measured RTF 3.1.
  *
  * A DIRECTORY, not a file. An MNN model is a config.json plus a dozen .mnn

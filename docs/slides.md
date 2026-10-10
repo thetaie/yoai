@@ -25,43 +25,108 @@ svg.fig { display: block; width: 100%; height: auto; margin-top: 12px; }
 
 # Voice streaming
 
-A reply is spoken while it is still being written. Recognition and synthesis sit outside the language model, so **voice works with every provider**, local or remote.
-
-<svg class="fig" viewBox="0 0 1250 330" role="img" aria-label="Microphone to asr to a chat model to the tts Reader to the speaker, with prosody read from the audio">
-<defs><marker id="arrow-chain" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#57606a"/></marker></defs>
+<svg class="fig" viewBox="0 -32 1250 504" role="img" aria-label="The microphone feeds an echo canceller, which takes what the speaker plays back out of the microphone signal, with the PCM played as its reference; its output feeds three paths to the speaker. The main line, framed and labeled The Qwen-Omni experience, without Qwen-Omni: ASR hands a chat model, local or remote, whole sentences cut at pauses, and the chat model streams its reply to TTS token by token. Beside ASR, emotion in reads the user's arousal from the sound, cut and timed by the transcript, and passes it to the chat model; the chat model hands its reply's valence, arousal and dominance to emotion out, which steers the TTS voice file. Below it, two omni paths, where one model takes the audio and speaks the reply itself: Qwen3-Omni-30B-A3B on vLLM-Omni, a remote provider on a GPU server or desktop, kept, made of a MoE thinker (30B total, 3B active, 48 layers, a router per layer picking 8 of 128 experts), a MoE talker (3B total, 0.3B active, 20 layers, 6 of 128 experts plus one shared), and a dense codec; and Qwen2.5-Omni-3B on MNN, a local provider on the device at RTF 3.0 on a phone, replaced by the main line.">
+<defs>
+<marker id="arrow-chain" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#57606a"/></marker>
+<marker id="arrow-ref" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#bc4c00"/></marker>
+</defs>
+<rect x="352" y="8" width="706" height="210" rx="16" fill="none" stroke="#24292f" stroke-width="2" stroke-dasharray="8 5"/>
+<text x="354" y="-6" font-size="24" font-weight="700" fill="#24292f">The Qwen-Omni experience, without Qwen-Omni</text>
 <g text-anchor="middle">
-<rect x="20" y="40" width="170" height="100" rx="10" fill="#f6f8fa" stroke="#d0d7de" stroke-width="2"/>
-<text x="105" y="84" font-size="22" font-weight="700" fill="#24292f">Microphone</text>
-<text x="105" y="114" font-size="17" fill="#57606a">16 kHz mono</text>
-<rect x="280" y="40" width="170" height="100" rx="10" fill="#ddf4ff" stroke="#0969da" stroke-width="2"/>
-<text x="365" y="84" font-size="22" font-weight="700" fill="#24292f">asr/</text>
-<text x="365" y="114" font-size="17" fill="#57606a">SenseVoice-Small</text>
-<rect x="540" y="40" width="170" height="100" rx="10" fill="#f6f8fa" stroke="#d0d7de" stroke-width="2"/>
-<text x="625" y="84" font-size="22" font-weight="700" fill="#24292f">Chat model</text>
-<text x="625" y="114" font-size="17" fill="#57606a">local or remote</text>
-<rect x="800" y="40" width="170" height="100" rx="10" fill="#dafbe1" stroke="#1a7f37" stroke-width="2"/>
-<text x="885" y="84" font-size="22" font-weight="700" fill="#24292f">tts/ Reader</text>
-<text x="885" y="114" font-size="17" fill="#57606a">Qwen3-TTS</text>
-<rect x="1060" y="40" width="170" height="100" rx="10" fill="#f6f8fa" stroke="#d0d7de" stroke-width="2"/>
-<text x="1145" y="84" font-size="22" font-weight="700" fill="#24292f">Speaker</text>
-<text x="1145" y="114" font-size="17" fill="#57606a">24 kHz mono</text>
-<rect x="280" y="215" width="430" height="90" rx="10" fill="#fff1e5" stroke="#bc4c00" stroke-width="2"/>
-<text x="495" y="252" font-size="22" font-weight="700" fill="#24292f">prosody/</text>
-<text x="495" y="283" font-size="17" fill="#57606a">pitch, loudness, continuity → arousal, no model</text>
+<rect x="16" y="20" width="130" height="100" rx="10" fill="#f6f8fa" stroke="#d0d7de" stroke-width="2"/>
+<text x="81" y="64" font-size="20" font-weight="700" fill="#24292f">Microphone</text>
+<text x="81" y="94" font-size="17" fill="#57606a">16 kHz mono</text>
+<rect x="185" y="20" width="130" height="100" rx="10" fill="#fff1e5" stroke="#bc4c00" stroke-width="2"/>
+<text x="250" y="64" font-size="22" font-weight="700" fill="#24292f">AEC</text>
+<text x="250" y="94" font-size="17" fill="#57606a">echo canceller</text>
+<rect x="375" y="20" width="150" height="100" rx="10" fill="#ddf4ff" stroke="#0969da" stroke-width="2"/>
+<text x="450" y="64" font-size="22" font-weight="700" fill="#24292f">ASR</text>
+<text x="450" y="94" font-size="17" fill="#57606a">SenseVoice-Small</text>
+<rect x="655" y="20" width="140" height="100" rx="10" fill="#f6f8fa" stroke="#d0d7de" stroke-width="2"/>
+<text x="725" y="64" font-size="22" font-weight="700" fill="#24292f">Chat model</text>
+<text x="725" y="94" font-size="17" fill="#57606a">local or remote</text>
+<rect x="925" y="20" width="120" height="100" rx="10" fill="#dafbe1" stroke="#1a7f37" stroke-width="2"/>
+<text x="985" y="64" font-size="22" font-weight="700" fill="#24292f">TTS</text>
+<text x="985" y="94" font-size="17" fill="#57606a">Qwen3-TTS</text>
+<rect x="1104" y="20" width="130" height="100" rx="10" fill="#f6f8fa" stroke="#d0d7de" stroke-width="2"/>
+<text x="1169" y="64" font-size="22" font-weight="700" fill="#24292f">Speaker</text>
+<text x="1169" y="94" font-size="17" fill="#57606a">24 kHz mono</text>
+<rect x="375" y="150" width="150" height="56" rx="10" fill="#fff1e5" stroke="#bc4c00" stroke-width="2"/>
+<text x="450" y="173" font-size="18" font-weight="700" fill="#24292f">Emotion in</text>
+<text x="450" y="194" font-size="15" fill="#57606a">arousal from sound</text>
+<rect x="885" y="150" width="160" height="56" rx="10" fill="#fff1e5" stroke="#bc4c00" stroke-width="2"/>
+<text x="965" y="173" font-size="18" font-weight="700" fill="#24292f">Emotion out</text>
+<text x="965" y="194" font-size="15" fill="#57606a">V, A, D → voice file</text>
+<rect x="375" y="238" width="680" height="132" rx="10" fill="#fbefff" stroke="#8250df" stroke-width="2"/>
+<text x="715" y="262" font-size="20" font-weight="700" fill="#24292f">Qwen3-Omni-30B-A3B</text>
+<text x="715" y="284" font-size="16" fill="#57606a">vLLM-Omni · remote provider, on a GPU server or desktop</text>
+<rect x="389" y="296" width="240" height="62" rx="8" fill="#ffffff" stroke="#8250df" stroke-width="1.5"/>
+<text x="509" y="316" font-size="16" font-weight="700" fill="#24292f">Thinker · MoE</text>
+<text x="509" y="334" font-size="14" fill="#57606a">30B total, 3B active · 48 layers</text>
+<text x="509" y="350" font-size="14" fill="#57606a">router per layer: 8 of 128</text>
+<rect x="653" y="296" width="240" height="62" rx="8" fill="#ffffff" stroke="#8250df" stroke-width="1.5"/>
+<text x="773" y="316" font-size="16" font-weight="700" fill="#24292f">Talker · MoE</text>
+<text x="773" y="334" font-size="14" fill="#57606a">3B total, 0.3B active · 20 layers</text>
+<text x="773" y="350" font-size="14" fill="#57606a">router per layer: 6 of 128 + shared</text>
+<rect x="917" y="296" width="124" height="62" rx="8" fill="#ffffff" stroke="#8250df" stroke-width="1.5"/>
+<text x="979" y="316" font-size="16" font-weight="700" fill="#24292f">Codec · dense</text>
+<text x="979" y="334" font-size="14" fill="#57606a">code predictor</text>
+<text x="979" y="350" font-size="14" fill="#57606a">+ Code2Wav</text>
+<rect x="375" y="390" width="680" height="56" rx="10" fill="#fbefff" stroke="#8250df" stroke-width="2"/>
+<text x="715" y="412" font-size="20" font-weight="700" fill="#24292f">Qwen2.5-Omni-3B</text>
+<text x="715" y="434" font-size="16" fill="#57606a">MNN · local provider, on the device · RTF 3.0 on a phone</text>
+<rect x="955" y="244" width="86" height="24" rx="12" fill="#8250df" stroke="#8250df" stroke-width="1.5"/>
+<text x="998" y="261" font-size="14" fill="#ffffff">kept</text>
+<rect x="955" y="406" width="86" height="24" rx="12" fill="#ffffff" stroke="#8250df" stroke-width="1.5"/>
+<text x="998" y="423" font-size="14" fill="#8250df">replaced</text>
 <g font-size="15" fill="#57606a">
-<text x="235" y="80">audio</text>
-<text x="495" y="80">text</text>
-<text x="755" y="80">text deltas</text>
-<text x="1015" y="80">PCM</text>
+<text x="589" y="56">whole sentences</text>
+<text x="589" y="100">cut at pauses</text>
+<text x="859" y="56">streamed</text>
+<text x="859" y="100">token by token</text>
+<text x="1082" y="56">PCM</text>
+<text x="613" y="170">user's arousal</text>
+<text x="458" y="140" text-anchor="start">text + timing</text>
+<text x="817" y="170">reply's V, A, D</text>
 </g>
+</g>
+<g font-size="15" fill="#bc4c00" text-anchor="end">
+<text x="240" y="300">reference:</text>
+<text x="240" y="319">PCM played</text>
 </g>
 <g stroke="#57606a" stroke-width="2" fill="none" marker-end="url(#arrow-chain)">
-<line x1="192" y1="90" x2="276" y2="90"/>
-<line x1="452" y1="90" x2="536" y2="90"/>
-<line x1="712" y1="90" x2="796" y2="90"/>
-<line x1="972" y1="90" x2="1056" y2="90"/>
-<path d="M105,142 V260 H276"/>
+<line x1="148" y1="70" x2="181" y2="70"/>
+<line x1="340" y1="70" x2="371" y2="70"/>
+<line x1="340" y1="178" x2="371" y2="178"/>
+<line x1="340" y1="327" x2="371" y2="327"/>
+<line x1="340" y1="418" x2="371" y2="418"/>
+<line x1="527" y1="70" x2="651" y2="70"/>
+<line x1="797" y1="70" x2="921" y2="70"/>
+<line x1="1047" y1="70" x2="1100" y2="70"/>
+<path d="M527,178 H700 V124"/>
+<path d="M750,122 V178 H881"/>
+<line x1="985" y1="148" x2="985" y2="124"/>
+<line x1="450" y1="122" x2="450" y2="146"/>
+<line x1="631" y1="327" x2="649" y2="327"/>
+<line x1="895" y1="327" x2="913" y2="327"/>
 </g>
+<g stroke="#57606a" stroke-width="2" fill="none">
+<path d="M317,70 H340 V418"/>
+<path d="M1057,327 H1076 V70"/>
+<path d="M1057,418 H1076 V327"/>
+</g>
+<g fill="#57606a">
+<circle cx="340" cy="70" r="4"/>
+<circle cx="340" cy="178" r="4"/>
+<circle cx="340" cy="327" r="4"/>
+<circle cx="1076" cy="70" r="4"/>
+</g>
+<path d="M1169,122 V462 H250 V124" stroke="#bc4c00" stroke-width="2" fill="none" marker-end="url(#arrow-ref)"/>
+<g fill="#0969da">
+<rect x="540" y="64" width="40" height="12" rx="3"/>
+<rect x="590" y="64" width="40" height="12" rx="3"/>
+</g>
+<line x1="801" y1="70" x2="904" y2="70" stroke="#0969da" stroke-width="12" stroke-dasharray="6 4"/>
 </svg>
 
 ---

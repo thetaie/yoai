@@ -1736,7 +1736,7 @@ declares. There is no runtime switch for audio-only — the single skip in that
 function is a hardcoded Gemma-3N special case — so a process that will never be
 handed an image pays for the vision weights anyway.
 
-[strip-mmproj-vision.py](strip-mmproj-vision.py) drops them: the `v.*` tensors
+[strip-mmproj-vision.py](../tools/strip-mmproj-vision.py) drops them: the `v.*` tensors
 and the `mm.0.*` / `mm.2.*` projector MLP go, the `a.*` encoder and `mm.a.*` head
 stay, every `clip.vision.*` key goes and `clip.has_vision_encoder` is set false —
 that last flag being the one `clip.cpp` actually reads. It is a metadata rewrite,

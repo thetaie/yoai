@@ -25,7 +25,7 @@ as a directory that runs on its own.
   mnn        assemble a desktop MNN SDK and build the addon with the omni
              lane: audio in, a spoken answer out, no text in between.
              Implies native. A second inference engine and 3.8 GB of
-             weights -- see design/voice.md before turning it on.
+             weights -- see docs/voice.md before turning it on.
   app        just the Electron bundles (out/)
   dist       native + app, then the app as one directory that runs where it
              is put: dist-<os>-<arch>/ -- YoAI.exe in dist-win-x64/, YoAI.app
@@ -44,7 +44,8 @@ as a directory that runs on its own.
 
 Settings, each read from .env at the repository root -- see .env.example --
 or the environment, .env winning:
-  VS_DIR            Windows: Visual Studio install root
+  VS_DIR            Windows: Visual Studio install root (default: the newest
+                    under Program Files)
   NINJA             Windows: ninja.exe (default: the one Visual Studio bundles)
   VCPKG_ROOT        vcpkg checkout, for curl and OpenSSL (default:
                     ../../third/vcpkg, cloned on the first run at vcpkg.json's
@@ -431,7 +432,7 @@ def qtts_sdk(gen):
     # that collapses the DAC decoder's snake activation into one kernel.
     # llama's ggml has no such fusion, so those five ops run unfused -- same
     # output, some unknown amount slower, in the codec stage that is already
-    # 45% of the bill. design/voice.md has the symbol tables.
+    # 45% of the bill. docs/voice.md has the symbol tables.
     ggml = b.env("LLAMA_SRC", b.third_dir("llama.cpp"))
     if not os.path.isfile(os.path.join(ggml, "ggml", "CMakeLists.txt")):
         fail("qtts compiles llama.cpp's ggml, and there is none at %s." % os.path.join(ggml, "ggml"),

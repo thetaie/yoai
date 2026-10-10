@@ -20,7 +20,14 @@ import {
   modelId,
   modelLabel
 } from '@shared/provider'
-import type { ModelLoadState, ReaderStatus, OmniStatus, TtsDownload, TtsStatus } from '@shared/api'
+import type {
+  ChatSettings,
+  ModelLoadState,
+  ReaderStatus,
+  OmniStatus,
+  TtsDownload,
+  TtsStatus
+} from '@shared/api'
 import type { CoreStatus, InterfacePrefs } from '@shared/store'
 import { FAMILY_LABEL, S } from '../strings'
 import * as tts from '../tts'
@@ -79,7 +86,9 @@ export function Settings({
   const [addOpen, setAddOpen] = useState(false)
   /** How each on-device model's automatic preload went, by model id. */
   const [loadStates, setLoadStates] = useState<Record<string, ModelLoadState>>({})
-  const [prompt, setPrompt] = useState<string | null>(null)
+  const [prompt, setPrompt] = useState<ChatSettings | null>(null)
+  /** Bumped by a reset, which remounts the prompt box with the default in it. */
+  const [promptRev, setPromptRev] = useState(0)
   const [ttsStatus, setTtsStatus] = useState<TtsStatus | null>(null)
   const [download, setDownload] = useState<TtsDownload | null>(null)
   /** Bumped when a download is started here, which starts following it. */
@@ -150,7 +159,7 @@ export function Settings({
 
   useEffect(() => {
     void (async () => {
-      setPrompt((await window.yoai.chat.settings()).systemPrompt)
+      setPrompt(await window.yoai.chat.settings())
     })()
   }, [])
 
@@ -251,8 +260,16 @@ export function Settings({
   }
 
   const savePrompt = async (text: string): Promise<void> => {
-    const next = await window.yoai.chat.setSettings({ systemPrompt: text })
-    setPrompt(next.systemPrompt)
+    // Left as it was: nothing to store, and nothing for the model to warm again.
+    if (prompt !== null && text === prompt.systemPrompt) {
+      return
+    }
+    setPrompt(await window.yoai.chat.setSettings({ systemPrompt: text }))
+  }
+
+  const resetPrompt = async (): Promise<void> => {
+    setPrompt(await window.yoai.chat.setSettings({ systemPrompt: null }))
+    setPromptRev((n) => n + 1)
   }
 
   const setSeed = async (raw: string): Promise<void> => {
@@ -604,14 +621,27 @@ export function Settings({
                   that round-trips to disk on every keystroke fights the cursor. */}
               {prompt !== null && (
                 <textarea
+                  key={promptRev}
                   className="control"
                   rows={4}
-                  defaultValue={prompt}
+                  defaultValue={prompt.systemPrompt}
                   placeholder={S.settingsPromptHint}
                   onBlur={(e) => void savePrompt(e.target.value)}
                 />
               )}
             </div>
+            {prompt !== null && (
+              <div className="row" style={{ padding: 0, marginTop: 8, gap: 8 }}>
+                <span className="field-note">
+                  {prompt.custom ? S.settingsPromptCustom : S.settingsPromptDefault}
+                </span>
+                {prompt.custom && (
+                  <button className="btn" onClick={() => void resetPrompt()}>
+                    {S.settingsPromptReset}
+                  </button>
+                )}
+              </div>
+            )}
           </section>
 
           {/*------------------------------------------------------------------*/}

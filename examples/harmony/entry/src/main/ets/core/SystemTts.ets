@@ -1,7 +1,7 @@
 /**
  * Speaking, through the platform rather than a model.
  *
- * design/voice.md settles why this and not the omni Talker: on this device the
+ * docs/voice.md settles why this and not the omni Talker: on this device the
  * Talker runs at 3.7x real time, so ten seconds of reply costs thirty-seven
  * seconds of the phone's whole attention, and streaming cannot rescue a ratio
  * above 1 -- it only moves the first word earlier and leaves the gaps. The

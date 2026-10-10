@@ -12,11 +12,13 @@
 
 #include "yoai.h"
 
+#include "llm/chat/annotations.hpp"
 #include "llm/chat/chat.hpp"
 #include "llm/chat/local.hpp"
 #include "llm/chat/mnn.hpp"
 #include "llm/chat/openai.hpp"
 #include "llm/chat/types.hpp"
+#include "llm/prompt/prompts.hpp"
 #include "utils/bundle.hpp"
 #include "utils/http.hpp"
 #include "utils/log.hpp"
@@ -247,6 +249,27 @@ void apply_local_options(const char* options_json, LocalOptions* opt) {
 
 //------------------------------------------------------------------------------
 
+// A message's "annotations" object, read field by field. A field of the wrong
+// type is ignored like a missing one, for the same reason a malformed message is
+// skipped below: a bad annotation should cost the line, not the turn.
+void parse_annotations(const rapidjson::Value& v, yoai::llm::Annotations* a) {
+    if (!v.IsObject()) return;
+    if (v.HasMember("time") && v["time"].IsNumber()) {
+        a->time_ms = v["time"].IsInt64() ? v["time"].GetInt64()
+                                         : static_cast<std::int64_t>(v["time"].GetDouble());
+    }
+    if (v.HasMember("utcOffset") && v["utcOffset"].IsInt()) {
+        a->utc_offset = v["utcOffset"].GetInt();
+    }
+    if (v.HasMember("timezone") && v["timezone"].IsString()) {
+        a->timezone.assign(v["timezone"].GetString(), v["timezone"].GetStringLength());
+    }
+    if (v.HasMember("arousal") && v["arousal"].IsNumber()) {
+        a->has_arousal = true;
+        a->arousal     = static_cast<float>(v["arousal"].GetDouble());
+    }
+}
+
 // Parse the host's transcript. An entry missing role or content is SKIPPED
 // rather than failing the turn: one malformed row out of fifty should cost the
 // user that row, not their message. Returns false only when the argument is not
@@ -263,6 +286,7 @@ bool parse_messages(const char* json, std::vector<ChatMessage>* out) {
         ChatMessage msg;
         msg.role.assign(m["role"].GetString(), m["role"].GetStringLength());
         msg.content.assign(m["content"].GetString(), m["content"].GetStringLength());
+        if (m.HasMember("annotations")) parse_annotations(m["annotations"], &msg.annotations);
         out->push_back(std::move(msg));
     }
     return true;
@@ -801,7 +825,7 @@ extern "C" const char* yoai_memory_bandwidth(int threads, int mib, int passes) {
     w.Key("passes");      w.Int(m.passes);
     w.Key("seconds");     w.Double(m.seconds);
     // Decimal GB, matching the 19.5 this is here to check. Mixing GB and GiB is
-    // a silent 7% and has already produced one wrong table in design/voice.md.
+    // a silent 7% and has already produced one wrong table in docs/voice.md.
     w.Key("gbPerSecond"); w.Double(m.gb_per_s);
     w.EndObject();
 
@@ -872,6 +896,137 @@ extern "C" int yoai_chat(const char* provider_id,
 
     const bool ok = chat->ainvoke(messages, system, forward, yoai::llm::UserContext(), req);
     return ok ? 0 : 1;
+}
+
+extern "C" const char* yoai_chat_preview(const char* messages_json) {
+    if (blank(messages_json)) return nullptr;
+    std::vector<ChatMessage> messages;
+    if (!parse_messages(messages_json, &messages)) return nullptr;
+    const std::vector<ChatMessage> sent = yoai::llm::with_annotation_text(messages);
+
+    rapidjson::StringBuffer buf;
+    rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+    w.StartArray();
+    for (std::size_t i = 0; i < sent.size(); ++i) {
+        w.StartObject();
+        w.Key("role");
+        w.String(sent[i].role.c_str(), static_cast<rapidjson::SizeType>(sent[i].role.size()));
+        w.Key("content");
+        w.String(sent[i].content.c_str(), static_cast<rapidjson::SizeType>(sent[i].content.size()));
+        w.EndObject();
+    }
+    w.EndArray();
+
+    static thread_local std::string out;
+    out = buf.GetString();
+    return out.c_str();
+}
+
+//------------------------------------------------------------------------------
+// Prompts
+//------------------------------------------------------------------------------
+
+namespace {
+
+using yoai::llm::Prompt;
+using yoai::llm::Prompts;
+
+std::string& prompt_error() {
+    static thread_local std::string e;
+    return e;
+}
+
+}  // namespace
+
+extern "C" const char* yoai_prompts(void) {
+    const std::vector<Prompt> all = Prompts::instance().list();
+
+    rapidjson::StringBuffer buf;
+    rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+    w.StartArray();
+    for (std::size_t i = 0; i < all.size(); ++i) {
+        const Prompt& p = all[i];
+        w.StartObject();
+        w.Key("name");
+        w.String(p.name.c_str(), static_cast<rapidjson::SizeType>(p.name.size()));
+        w.Key("description");
+        w.String(p.description.c_str(), static_cast<rapidjson::SizeType>(p.description.size()));
+        w.Key("arguments");
+        w.StartArray();
+        for (std::size_t j = 0; j < p.arguments.size(); ++j) {
+            const yoai::llm::PromptArgument& a = p.arguments[j];
+            w.StartObject();
+            w.Key("name");
+            w.String(a.name.c_str(), static_cast<rapidjson::SizeType>(a.name.size()));
+            w.Key("description");
+            w.String(a.description.c_str(), static_cast<rapidjson::SizeType>(a.description.size()));
+            w.Key("required");
+            w.Bool(a.required);
+            w.EndObject();
+        }
+        w.EndArray();
+        w.Key("text");
+        w.String(p.text.c_str(), static_cast<rapidjson::SizeType>(p.text.size()));
+        w.Key("grammar");
+        w.String(p.grammar.c_str(), static_cast<rapidjson::SizeType>(p.grammar.size()));
+        w.Key("overridden");
+        w.Bool(p.overridden);
+        w.EndObject();
+    }
+    w.EndArray();
+
+    static thread_local std::string out;
+    out = buf.GetString();
+    return out.c_str();
+}
+
+extern "C" const char* yoai_prompt_get(const char* name, const char* args_json) {
+    std::string& err = prompt_error();
+    err.clear();
+    if (blank(name)) {
+        err = "no prompt name given";
+        return nullptr;
+    }
+
+    std::map<std::string, std::string> args;
+    if (!blank(args_json)) {
+        rapidjson::Document doc;
+        doc.Parse(args_json);
+        if (doc.HasParseError() || !doc.IsObject()) {
+            err = "arguments must be a JSON object";
+            return nullptr;
+        }
+        for (rapidjson::Value::ConstMemberIterator m = doc.MemberBegin(); m != doc.MemberEnd(); ++m) {
+            if (!m->value.IsString()) {
+                err = std::string("argument \"") + m->name.GetString() + "\" is not a string";
+                return nullptr;
+            }
+            args[std::string(m->name.GetString(), m->name.GetStringLength())] =
+                std::string(m->value.GetString(), m->value.GetStringLength());
+        }
+    }
+
+    static thread_local std::string out;
+    if (!Prompts::instance().render(name, args, &out, &err)) return nullptr;
+    return out.c_str();
+}
+
+extern "C" int yoai_prompt_set(const char* name, const char* text) {
+    if (blank(name)) return 1;
+    Prompts& p = Prompts::instance();
+    const bool ok = (text == nullptr) ? p.reset(name) : p.set_text(name, text);
+    return ok ? 0 : 1;
+}
+
+extern "C" const char* yoai_prompt_turn_system(const char* base, int reading) {
+    static thread_local std::string out;
+    out = base == nullptr ? yoai::llm::default_turn_system_prompt(reading != 0)
+                          : yoai::llm::turn_system_prompt(std::string(base), reading != 0);
+    return out.c_str();
+}
+
+extern "C" const char* yoai_prompt_last_error(void) {
+    return prompt_error().c_str();
 }
 
 //------------------------------------------------------------------------------

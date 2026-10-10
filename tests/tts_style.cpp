@@ -20,7 +20,7 @@
 //
 // CustomVoice can be asked HOW to read -- 语气轻快，开心 -- but only as one of
 // its built-in speakers. Base reads as anyone a recording gives it and takes no
-// instruction at all. design/voice.md ("Emotion and pace have no vector") names
+// instruction at all. docs/voice.md ("Emotion and pace have no vector") names
 // two ways a style might still reach Base; this measures both, and a third that
 // follows from the first:
 //

@@ -8,7 +8,6 @@
  */
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react'
 import type { ChatMessage, MessagePart, Usage } from '@shared/chat'
-import { turnSystemPrompt } from '@shared/prompts'
 import { ModelConfig, modelLabel } from '@shared/provider'
 import {
   DEFAULT_PREFS,
@@ -259,13 +258,12 @@ export function App(): JSX.Element {
     // Unconditional: stopping when nothing is speaking costs an atomic flag.
     void tts.stop()
 
-    // The system prompt is read HERE, not held in state, for the reason the
-    // speak flag taught: a value captured at startup is wrong the moment the
-    // user changes it, and the settings screen is where they change it. One
-    // extra round trip against a reply that takes seconds.
+    // The system prompt is not read here: the main process adds it when the
+    // turn starts, from the settings as they stand then, so a change on the
+    // settings screen applies to the very next message.
     //
-    // Everything the user can see has already been updated above, so the await
-    // delays the request and not the interface.
+    // Everything the user can see has already been updated above, so the awaits
+    // below delay the request and not the interface.
     void (async () => {
       // Omni answers INSTEAD of the chain when it is switched on: one model
       // that hears, thinks and speaks, so there is no turn to stream and no
@@ -321,8 +319,6 @@ export function App(): JSX.Element {
         return
       }
 
-      const { systemPrompt } = await window.yoai.chat.settings()
-
       // The reading lane, decided BEFORE the turn starts because it has to be
       // open before the first token arrives. Asked fresh for the same reason
       // the speak flag is: the models load in the background.
@@ -330,12 +326,11 @@ export function App(): JSX.Element {
       if (reading) {
         await reader.begin()
       }
-      // A reply that will be heard is asked to be written for the ear. Built
-      // by the same function the local model's warm-up uses, so the prompt
-      // computed ahead of this turn is the one it sends.
-      const prompt = turnSystemPrompt(systemPrompt, reading)
 
-      cancelerRef.current = runTurn(activeId, withUser, prompt, {
+      // A reply that will be heard is asked to be written for the ear. The
+      // main process builds that prompt the way the local model's warm-up
+      // does, so the prompt computed ahead of this turn is the one it sends.
+      cancelerRef.current = runTurn(activeId, withUser, reading, {
         onDelta: (t) => {
           textRef.current += t
           setStreamText(textRef.current)

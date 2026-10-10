@@ -7,7 +7,7 @@
 // the whole directory has to reach the device intact. Asking somebody to copy
 // twenty files onto a phone and keep the layout is asking them to fail.
 //
-// So: pack it into one file on a workstation (design/pack-mnn-model.py), copy
+// So: pack it into one file on a workstation (tools/pack-mnn-model.py), copy
 // that one file across, and extract it into the app's own storage here.
 //
 // **Not compressed, on purpose.** The payload is quantized weights -- int4 and

@@ -13,7 +13,6 @@
  */
 import { existsSync } from 'node:fs'
 import type { ModelLoadState } from '../shared/api'
-import { turnSystemPrompt } from '../shared/prompts'
 import { ModelConfig, isLocal } from '../shared/provider'
 import * as chat from './chat'
 import { core } from './core'
@@ -261,7 +260,7 @@ export function loadStates(): Record<string, ModelLoadState> {
 
 /**
  * Compute the active on-device model's prompt front now: the system prompt the
- * next turn will be sent with, as the page builds it (shared/prompts.ts).
+ * next turn will be sent with, from chat.turnPrompt as the turn takes it.
  *
  * The first turn of a conversation otherwise prefills it while someone waits --
  * measured at 3.5 s for a 236-token prompt, before the reply's first word, when
@@ -280,15 +279,15 @@ export function warmActive(): void {
     return
   }
   const st = reader.status()
-  const prompt = turnSystemPrompt(chat.get().systemPrompt, st.available && st.loaded && st.enabled)
   try {
+    const prompt = chat.turnPrompt(st.available && st.loaded && st.enabled)
     core().nativeLocalWarm(cfg.id, prompt, (type, content) => {
       if (type !== 'end') {
         console.warn(`[yoai] ${cfg.id}: the prompt was not warmed: ${content}`)
       }
     })
   } catch (e) {
-    // An addon built before this call existed. The turn prefills as it always
+    // An addon built before these calls existed. The turn prefills as it always
     // did; nothing is lost but the head start.
     console.warn(`[yoai] the prompt was not warmed: ${e instanceof Error ? e.message : String(e)}`)
   }

@@ -25,7 +25,7 @@
  *
  * So the platform's ceiling for a third-party app IS the broadcast timbre. The
  * voices offered in the assistant's own settings are not reachable from either
- * API; they belong to the assistant. That makes design/voice.md's comparison
+ * API; they belong to the assistant. That makes docs/voice.md's comparison
  * against omni a fair one rather than a configuration mistake, which is the
  * opposite of what this file was written to check.
  *

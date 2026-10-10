@@ -15,6 +15,7 @@ import { basename, dirname } from 'node:path'
 import {
   CHANNELS,
   ChatSettings,
+  ChatSettingsPatch,
   OmniStatus,
   PickedModel,
   ReaderStatus,
@@ -212,15 +213,18 @@ export function registerHandlers(): void {
   //----------------------------------------------------------------------------
 
   handle<[], ChatSettings>(CHANNELS.chatSettingsGet, () => chat.get())
-  handle<[Partial<ChatSettings>], ChatSettings>(CHANNELS.chatSettingsSet, (patch) => {
-    const next = chat.set(patch ?? {})
+  handle<[ChatSettingsPatch], ChatSettings>(CHANNELS.chatSettingsSet, (patch) => {
+    // Validated: null is a reset and a string is a prompt; anything else from
+    // the page leaves the stored prompt alone.
+    const p = patch?.systemPrompt
+    const next = chat.set(p === null || typeof p === 'string' ? { systemPrompt: p } : {})
     models.warmActive()   // the front the next turn shares has just changed
     return next
   })
 
   ipcMain.handle(
     CHANNELS.chatStart,
-    (event, providerId: string, messages: WireMessage[], systemPrompt: string) => {
+    (event, providerId: string, messages: WireMessage[], reading: boolean) => {
       const sender = event.sender
       const wire = (Array.isArray(messages) ? messages : []).map((m) => ({
         role: String(m.role),
@@ -246,7 +250,7 @@ export function registerHandlers(): void {
       turnId = core().nativeChat(
         String(providerId),
         JSON.stringify(wire),
-        String(systemPrompt ?? ''),
+        chat.turnPrompt(reading === true),
         '',
         (type, content) => {
           if (sender.isDestroyed()) {

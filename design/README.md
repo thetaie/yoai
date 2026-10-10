@@ -1,10 +1,9 @@
 # Design
 
-Design source of record, kept outside `examples/harmony/` so it serves the Android app
-too when that arrives.
+Design source of record, kept outside `examples/` because every host there
+draws on it.
 
-Two kinds of file live here, and they are read for different reasons. **What
-the design is** — settled, and the app should match it:
+**What the design is** — settled, and the app should match it:
 
 | File | What |
 |---|---|
@@ -14,27 +13,21 @@ the design is** — settled, and the app should match it:
 | [i18n-status.md](i18n-status.md) | Which of the eleven languages are written, and what is left |
 | [ui/](ui/) | The upstream review canvas itself — see below |
 
-**What was decided and why** — the record of an argument, including what was
-tried and rejected, so it is not argued twice:
-
-| File | What |
-|---|---|
-| [embedding.md](embedding.md) | Which embedding model, at what quantization, and how the vectors are stored |
-| [voice.md](voice.md) | Recognition outside the model, what is read from the voice and by what, and why not one omni pass |
-
 They are not numbered because they are not a sequence — `logo.md` does not come
-before `icons.md`. This table is the index; git is the history.
+before `icons.md`. This table is the index; git is the history. What was decided
+outside the interface, and why — speech, embedding — is in [docs/](../docs/).
 
-Five scripts here write into the apps, and are the only thing that should:
-`make-arkts-palettes.py` generates the HarmonyOS palette table,
+Five scripts in [scripts/](scripts/) write into the apps, and are the only thing
+that should: `make-arkts-palettes.py` generates the HarmonyOS palette table,
 `make-compose-palettes.py` the Android one, `make-css-palettes.py` the desktop
 client's stylesheet of the same colors, `make-harmony-icons.py` the icon assets,
 `sync-locales.py` the untranslated locale directories and the status table
 above. Their outputs are committed, so nothing here is needed to build; they are
-needed to *change* any of it.
+needed to *change* any of it. Scripts that work on model files are in
+[tools/](../tools/).
 
-The three palette generators share [palette_tokens.py](palette_tokens.py), which
-is not a generator and emits nothing: it holds the rename table, the field
+The three palette generators share [palette_tokens.py](scripts/palette_tokens.py),
+which is not a generator and emits nothing: it holds the rename table, the field
 order, and the invariant checks — that every palette carries all 19 tokens, that
 each family is one light and one dark, that a new palette has been registered.
 It exists because a token that means `bg_page` on the phone and something else

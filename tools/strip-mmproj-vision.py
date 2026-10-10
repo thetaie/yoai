@@ -19,10 +19,10 @@ What it does:
 
 Usage:
 
-    python design/strip-mmproj-vision.py <in.gguf> <out.gguf>
+    python tools/strip-mmproj-vision.py <in.gguf> <out.gguf>
 
 This rewrites metadata, it does not requantize: every tensor kept is copied
-byte for byte at its original type. That matters for the reason design/voice.md
+byte for byte at its original type. That matters for the reason docs/voice.md
 gives at length -- the audio encoder is the instrument the voice work measures
 with, and this project has already been bitten once by quantizing one and
 getting a confident wrong answer that the obvious check passed.

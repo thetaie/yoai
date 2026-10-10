@@ -67,7 +67,8 @@ function windowBackground(): string {
   const want = dark ? 'dark' : 'light'
 
   // A palette key contains its family name -- daylight-arctic, midnight-arctic,
-  // quiet-day -- which is the same rule design/make-css-palettes.py groups by.
+  // quiet-day -- which is the same rule design/scripts/make-css-palettes.py
+  // groups by.
   const themes = Object.entries(palettes.themes)
   const pick =
     themes.find(([key, t]) => key.includes(p.paletteFamily) && t.mode === want) ??

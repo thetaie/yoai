@@ -59,6 +59,9 @@ export const S = {
   settingsPromptIntro:
     '每一轮对话都会带上这段话，用来交代助手的身份、语气和边界。全局生效，对本机模型和远程模型一样。留空则不发送。',
   settingsPromptHint: '例：你是一个简洁、直接的助手，回答用中文。',
+  settingsPromptDefault: '当前为内置默认提示词，随版本更新。',
+  settingsPromptCustom: '当前为自定义提示词。',
+  settingsPromptReset: '恢复默认',
 
   // Speech output
   settingsTts: '语音输出',

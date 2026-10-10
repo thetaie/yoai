@@ -158,10 +158,11 @@ its nvcc refuses any other:
 Installer show it. 17.10 moved MSVC from 19.3x to 19.40, past what CUDA 12.3
 and earlier accept.
 
-The build compiles with the Visual Studio at `VS_DIR`, 2026 by default, so with
-an older CUDA it stops while CMake checks the CUDA compiler, on
-`unsupported Microsoft Visual Studio version!`. Point `VS_DIR` in `.env` at a
-Visual Studio 2022 install, which can sit beside 2026, or install a newer CUDA.
+The build compiles with the newest Visual Studio under Program Files, or the
+one at `VS_DIR`. With 2026 picked and an older CUDA, it stops while CMake
+checks the CUDA compiler, on `unsupported Microsoft Visual Studio version!`.
+Point `VS_DIR` in `.env` at a Visual Studio 2022 install, which can sit beside
+2026, or install a newer CUDA.
 NVIDIA's CUDA Installation Guide for Windows lists the range of each release.
 
 **A package built with CUDA needs CUDA on every machine it runs on.**
@@ -224,7 +225,7 @@ and all three are under 设置:
 | `qwen-talker-1.7b-customvoice-Q4_K_M.gguf` | 1.18 GB | speech, 内置说话人（CustomVoice） | 语音输出 |
 | `qwen-tokenizer-12hz-Q8_0.gguf` | 291 MB | speech, either mode | 语音输出 |
 
-The 2B rather than the 4B: [design/voice.md](../../design/voice.md) measured
+The 2B rather than the 4B: [docs/voice.md](../../docs/voice.md) measured
 Qwen3.5-2B at 14.0 tok/s and the 4B at 6.70 tok/s, too slow for a reply.
 Speech needs the talker of the chosen mode plus the tokenizer; the default mode
 is Base, so 1.5 GB to start. The reasons for the speech files' quantizations
@@ -305,7 +306,7 @@ can be kept here.
 ## Colours
 
 From [design/palettes.json](../../design/palettes.json), through
-`design/make-css-palettes.py`, which writes
+`design/scripts/make-css-palettes.py`, which writes
 `src/renderer/src/palettes.css`. Do not hand-edit that file, and do not take a
 colour from anywhere else — see [design/README.md](../../design/README.md) for what
 goes wrong when someone reads one off the canvas instead.

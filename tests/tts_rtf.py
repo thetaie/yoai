@@ -21,9 +21,9 @@ Usage: python tests/tts_rtf.py --models <dir> [--build <dir>] [--backend <name> 
   --out      where each run's WAVs and log go (default: build/tts-rtf/)
 
 It prints one line per run as it goes, then a table in the shape of
-src/voice/slides.md's RTF slide, and the raw figures for design/voice.md.
+docs/slides.md's RTF slide, and the raw figures for docs/voice.md.
 
-The protocol is design/voice.md's "All four talkers, one session": a warm-up
+The protocol is docs/voice.md's "All four talkers, one session": a warm-up
 sentence that is not counted, then three passages, each read as one say()
 (yoai-tts-sweep --whole), at the desktop's reading settings -- seed 101,
 talker temperature 1.3, the streaming text layout, a 2-frame eos hold. Base

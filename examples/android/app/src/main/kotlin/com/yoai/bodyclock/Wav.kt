@@ -9,7 +9,7 @@ import java.nio.ByteOrder
  *
  * Deliberately narrow: 16-bit PCM, and the channel count is folded to mono by
  * averaging. That is what the recognition lane takes and what every clip in
- * design/voice.md is. A file this cannot read is a wrong file rather than a
+ * docs/voice.md is. A file this cannot read is a wrong file rather than a
  * missing feature, so it says which field disagreed instead of guessing.
  */
 object Wav {

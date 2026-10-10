@@ -79,7 +79,8 @@ sit in different directories and share only `Backend`'s constructor.
 | File | What it does | Engine | Build flag |
 |---|---|---|---|
 | [chat](chat/chat.hpp) | `Chat`: a streamed conversation turn | none | always built |
-| [types](chat/types.hpp) | `ChatMessage`, `EventHandler`, `UserContext`, `RequestOptions`: what a turn is made of | none | always built |
+| [types](chat/types.hpp) | `ChatMessage`, `Annotations`, `EventHandler`, `UserContext`, `RequestOptions`: what a turn is made of | none | always built |
+| [annotations](chat/annotations.hpp) | `with_annotation_text()`: a message's annotations -- its time, how it sounded -- written as one bracketed line in front of a user message. Every client calls it before rendering its prompt; the time appears only when it first does, the date or zone changes, or 30 minutes pass; a message renders the same however many follow it | none | always built |
 | [event](chat/event.hpp) | `Event`, `EventType`, `CostStatistics`: what comes back out | none | always built |
 | [local](chat/local.hpp) | `LocalClient`: chat on a GGUF, with KV-cache reuse across turns, `<think>` splitting and GBNF grammars | llama.cpp | `YOAI_ONDEVICE_LLM` |
 | [mnn](chat/mnn.hpp) | `MnnClient`: chat on an MNN export, with MNN's prompt cache across turns and the same `<think>` splitting. No grammar; threads apply at load; an omni export chats with its Talker off | MNN | `YOAI_MNN` |
@@ -92,6 +93,12 @@ sit in different directories and share only `Backend`'s constructor.
 |---|---|---|---|
 | [embedder](embed/embedder.hpp) | `Embedder`, `EmbedKind`: text to a unit vector | none | always built |
 | [local](embed/local.hpp) | `LocalEmbedder`: embeddings from a GGUF that llama.cpp pools; written for Qwen3-Embedding-0.6B (1024 dimensions, last-token pooling) | llama.cpp | `YOAI_ONDEVICE_LLM` |
+
+### prompt/ -- what a model is told
+
+| File | What it does | Engine | Build flag |
+|---|---|---|---|
+| [prompts](prompt/prompts.hpp) | `Prompts`, `Prompt`, `turn_system_prompt()`: the text the core and its hosts send to a model -- the default system prompt, the spoken-style instruction, the text-axes scoring prompt and its grammar, the two parts of an annotation line -- each with a compiled-in default and a run-time replacement. Shaped like an MCP prompt: a name, a description, declared arguments, `{{argument}}` placeholders | none | always built |
 
 ## Threads and sharing
 
@@ -135,3 +142,15 @@ still differs by kind: `yoai_provider_set` registers a remote model and
 `yoai_local_set` an on-device one, on whichever engine the path needs.
 `yoai_local_load`, `yoai_local_set_threads`
 and `yoai_local_forget` refuse a remote id. Embedding has no C entry points yet.
+
+A message in `yoai_chat`'s JSON may carry `annotations` (`time`, `utcOffset`,
+`timezone`, `arousal`). The host keeps them as data and decides what its screen
+shows; the core writes them into the text the model reads, and
+`yoai_chat_preview` returns that text without running a turn.
+
+`yoai_prompts` lists the prompt table, `yoai_prompt_get` fills one prompt's
+placeholders, `yoai_prompt_set` replaces or resets a text, and
+`yoai_prompt_turn_system` builds the system prompt a turn and its warm-up both
+send, from the user's own prompt or, given NULL, the core's default. A host
+passes what they return to `yoai_chat` and `yoai_local_warm`; the chat clients
+keep no copy of a default and never read the table themselves.

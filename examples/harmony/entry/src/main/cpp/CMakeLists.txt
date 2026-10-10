@@ -98,7 +98,7 @@ endif()
 # capability has to be wanted. Unlike llama, whose presence is the switch, this
 # one stays off unless examples/harmony/build.py mnn has been run -- it is 3.8 GB of
 # weights and a second quantization story bought for one capability whose cost
-# has not been measured on a phone. See design/voice.md.
+# has not been measured on a phone. See docs/voice.md.
 # Retired. src/voice/omni.cpp moved to src/voice/attic/ and is in no target, so
 # an SDK found here would only change which rapidjson the JSON files compile
 # against and link a framework nothing calls. Turning the lane back on means

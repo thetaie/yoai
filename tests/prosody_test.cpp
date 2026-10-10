@@ -1,13 +1,13 @@
 // The within-recording arousal profile, exercised on a workstation.
 //
 // No model and no GGUF: this half of the voice work is signal processing, which
-// is the whole point of it -- see design/voice.md. So this runs anywhere the
+// is the whole point of it -- see docs/voice.md. So this runs anywhere the
 // core builds.
 //
 //     build/yoai-prosody-test <audio.wav> [more.wav ...]
 //
 // The table it prints is meant to be compared, column by column, against the
-// scratchpad Python that produced the result design/voice.md records. That
+// scratchpad Python that produced the result docs/voice.md records. That
 // comparison is the only check available here: what a recording means is not a
 // fact this file knows, but "does the port agree with the thing that was
 // validated" is, and the F0 and z columns are scale-invariant so the two agree

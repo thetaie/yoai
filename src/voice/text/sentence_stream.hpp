@@ -77,7 +77,7 @@ struct SplitOptions {
     // at least this many characters, not for this many characters.
     //
     // So its price depends on the lane writing the text, not on the one
-    // speaking it. The on-device model decodes at 14 tok/s (design/voice.md),
+    // speaking it. The on-device model decodes at 14 tok/s (docs/voice.md),
     // where eighteen further characters is on the order of a second; a remote
     // model is several times faster and it is a fraction of that. Neither is
     // measured by Reader::read(), which is handed text that already exists --

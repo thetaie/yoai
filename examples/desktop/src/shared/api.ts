@@ -235,8 +235,18 @@ export interface TtsEvent {
  * under.
  */
 export interface ChatSettings {
-  /** Prepended to every turn as the system message. '' sends none at all. */
+  /**
+   * Prepended to every turn as the system message: the user's own, or the
+   * core's default while `custom` is false. '' sends none at all.
+   */
   systemPrompt: string
+  /** The user has written their own; false while the core's default is in force. */
+  custom: boolean
+}
+
+/** A change to ChatSettings. A systemPrompt of null goes back to the core's default. */
+export interface ChatSettingsPatch {
+  systemPrompt?: string | null
 }
 
 /** What the end-to-end lane can do right now. */
@@ -377,14 +387,16 @@ export interface YoaiApi {
   }
 
   chat: {
+    /** The global system prompt, as the settings screen shows it. */
+    settings(): Promise<ChatSettings>
+    setSettings(patch: ChatSettingsPatch): Promise<ChatSettings>
     /**
      * Start one turn and resolve to its id. `messages` is the WHOLE transcript
      * including the user message just sent -- the core keeps no session state.
+     * The main process adds the system prompt as the settings stand now, with
+     * the spoken-style paragraph when `reading` says the reply will be heard.
      */
-    /** The global system prompt, read fresh at send time. */
-    settings(): Promise<ChatSettings>
-    setSettings(patch: Partial<ChatSettings>): Promise<ChatSettings>
-    start(providerId: string, messages: WireMessage[], systemPrompt: string): Promise<number>
+    start(providerId: string, messages: WireMessage[], reading: boolean): Promise<number>
     cancel(turnId: number): Promise<void>
     /**
      * Start a new conversation, as far as the engines are concerned: drop what
@@ -453,7 +465,7 @@ export interface YoaiApi {
    * Omni: one model that hears, thinks and speaks.
    *
    * Not a replacement for the chain -- it is the shape the chain cannot be.
-   * Costly enough that design/voice.md argues over whether it is affordable;
+   * Costly enough that docs/voice.md argues over whether it is affordable;
    * these calls exist so the question can be asked on real hardware.
    */
   omni: {

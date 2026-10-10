@@ -518,7 +518,7 @@ void describe_pieces(const std::vector<float>& pcm, const std::vector<std::size_
     }
 }
 
-// The voice, measured the way design/voice.md measures a recording.
+// The voice, measured the way docs/voice.md measures a recording.
 //
 // The pause cut rather than the sentence boundaries, deliberately: it is the
 // unit this file's arithmetic was validated on, and on a read passage the model

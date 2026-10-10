@@ -33,7 +33,7 @@ interface KnownFile {
  * What a download fetches for each slot.
  *
  * 1.7B at Q4_K_M for both talkers: the Base one is what the desktop reads with
- * in design/voice.md, and the 0.6B Base at Q4_K_M misreads characters there
+ * in docs/voice.md, and the 0.6B Base at Q4_K_M misreads characters there
  * (调暗 as diào). The tokenizer at Q8_0, the one tests/tts_rtf.py loads. Sizes
  * and hashes are the repository's own at REVISION, and match the files these
  * measurements were taken with.

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Usage: python build.py [clean] [asr] [llama] [tts] [server] [cosyvoice]
 
-Builds the core library, the desktop tools in cli/ and the tests in tests/,
-into build/: configures if needed, then builds. This is not the desktop app
--- that is examples/desktop/build.py.
+Builds the core library, the same core as a shared library (yoai.dll,
+libyoai.so or libyoai.dylib, for examples/python/), the desktop tools in cli/
+and the tests in tests/, into build/: configures if needed, then builds. This
+is not the desktop app -- that is examples/desktop/build.py.
 
   asr        also compile speech recognition in. Needs a llama.cpp checkout
              for ggml; see LLAMA_SRC
@@ -30,7 +31,8 @@ skipped is named. llama, server and cosyvoice are built only when named.
 
 Settings, each read from .env at the repository root -- see .env.example --
 or the environment, .env winning:
-  VS_DIR            Windows: Visual Studio install root
+  VS_DIR            Windows: Visual Studio install root (default: the newest
+                    under Program Files)
   NINJA             Windows: ninja.exe (default: the one Visual Studio bundles)
   VCPKG_ROOT        vcpkg checkout, for curl and OpenSSL (default: third/vcpkg,
                     cloned on the first run at vcpkg.json's builtin-baseline)
@@ -378,12 +380,53 @@ def lib(stem):
 
 
 # --- Toolchains ----------------------------------------------------------------
+# Visual Studio installs into Microsoft Visual Studio\<release>\<edition>, and
+# <release> is the year up to 2022 and the major version from 2026 on (18). The
+# years are mapped to their major version so the two sort together.
+VS_YEARS = {"2017": 15, "2019": 16, "2022": 17}
+VS_EDITIONS = ("Enterprise", "Professional", "Community", "BuildTools")
+
+
+def vs_installs():
+    """Every Visual Studio with the C++ tools in its default location, under
+    Program Files or Program Files (x86): newest release first, and within one
+    release by VS_EDITIONS. One installed anywhere else is found only through
+    VS_DIR."""
+    bases = []
+    # ProgramW6432 first: a 32-bit Python sees ProgramFiles as the (x86) one.
+    for name, default in (("ProgramW6432", ""), ("ProgramFiles", r"C:\Program Files"),
+                          ("ProgramFiles(x86)", r"C:\Program Files (x86)")):
+        base = env(name, default)
+        if base and os.path.normcase(base) not in [os.path.normcase(x) for x in bases]:
+            bases.append(base)
+    found = []
+    for base in bases:
+        for bat in glob.glob(os.path.join(base, "Microsoft Visual Studio", "*", "*",
+                                          "VC", "Auxiliary", "Build", "vcvarsall.bat")):
+            vs_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(bat))))
+            release, edition = vs_dir.split(os.sep)[-2:]
+            major = VS_YEARS.get(release, int(release) if release.isdigit() else 0)
+            rank = VS_EDITIONS.index(edition) if edition in VS_EDITIONS else len(VS_EDITIONS)
+            found.append((-major, rank, vs_dir))
+    return [vs_dir for _, _, vs_dir in sorted(found)]
+
+
 def visual_studio():
     """Windows: take on the environment vcvarsall.bat sets up, as `call
     vcvarsall.bat` did for the batch scripts, and return the ninja to build
-    with. Reads VS_DIR and NINJA."""
-    vs_dir = env("VS_DIR", os.path.join(env("ProgramFiles", r"C:\Program Files"),
-                                        "Microsoft Visual Studio", "18", "Community"))
+    with. Reads VS_DIR and NINJA; without VS_DIR, the first of vs_installs()."""
+    vs_dir = env("VS_DIR")
+    if not vs_dir:
+        installs = vs_installs()
+        if not installs:
+            fail("[build] No Visual Studio with the C++ tools under Program Files.",
+                 "[build] Install it with the Desktop development with C++ workload, or, if it",
+                 "[build] is installed somewhere else, set VS_DIR in .env.")
+        vs_dir = installs[0]
+        say("[build] Visual Studio: %s" % vs_dir)
+        if len(installs) > 1:
+            say("[build]   also found: %s -- VS_DIR in .env picks another"
+                % ", ".join(installs[1:]))
     ninja = env("NINJA", os.path.join(vs_dir, "Common7", "IDE", "CommonExtensions",
                                       "Microsoft", "CMake", "Ninja", "ninja.exe"))
     bat = os.path.join(vs_dir, "VC", "Auxiliary", "Build", "vcvarsall.bat")
@@ -782,6 +825,13 @@ CACHED = (("asr", "YOAI_ASR"), ("llama", "YOAI_ONDEVICE_LLM"), ("tts", "YOAI_QTT
 # needs. The others are built only when named: llama takes twenty minutes,
 # server needs libwebsockets, cosyvoice downloads its own dependencies.
 AUTO = (("asr", ("llama.cpp",)), ("tts", ("qwentts.cpp", "llama.cpp")))
+# Position-independent code for the SDKs, off Windows: their archives go into
+# libyoai.so as well as into the tools, and every archive in a shared object
+# must be built -fPIC. qwentts.cpp does not turn it on for itself, and the link
+# then fails on a thread_local in qwen.cpp; examples/desktop/build.py passes
+# the same for the same reason. The ggml tree is configured only once, so one
+# configured before this needs `clean`.
+PIC = [] if WINDOWS else ["-DCMAKE_POSITION_INDEPENDENT_CODE=ON"]
 
 
 def main(argv):
@@ -933,7 +983,7 @@ def ggml_sdk(gen, with_llama):
 
     fresh_tree(gbuild, src)
     if not configured(gbuild):
-        run(["cmake", "-S", src, "-B", gbuild] + gen + QUIET_THIRD + [
+        run(["cmake", "-S", src, "-B", gbuild] + gen + QUIET_THIRD + PIC + [
             "-DCMAKE_BUILD_TYPE=Release",
             "-DBUILD_SHARED_LIBS=OFF",
             "-DLLAMA_BUILD_TESTS=OFF",
@@ -1039,7 +1089,7 @@ def qtts_sdk(gen):
     sdk = os.path.join(BUILD, "qtts-sdk")
     say("[build] qwentts.cpp from %s, ggml from %s" % (src, os.path.join(ggml, "ggml")))
     fresh_tree(qbuild, src)
-    run(["cmake", "-S", src, "-B", qbuild] + gen + QUIET_THIRD + [
+    run(["cmake", "-S", src, "-B", qbuild] + gen + QUIET_THIRD + PIC + [
         "-DCMAKE_BUILD_TYPE=Release",
         "-DGGML_SOURCE_DIR=" + fwd(ggml) + "/ggml",
         "-DBUILD_SHARED_LIBS=OFF",
@@ -1075,7 +1125,7 @@ def qtts_sdk(gen):
 
 def cosyvoice(gen):
     """CosyVoice3's own command-line tool, for listening against Qwen3-TTS.
-    Linked into nothing -- design/voice.md has why it is not a lane (RTF about
+    Linked into nothing -- docs/voice.md has why it is not a lane (RTF about
     4 on the CPU). It compiles llama.cpp's ggml like everything else. Its CMake
     downloads the latest ICU and ONNX Runtime releases into build/cosyvoice on
     the first configure; those two are not pinned.

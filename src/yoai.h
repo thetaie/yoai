@@ -367,7 +367,7 @@ int yoai_local_warm(const char* id, const char* system_prompt);
 // How fast this machine reads memory, measured WITHOUT a language model.
 //
 // Returns a JSON object -- threads, bytes, passes, seconds, gbPerSecond (in
-// decimal GB, the unit the figures in design/voice.md use) -- owned by the core
+// decimal GB, the unit the figures in docs/voice.md use) -- owned by the core
 // and valid until this thread's next call. NULL if the buffer would not
 // allocate. BLOCKS for tens of milliseconds per call.
 //
@@ -431,6 +431,24 @@ typedef int (*yoai_chat_handler)(const char* event_type,
 //                   The WHOLE transcript, every turn: the core holds no session
 //                   state, which is what lets the host own history (and decide
 //                   what to trim) without two policies disagreeing.
+//
+//                   A message may carry "annotations", what the app knows about
+//                   it besides its words, every field optional:
+//                     "time"       when it was sent, ms since the epoch, UTC
+//                     "utcOffset"  minutes east of UTC there and then (480 for
+//                                  China); read only with "time", default 0
+//                     "timezone"   IANA name, e.g. "Asia/Shanghai"
+//                     "arousal"    -1..1 from prosody, against the speaker's own
+//                                  baseline; omit it when prosody declined
+//                   The core writes them into a short bracketed line in front of
+//                   a user message's content before the model sees it -- the
+//                   time only when it first appears, the date or zone changes,
+//                   or 30 minutes have passed (see src/llm/chat/annotations.hpp).
+//                   "content" stays exactly what was said. Keep the annotations
+//                   in the host's history as data, show them or not as the
+//                   screen likes, and send them back unchanged every turn: the
+//                   same transcript gives the same text, which is what keeps a
+//                   cached prefix valid. yoai_chat_preview shows that text.
 //   system_prompt   may be NULL or empty for none.
 //   grammar         optional GBNF constraining the reply, with `root` as the
 //                   start rule. NULL or empty for an ordinary free-text turn,
@@ -470,6 +488,67 @@ int yoai_chat(const char* provider_id,
               yoai_chat_handler on_event,
               void* user_data);
 
+// What a model would receive for `messages_json` -- the same argument yoai_chat
+// takes -- as '[{"role","content"},...]', with each user message's annotations
+// written into its content. For a debug screen, and for checking a host's
+// annotations without running a turn. Returns NULL when `messages_json` is not
+// a JSON array. Owned by the core, valid until this thread's next call.
+const char* yoai_chat_preview(const char* messages_json);
+
+//------------------------------------------------------------------------------
+// Prompts
+//------------------------------------------------------------------------------
+//
+// The text a host sends to a model on the core's behalf: the assistant's default
+// system prompt, the spoken-style instruction, the text-axes scoring prompt and
+// its grammar. They live in the core -- src/llm/prompt/prompts.hpp -- so no host
+// keeps a copy that drifts from the others. A host fetches them here and passes
+// them to yoai_chat and yoai_local_warm as before.
+//
+// Each has a compiled-in default and a text that can be replaced for the rest of
+// the process, for tuning wording without a rebuild. Nothing is persisted. Every
+// call is safe from any thread and returns at once.
+//
+// A string returned here is owned by the core and stays valid until this
+// thread's next call to the same function -- copy it to keep it.
+
+// Every prompt as a JSON array, in a fixed order:
+//   [{"name","description",
+//     "arguments":[{"name","description","required"}],
+//     "text","grammar","overridden"}, ...]
+// `text` is the current text with its {{argument}} placeholders unfilled;
+// `grammar` is the GBNF its reply must follow, or "" for a prose reply;
+// `overridden` is true while yoai_prompt_set has replaced the default. The
+// shape is MCP's prompts/list plus those three. Never NULL.
+const char* yoai_prompts(void);
+
+// One prompt's text with its placeholders filled from `args_json`, a JSON object
+// of strings ('{"name":"value"}'), or NULL/empty for none. Returns NULL for an
+// unknown name, a required argument missing, or `args_json` that is not an
+// object of strings; the reason is in yoai_prompt_last_error().
+const char* yoai_prompt_get(const char* name, const char* args_json);
+
+// Replace a prompt's text, or pass NULL to go back to the default. Its arguments
+// and grammar do not change. Returns 0, or non-zero for an unknown name.
+int yoai_prompt_set(const char* name, const char* text);
+
+// The system prompt for one turn: `base` with the spoken-style prompt after it
+// when `reading` is non-zero, a blank part left out, and a closing line saying
+// all of it is internal. With nothing before that line the result is "", no
+// system prompt. Pass the same result to yoai_chat and to yoai_local_warm: the
+// warm-up is wasted unless the turn sends the same text to the token, and
+// building it here on both paths is what keeps them equal. Never NULL.
+//
+// `base` is the user's own system prompt, which the host stores. NULL means the
+// user has not written one, and the core's "system" prompt is used -- so a host
+// keeps no copy of the default, and a new default reaches every user who never
+// changed it. "" is a user who cleared it: nothing of theirs is sent, and on a
+// turn that is not read aloud, no system prompt at all.
+const char* yoai_prompt_turn_system(const char* base, int reading);
+
+// Why the last yoai_prompt_get on this thread failed, or "" after a success.
+const char* yoai_prompt_last_error(void);
+
 //------------------------------------------------------------------------------
 // Voice
 //------------------------------------------------------------------------------
@@ -481,7 +560,7 @@ int yoai_chat(const char* provider_id,
 //   - The prosody measurements need neither. They are signal processing, they
 //     run on any build, and they are what "how did this person sound" is read
 //     from -- not from the model's own emotion label, which has no word for
-//     tired, depleted or calm. See design/voice.md.
+//     tired, depleted or calm. See docs/voice.md.
 //
 // So a host that never loads a model still gets the half that matters most.
 
@@ -573,7 +652,7 @@ const char* yoai_voice_analyze(const short* pcm,
 // It is NOT a replacement for anything. Recognition stays with SenseVoice, which
 // is cheap and uniquely supplies the 60 ms alignment the clause cut needs; text
 // stays with llama.cpp and its grammar; prosody is signal processing and needs no
-// engine at all. This lane buys exactly one thing, and design/voice.md argues
+// engine at all. This lane buys exactly one thing, and docs/voice.md argues
 // over whether that one thing is affordable. These entry points exist so the
 // question can be answered on a phone instead of a workstation.
 //
@@ -654,7 +733,7 @@ typedef void (*yoai_omni_text_handler)(const char* text, void* user_data);
 //
 // Returns a JSON object, owned by the core and valid until this thread's next
 // call, or NULL on a bad argument or an engine failure. It carries the reply
-// `text` and the timings the decision in design/voice.md turns on:
+// `text` and the timings the decision in docs/voice.md turns on:
 //
 //   speechRealtime      seconds of computation per second of speech, for the
 //                       TALKER alone. Above 1 it cannot talk as fast as it
@@ -687,7 +766,7 @@ typedef void (*yoai_omni_text_handler)(const char* text, void* user_data);
 // number is not a limit. It was set from two runs that read as a boundary;
 // re-measured, the same clip at the same length both crashes and succeeds, at
 // any thread count. The guard shortens the input rather than avoiding the bug.
-// See src/voice/omni/qwen25_omni.hpp and design/voice.md.
+// See src/voice/omni/qwen25_omni.hpp and docs/voice.md.
 const char* yoai_omni_ask(const short* pcm,
                           int n_samples,
                           const char* prompt,
@@ -708,7 +787,7 @@ const char* yoai_omni_ask(const short* pcm,
 // **The voice is written, not cloned.** yoai_tts_set_voice takes an English
 // description and the same description yields the same speaker across different
 // passages. Five other ways of getting a fixed voice out of this model family
-// were tried first and design/voice.md records why each failed; the short form
+// were tried first and docs/voice.md records why each failed; the short form
 // is that the cloning checkpoint either changed speaker between texts or held
 // the speaker and flattened the prosody.
 //
@@ -815,7 +894,7 @@ void yoai_tts_set_top_k(int top_k);
 // the reason is in yoai_tts_last_error().
 //
 // The transcript is what makes this IN-CONTEXT cloning rather than a
-// speaker-embedding copy, and design/voice.md records why that distinction
+// speaker-embedding copy, and docs/voice.md records why that distinction
 // decides the result: pinning a voice through the speaker encoder held the
 // identity and flattened the prosody; carrying the audio and its text in
 // context held both.
@@ -1186,7 +1265,7 @@ const char* yoai_reader_last_error(void);
 //------------------------------------------------------------------------------
 //
 // One file in, a directory out, so a model that is twenty files can be copied to
-// a phone as one. Packed by design/pack-mnn-model.py; the format lives in
+// a phone as one. Packed by tools/pack-mnn-model.py; the format lives in
 // src/utils/bundle.hpp.
 //
 // This is here for the omni lane, whose model MNN resolves as a directory

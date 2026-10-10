@@ -6,7 +6,7 @@ import java.io.File
 /**
  * What the chip says about itself.
  *
- * This is here because of one measured result in design/voice.md: a cross build
+ * This is here because of one measured result in docs/voice.md: a cross build
  * with no `-march` lands on baseline `armv8-a` and costs 2.9x prefill and 2.2x
  * decode, because CMake's feature probes compile *and run* a test binary and
  * cannot run one for the phone. So the feature set has to be asserted by the
@@ -30,7 +30,7 @@ data class DeviceInfo(
 ) {
     /**
      * Cores grouped by identical max clock, in descending order: "2x3.8 + 6x3.5".
-     * The shape a thread-count sweep is read against -- design/voice.md's
+     * The shape a thread-count sweep is read against -- docs/voice.md's
      * "four is where it stops paying" is a statement about a cluster boundary.
      */
     val clusters: String

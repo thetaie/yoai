@@ -218,6 +218,9 @@ add_library(yoai_core STATIC
     # Backend's constructor, which starts each local model's engine. A no-op
     # for an engine the build does not have.
     src/llm/backend.cpp
+    # A message's annotations -- its time, how it sounded -- written as the line
+    # the model reads in front of it. Every chat client calls it.
+    src/llm/chat/annotations.cpp
     src/llm/chat/event.cpp
     # Compiles to a stub unless YOAI_ONDEVICE_LLM is on (see below), so the
     # default build needs no llama.cpp and still exposes the on-device entry
@@ -227,6 +230,9 @@ add_library(yoai_core STATIC
     src/llm/chat/mnn.cpp
     src/llm/chat/openai.cpp
     src/llm/chat/sse_parser.cpp
+    # What the core and its hosts send to a model, with compiled-in defaults, so
+    # no host keeps its own copy. Plain text, no engine.
+    src/llm/prompt/prompts.cpp
     # Text to vectors for search by meaning, on the same llama.cpp and the same
     # switch as chat/local.cpp above, and a stub the same way without it.
     src/llm/embed/local.cpp
@@ -243,7 +249,7 @@ add_library(yoai_core STATIC
     src/utils/memory_bandwidth.cpp
 
     # Voice. One subsystem, two halves with different appetites -- the same split
-    # design/voice.md is built on. algorithms/ and prosody are arithmetic over a
+    # docs/voice.md is built on. algorithms/ and prosody are arithmetic over a
     # sample buffer and build everywhere; sensevoice needs ggml and compiles to a
     # truthful stub without it, the way llm/chat/local.cpp does for the LLM lane.
     src/voice/algorithms/fft.cpp
@@ -260,10 +266,9 @@ add_library(yoai_core STATIC
     # A SECOND engine, for the one thing the other two cannot do between them:
     # take audio in and answer in the model's own voice, with no text in the
     # middle. It lost to the third on size, on carrying a second framework and
-    # on having no way to ask for a voice -- design/voice.md and
-    # src/voice/attic/README.md have the table -- and is back because the
-    # end-to-end shape is the thing a chain cannot imitate. Stubs out without
-    # YOAI_MNN.
+    # on having no way to ask for a voice -- docs/voice.md has the table --
+    # and is back because the end-to-end shape is the thing a chain cannot
+    # imitate. Stubs out without YOAI_MNN.
     src/voice/omni/qwen25_omni.cpp
     # A THIRD, for the speaking half alone at a third of the cost, on text
     # somebody else wrote. Stubs out without YOAI_QTTS.
@@ -322,7 +327,7 @@ endif()
 #     encoder plus a CTC head with no autoregression, so it links ggml directly
 #     and never touches llama. That is why recognition can be switched on by
 #     itself, and why it costs a fraction of what an audio-capable LLM would --
-#     see design/voice.md. The rest of src/voice/ needs neither: the filterbank
+#     see docs/voice.md. The rest of src/voice/ needs neither: the filterbank
 #     and the prosody measurements are arithmetic over a sample buffer.
 #   - Speech OUTPUT (src/voice/tts/qwen3_tts.cpp) needs libqwen-core on top,
 #     and that comes with a ggml of its own.
@@ -357,7 +362,7 @@ endif()
 # side that goes short has swapped. The choice below is therefore WRONG for the
 # current pins and the desktop addon does not link -- the real fix is one ggml
 # for both lanes via qwentts's new GGML_SOURCE_DIR, which the same measurement
-# says works. design/voice.md carries the numbers and the one cost (qwentts's
+# says works. docs/voice.md carries the numbers and the one cost (qwentts's
 # ggml fork adds a fused snake kernel for the codec that llama's does not have).
 #
 # It surfaced exactly as predicted: a missing symbol at link time rather than a
@@ -532,7 +537,7 @@ endmacro()
 # ggml already here, against MNN's whole inference framework. It speaks text the
 # LLM lane produced, in a voice described in English rather than cloned, and it
 # measured 1.16x against omni's 3.0x for the same job on a desktop. See
-# src/voice/tts/qwen3_tts.hpp for what the description buys and design/voice.md
+# src/voice/tts/qwen3_tts.hpp for what the description buys and docs/voice.md
 # for the five checkpoints that were tried before this one.
 #
 # **Declared BEFORE the LLM lane on purpose**, and the reason is the link line
@@ -694,7 +699,7 @@ endif()
 # OFF by default, and more firmly than the other lanes. It is a second model
 # format and a second quantization story, and the omni half is 3.8 GB of
 # weights bought for one capability whose cost has not been measured on a phone
-# -- about 3x slower than real time on a desktop CPU. See design/voice.md
+# -- about 3x slower than real time on a desktop CPU. See docs/voice.md
 # before turning it on.
 #
 # MNN_DIR points at an SDK dir shaped like the llama one: include/ + lib/.
@@ -892,7 +897,7 @@ if(YOAI_BUILD_CLI)
 
     # Needs neither a model nor ggml, so it builds in the plain desktop
     # configuration and its table can be checked against the tool that produced
-    # the result design/voice.md records.
+    # the result docs/voice.md records.
     add_executable(yoai-prosody-test tests/prosody_test.cpp)
     target_link_libraries(yoai-prosody-test PRIVATE yoai_core)
 
@@ -911,7 +916,7 @@ if(YOAI_BUILD_CLI)
     add_executable(yoai-delay-estimator-test tests/delay_estimator_test.cpp)
     target_link_libraries(yoai-delay-estimator-test PRIVATE yoai_core)
 
-    # One file in, a directory out. Checked against design/pack-mnn-model.py:
+    # One file in, a directory out. Checked against tools/pack-mnn-model.py:
     # a truncated weight file is the one failure MNN would answer through
     # rather than report.
     add_executable(yoai-bundle-test tests/bundle_test.cpp)
@@ -922,6 +927,16 @@ if(YOAI_BUILD_CLI)
     # aloud and simply did not say everything.
     add_executable(yoai-reader-test tests/reader_test.cpp)
     target_link_libraries(yoai-reader-test PRIVATE yoai_core)
+
+    # The prompt table, through the class and through the C ABI a host reads.
+    # With --dump it prints yoai_prompts() instead, to see what a host gets.
+    add_executable(yoai-prompts-test tests/prompts_test.cpp)
+    target_link_libraries(yoai-prompts-test PRIVATE yoai_core)
+
+    # When a message's time and arousal reach the model, and that adding a turn
+    # never rewrites an earlier one -- the property every cached prefix rests on.
+    add_executable(yoai-annotations-test tests/annotations_test.cpp)
+    target_link_libraries(yoai-annotations-test PRIVATE yoai_core)
 
     # One passage at several talker temperatures and seeds, written out to be
     # listened to. Needs the engine to do anything; builds everywhere.
@@ -948,4 +963,97 @@ if(YOAI_BUILD_CLI)
             target_link_libraries(yoai-server PRIVATE shell32)
         endif()
     endif()
+endif()
+
+#-------------------------------------------------------------------------------
+# yoai -- the C ABI as a shared library
+#-------------------------------------------------------------------------------
+
+# yoai_core linked into one yoai.dll / libyoai.so / libyoai.dylib, for a host
+# that loads the core at runtime instead of linking it in: examples/python/
+# reaches it through ctypes. Off when cross-compiling, like the CLI -- the phone
+# hosts link yoai_core into a module of their own -- and off in the desktop
+# addon's tree, which turns it off before reading this file.
+option(YOAI_BUILD_SHARED "Build the C ABI as a shared library (examples/python/)"
+       ${_yoai_cli_default})
+
+if(YOAI_BUILD_SHARED)
+    # What it exports is read from src/yoai.h, so a function added there is
+    # exported without anyone remembering to. Every declaration starts at
+    # column 0 and names yoai_<name>( on its first line; a typedef's name is
+    # followed by `)`, so the callback types do not match. file(STRINGS) splits
+    # a line at each `;`, which leaves pieces with no name in them; those are
+    # skipped.
+    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/src/yoai.h" _yoai_decls
+         REGEX "^[A-Za-z].*[ *]yoai_[a-z0-9_]+\\(")
+    set(_yoai_exports "")
+    foreach(_line ${_yoai_decls})
+        string(REGEX MATCH "yoai_[a-z0-9_]+\\(" _name "${_line}")
+        if(_name)
+            string(REGEX REPLACE "\\($" "" _name "${_name}")
+            list(APPEND _yoai_exports ${_name})
+        endif()
+    endforeach()
+    list(REMOVE_DUPLICATES _yoai_exports)
+    if(NOT _yoai_exports)
+        message(FATAL_ERROR "No functions found in src/yoai.h to export.")
+    endif()
+
+    # Four files from the one list. The C file references every function,
+    # because a linker takes from a static archive only what something already
+    # in the link needs, and nothing else here needs yoai_core at all. The
+    # other three say what the library exports, one per linker: everything else
+    # stays inside it -- llama.cpp's and ggml's symbols included, so a process
+    # that loads another ggml, as a Python process may, gets no clash.
+    set(_refs "")
+    set(_def "EXPORTS\n")
+    set(_map "{\n  global:\n")
+    set(_exp "")
+    foreach(_name ${_yoai_exports})
+        string(APPEND _refs "    (yoai_fn)${_name},\n")
+        string(APPEND _def "    ${_name}\n")
+        string(APPEND _map "    ${_name};\n")
+        # Mach-O prefixes every C symbol with an underscore.
+        string(APPEND _exp "_${_name}\n")
+    endforeach()
+    string(APPEND _map "  local: *;\n};\n")
+
+    set(_shared_gen "${_yoai_gen_dir}/shared")
+    file(WRITE "${_shared_gen}/yoai_shared.c.in"
+        "/* Generated by the root CMakeLists.txt from src/yoai.h -- do not edit. */\n"
+        "#include \"yoai.h\"\n"
+        "\n"
+        "typedef void (*yoai_fn)(void);\n"
+        "\n"
+        "const yoai_fn yoai_shared_exports[] = {\n"
+        "${_refs}"
+        "};\n")
+    file(WRITE "${_shared_gen}/yoai.def.in" "${_def}")
+    file(WRITE "${_shared_gen}/yoai.map.in" "${_map}")
+    file(WRITE "${_shared_gen}/yoai.exp.in" "${_exp}")
+    # COPYONLY, as for the migrations: an unchanged header relinks nothing.
+    foreach(_f yoai_shared.c yoai.def yoai.map yoai.exp)
+        configure_file("${_shared_gen}/${_f}.in" "${_shared_gen}/${_f}" COPYONLY)
+    endforeach()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                 "${CMAKE_CURRENT_SOURCE_DIR}/src/yoai.h")
+
+    add_library(yoai_shared SHARED "${_shared_gen}/yoai_shared.c")
+    set_target_properties(yoai_shared PROPERTIES OUTPUT_NAME yoai)
+    target_link_libraries(yoai_shared PRIVATE yoai_core)
+    if(WIN32)
+        target_sources(yoai_shared PRIVATE "${_shared_gen}/yoai.def")
+    elseif(APPLE)
+        target_link_options(yoai_shared PRIVATE
+            "LINKER:-exported_symbols_list,${_shared_gen}/yoai.exp")
+    else()
+        target_link_options(yoai_shared PRIVATE
+            "LINKER:--version-script=${_shared_gen}/yoai.map")
+        # The libraries it loads, looked for beside it first, as Windows does
+        # for a DLL's.
+        set_target_properties(yoai_shared PROPERTIES BUILD_RPATH "$ORIGIN")
+    endif()
+
+    list(LENGTH _yoai_exports _yoai_export_count)
+    message(STATUS "yoai: shared library ON, ${_yoai_export_count} functions exported")
 endif()

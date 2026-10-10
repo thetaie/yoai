@@ -17,12 +17,12 @@
  * **VoiceDesign's voice is written, not cloned, and it holds within one take
  * only.** Read sentence by sentence it was heard to change voice, gender
  * included; whether the model or this code is at fault is not settled
- * (design/voice.md). A `base` checkpoint reads with a voice file (.spk), as the
+ * (docs/voice.md). A `base` checkpoint reads with a voice file (.spk), as the
  * desktop does, or clones in context from a .wav and its transcript, which
  * holds identity and prosody at 70% more per frame.
  *
  * **Benchmark** runs the PC's RTF protocol on this phone, so the two columns of
- * design/voice.md's "All four talkers, one session" table compare: a warm-up
+ * docs/voice.md's "All four talkers, one session" table compare: a warm-up
  * sentence, then three passages, each one say(), at the desktop's settings.
  * Each line also goes to hilog under the tag `yoai`, prefixed `bench`.
  *
@@ -113,7 +113,7 @@ const LONG_TEXT: string =
 const PINNED_SEED: number = 23;
 
 /**
- * The PC's RTF protocol (design/voice.md, "All four talkers, one session"):
+ * The PC's RTF protocol (docs/voice.md, "All four talkers, one session"):
  * tests/tts_sweep.cpp's three passages, each read as one say(), after a
  * warm-up that is not counted. Seed, temperature, text layout and eos hold are
  * the desktop's reading settings, not this page's.
@@ -967,7 +967,7 @@ struct TtsDebug {
 
       // The other half of this page, and it has no number. Whether the voice is
       // worth having is judged by ear, against the platform's own — which
-      // design/voice.md measured to be one broadcast timbre on both of its APIs,
+      // docs/voice.md measured to be one broadcast timbre on both of its APIs,
       // with no setting that changes it.
       Text('The ratio is one of two answers. The other is whether this sounds ' +
            'better than the platform voice, which is a listening test and not a ' +

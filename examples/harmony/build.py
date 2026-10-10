@@ -482,7 +482,7 @@ def build_llama(o, sdk):
 # real speech out. What is NOT known is whether generating that speech is
 # affordable on a phone. On a desktop CPU it runs at about 3x slower than real
 # time, which is the figure that decides the feature, and a desktop figure
-# does not transfer. See design/voice.md.
+# does not transfer. See docs/voice.md.
 #
 # Output: prebuilt/mnn-sdk/<abi>/{include,lib}, shaped like the llama SDK so
 # that whatever links it later resolves it by repo-relative path.
@@ -590,7 +590,7 @@ def build_mnn(o, sdk):
 # -----------------------------------------------------------------------------
 # qwentts.cpp: Qwen3-TTS, for the model's own voice reading text.
 #
-# A THIRD engine, and the bar for that is high -- design/voice.md has the
+# A THIRD engine, and the bar for that is high -- docs/voice.md has the
 # arithmetic. What it buys that neither llama.cpp nor MNN can: a voice that
 # holds across utterances AND keeps its prosody. llama.cpp runs the same
 # checkpoint, but its only reference path pools the speaker into a fixed
@@ -626,7 +626,7 @@ def build_qtts(o, sdk):
     # everything because it superset llama's. The 2026-09-21 update inverted
     # that: libllama now wants ggml_dsv4_hc_pre_gated, which the fork does not
     # have, so whichever of the two copies is kept, one symbol goes unmet and
-    # the app does not link. design/voice.md has both symbol tables.
+    # the app does not link. docs/voice.md has both symbol tables.
     #
     # GGML_SOURCE_DIR, which qwentts added the same day, is the way out: it
     # points the qwentts build at any ggml tree, so both lanes compile the SAME

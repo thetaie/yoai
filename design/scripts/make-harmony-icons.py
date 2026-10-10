@@ -1,6 +1,6 @@
 """Regenerate the HarmonyOS icon set from the logo mark.
 
-    python design/make-harmony-icons.py
+    python design/scripts/make-harmony-icons.py
 
 Writes, relative to the repo root:
     examples/harmony/AppScope/resources/base/media/app_icon.png
@@ -141,7 +141,7 @@ def build_svg():
 
 
 def main():
-    root = pathlib.Path(__file__).resolve().parent.parent
+    root = pathlib.Path(__file__).resolve().parents[2]
     entry = root / "examples/harmony/entry/src/main/resources/base/media"
     appscope = root / "examples/harmony/AppScope/resources/base/media"
     for d in (entry, appscope):

@@ -101,7 +101,7 @@ function onEvent(ev: OmniEvent): void {
     // text have already arrived.
   }
   // Worth having in the console while this lane is being judged: these are the
-  // numbers design/voice.md's argument turns on, and they are per exchange.
+  // numbers docs/voice.md's argument turns on, and they are per exchange.
   console.log(
     `[omni] done at ${at()} s: ${blocks} block(s), ${audioSeconds.toFixed(2)} s of speech`,
     stats

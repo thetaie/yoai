@@ -17,8 +17,8 @@
 // transfer inside the core. A turn producing no further events cannot be
 // interrupted earlier -- there is nothing to observe the flag.
 //
-// This bridge exposes the chat, on-device, speech-output and omni lanes. The
-// voice (recognition) and bundle entry points are in the header and
+// This bridge exposes the chat, prompt, on-device, speech-output and omni
+// lanes. The voice (recognition) and bundle entry points are in the header and
 // deliberately not wired up here: nothing in the desktop client calls them yet,
 // and an export nobody uses is a second place to keep correct.
 
@@ -443,6 +443,50 @@ napi_value NativeChatCancelAll(napi_env env, napi_callback_info /*info*/) {
         entry.second->cancelled.store(true, std::memory_order_relaxed);
     }
     return Int32(env, static_cast<std::int32_t>(g_turns.size()));
+}
+
+//------------------------------------------------------------------------------
+// Prompts
+//------------------------------------------------------------------------------
+//
+// The two the chat needs. The defaults live in the core, so this side keeps no
+// copy: nativePromptGet shows the default on the settings screen, and
+// nativePromptTurnSystem builds what a turn and its warm-up send.
+
+// nativePromptGet(name: string): string | null  (null for an unknown name)
+napi_value NativePromptGet(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    const std::string name = ArgUtf8(env, argc, argv, 0);
+
+    const char* text = yoai_prompt_get(name.c_str(), nullptr);
+    if (text == nullptr) {
+        napi_value null_value = nullptr;
+        napi_get_null(env, &null_value);
+        return null_value;
+    }
+    return Utf8(env, text);
+}
+
+// nativePromptTurnSystem(base: string | null, reading: boolean): string
+//
+// Anything but a string is a user who never wrote a prompt, and gets the core's
+// default; '' is one who cleared it, and gets none.
+napi_value NativePromptTurnSystem(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+
+    napi_valuetype type = napi_undefined;
+    if (argc >= 1) napi_typeof(env, argv[0], &type);
+    const bool        given = type == napi_string;
+    const std::string base  = given ? ToUtf8(env, argv[0]) : std::string();
+
+    bool reading = false;
+    if (argc >= 2) napi_get_value_bool(env, argv[1], &reading);
+
+    return Utf8(env, yoai_prompt_turn_system(given ? base.c_str() : nullptr, reading ? 1 : 0));
 }
 
 //------------------------------------------------------------------------------
@@ -1101,7 +1145,7 @@ napi_value NativeTtsLastError(napi_env env, napi_callback_info /*info*/) {
 // The end-to-end lane: audio in, an answer out, spoken in the model's own
 // voice, with no text in the middle. The other two lanes are halves of a chain
 // and this one is not, which is the whole reason it is carried -- see
-// design/voice.md for what that costs.
+// docs/voice.md for what that costs.
 //
 // It reuses the audio machinery above because the two agree where it matters:
 // chunks of 24 kHz mono float, then a JSON summary. What differs is the INPUT.
@@ -1297,6 +1341,8 @@ NAPI_MODULE_INIT() {
         {"nativeChat",            nullptr, NativeChat,            nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChatCancel",      nullptr, NativeChatCancel,      nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChatCancelAll",   nullptr, NativeChatCancelAll,   nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativePromptGet",       nullptr, NativePromptGet,       nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativePromptTurnSystem", nullptr, NativePromptTurnSystem, nullptr, nullptr, nullptr, napi_default, nullptr},
 
         {"nativeTtsAvailable",    nullptr, NativeTtsAvailable,    nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeReaderAvailable", nullptr, NativeReaderAvailable, nullptr, nullptr, nullptr, napi_default, nullptr},

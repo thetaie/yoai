@@ -86,7 +86,7 @@ struct LocalOptions {
      * A read loop with no model in it measures **24.4 GB/s** on this device at
      * eight threads, and that is a lower bound — every fix to the benchmark
      * raised it. So llama.cpp's decode sits at 73-75% of what the chip gives up,
-     * the headroom is real, and design/voice.md has the sweep and the caveats.
+     * the headroom is real, and docs/voice.md has the sweep and the caveats.
      */
     int n_threads = 4;
 
