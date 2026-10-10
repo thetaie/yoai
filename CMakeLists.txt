@@ -911,6 +911,11 @@ if(YOAI_BUILD_CLI)
     add_executable(yoai-echo-canceller-test tests/echo_canceller_test.cpp)
     target_link_libraries(yoai-echo-canceller-test PRIVATE yoai_core)
 
+    # The same canceller through the door a host uses: its reference resampled,
+    # the two streams paired however they arrive, against the class run directly.
+    add_executable(yoai-aec-abi-test tests/aec_abi_test.cpp)
+    target_link_libraries(yoai-aec-abi-test PRIVATE yoai_core)
+
     # The delay estimator against delays it was not told, through synthetic
     # rooms; with two WAVs, a window-by-window trace of a real pair.
     add_executable(yoai-delay-estimator-test tests/delay_estimator_test.cpp)

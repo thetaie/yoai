@@ -640,6 +640,67 @@ const char* yoai_voice_analyze(const short* pcm,
                                int sample_rate);
 
 //------------------------------------------------------------------------------
+// Echo cancellation
+//------------------------------------------------------------------------------
+//
+// Takes what the speaker played out of what the microphone heard, so that a
+// user talking over a reply can still be recognized. A section of its own
+// because it runs on every block of a live microphone, where the voice lane
+// above takes one finished recording.
+//
+// One canceller for the process. Calls are serialized internally, but feed it
+// from one thread: the two streams are paired in the order they arrive.
+//
+// The host pairs the streams. Each call passes the microphone samples captured
+// over some span and the samples sent to the speaker over the same span;
+// samples are matched by position since the last reset, and whichever stream
+// is ahead waits. So the reference has to keep flowing: while nothing plays,
+// pass silence, which the filter does not learn from. A microphone with no
+// reference beside it waits for one and produces nothing.
+//
+// The core brings the reference to 16 kHz itself. It is the one thing the core
+// resamples, and the microphone is not touched; see
+// src/voice/algorithms/resampler.hpp for why the two differ.
+
+// Bluetooth, or another output with a long delay. Non-zero models 512ms of echo
+// path instead of 256ms. On synthetic echo with 300ms of buffering it cancels
+// 22 dB where 256ms cancels nothing; with short buffering it is 2-3 dB worse,
+// converges in 10s instead of 6s, and costs twice the CPU (RTF 0.021 against
+// 0.012 on a Core Ultra 9 185H). Takes effect when the canceller is next made:
+// at the next yoai_aec_reset(), or at the first yoai_aec_process() if there
+// has been none.
+void yoai_aec_set_high_latency(int on);
+
+// The rate of the reference passed to yoai_aec_process(). 24000, the default,
+// is what speech output emits; 16000 passes the reference through as it is.
+// Takes effect when yoai_aec_set_high_latency() does. Returns 0, or -1 for a
+// rate it cannot convert, with the reason in yoai_aec_last_error().
+int yoai_aec_set_reference_rate(int hz);
+
+// Forget the learned path and anything buffered, and apply the settings above.
+// A new output device, or a stream reopened after an underrun, is a new path.
+void yoai_aec_reset(void);
+
+// One step of the two streams:
+//
+//   mic, n_mic   16-bit mono at 16000 Hz.
+//   ref, n_ref   float mono at the reference rate, over the same span.
+//   out          room for out_capacity samples of the microphone with the echo
+//                taken out, 16-bit at 16000 Hz, ready for yoai_voice_analyze().
+//
+// Output comes in whole 16ms blocks and runs a block, plus 3ms of resampling,
+// behind the input. While the two streams arrive together, n_mic + 512 is room
+// enough to take everything each call; what does not fit stays for the next
+// one, and a call with no input drains it. Returns the number of samples
+// written, or -1 with the reason in yoai_aec_last_error().
+int yoai_aec_process(const short* mic, int n_mic,
+                     const float* ref, int n_ref,
+                     short* out, int out_capacity);
+
+// Why the last yoai_aec_* call on this thread failed, or "" if it did not.
+const char* yoai_aec_last_error(void);
+
+//------------------------------------------------------------------------------
 // Omni (MNN + Qwen2.5-Omni)
 //------------------------------------------------------------------------------
 

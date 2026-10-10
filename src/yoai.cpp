@@ -25,6 +25,8 @@
 #include "utils/memory_bandwidth.hpp"
 #include "store/db.hpp"
 #include "store/timeline.hpp"
+#include "voice/algorithms/echo_canceller.hpp"
+#include "voice/algorithms/resampler.hpp"
 #include "voice/omni/qwen25_omni.hpp"
 #include "voice/prosody/prosody.hpp"
 #include "voice/text/speakable_stream.hpp"
@@ -39,7 +41,9 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -1353,6 +1357,178 @@ extern "C" const char* yoai_voice_analyze(const short* pcm,
 
     voice_buffer().assign(buf.GetString(), buf.GetSize());
     return voice_buffer().c_str();
+}
+
+//------------------------------------------------------------------------------
+// Echo cancellation
+//------------------------------------------------------------------------------
+
+namespace {
+
+// The canceller runs at the microphone's rate, the one recognition reads.
+const int kAecRate = 16000;
+
+// The echo path modelled, in ms, normally and for an output with a long delay.
+// 512 rather than more: on synthetic echo 1024 took past 16s to converge on
+// white noise and stayed under 17 dB on speech, worse than 512 even with 300ms
+// of buffering. See yoai_aec_set_high_latency in yoai.h for the rest.
+const int kAecFilterMs            = 256;
+const int kAecFilterMsHighLatency = 512;
+
+// One canceller for the process, like the other lanes. The mutex keeps a
+// setter from the settings screen out of the middle of a step; the streams
+// still want one feeding thread, since they are paired by order of arrival.
+struct AecLane {
+    std::mutex mutex;
+
+    // Settings, applied when the canceller is next made.
+    bool high_latency   = false;
+    int  reference_rate = 24000;
+
+    // What the settings made. No resampler when the reference is already at
+    // kAecRate.
+    std::unique_ptr<yoai::voice::EchoCanceller> aec;
+    std::unique_ptr<yoai::voice::Resampler>     resampler;
+
+    // The resampler's lead still to drop from the reference, in samples at
+    // kAecRate: its output starts that far behind its input.
+    int skip = 0;
+
+    // At kAecRate, each waiting for its partner from the other stream.
+    std::vector<float> mic, ref;
+
+    // Cancelled and converted, not yet handed over.
+    std::vector<short> ready;
+
+    // Reused for the resampler's and the canceller's output.
+    std::vector<float> scratch;
+};
+
+AecLane& aec_lane() {
+    static AecLane lane;
+    return lane;
+}
+
+std::string& aec_error() {
+    static thread_local std::string e;
+    return e;
+}
+
+// Under the lane's mutex.
+void aec_make(AecLane& l) {
+    yoai::voice::EchoCancellerOptions opt;
+    opt.sample_rate = kAecRate;
+    opt.filter_ms   = l.high_latency ? kAecFilterMsHighLatency : kAecFilterMs;
+    l.aec.reset(new yoai::voice::EchoCanceller(opt));
+    l.resampler.reset();
+    l.skip = 0;
+    if (l.reference_rate != kAecRate) {
+        l.resampler.reset(new yoai::voice::Resampler(l.reference_rate, kAecRate));
+        l.skip = l.resampler->delay();
+    }
+    l.mic.clear();
+    l.ref.clear();
+    l.ready.clear();
+}
+
+short aec_pcm16(float x) {
+    const float v = x * 32768.0f;
+    if (v >= 32767.0f) {
+        return 32767;
+    }
+    if (v <= -32768.0f) {
+        return -32768;
+    }
+    return static_cast<short>(std::lrint(v));
+}
+
+}  // namespace
+
+extern "C" void yoai_aec_set_high_latency(int on) {
+    aec_error().clear();
+    AecLane& l = aec_lane();
+    std::lock_guard<std::mutex> guard(l.mutex);
+    l.high_latency = on != 0;
+}
+
+extern "C" int yoai_aec_set_reference_rate(int hz) {
+    aec_error().clear();
+    // Tried rather than reasoned about: the resampler's own constructor is what
+    // decides which ratios it takes.
+    if (hz != kAecRate && (hz <= 0 || !yoai::voice::Resampler(hz, kAecRate).valid())) {
+        aec_error() = "cannot bring a reference at " + std::to_string(hz) + " Hz to 16000 Hz";
+        return -1;
+    }
+    AecLane& l = aec_lane();
+    std::lock_guard<std::mutex> guard(l.mutex);
+    l.reference_rate = hz;
+    return 0;
+}
+
+extern "C" void yoai_aec_reset(void) {
+    aec_error().clear();
+    AecLane& l = aec_lane();
+    std::lock_guard<std::mutex> guard(l.mutex);
+    aec_make(l);
+}
+
+extern "C" int yoai_aec_process(const short* mic, int n_mic,
+                                const float* ref, int n_ref,
+                                short* out, int out_capacity) {
+    aec_error().clear();
+    if (n_mic < 0 || n_ref < 0 || out_capacity < 0) {
+        aec_error() = "n_mic, n_ref and out_capacity must not be negative";
+        return -1;
+    }
+    if ((n_mic > 0 && mic == nullptr) || (n_ref > 0 && ref == nullptr) ||
+        (out_capacity > 0 && out == nullptr)) {
+        aec_error() = "a buffer with a non-zero count is NULL";
+        return -1;
+    }
+
+    AecLane& l = aec_lane();
+    std::lock_guard<std::mutex> guard(l.mutex);
+    if (!l.aec) {
+        aec_make(l);
+    }
+
+    for (int i = 0; i < n_mic; ++i) {
+        l.mic.push_back(mic[i] / 32768.0f);
+    }
+    if (n_ref > 0) {
+        if (l.resampler) {
+            l.scratch.clear();
+            l.resampler->process(ref, static_cast<size_t>(n_ref), &l.scratch);
+            const size_t lead = std::min(l.scratch.size(), static_cast<size_t>(l.skip));
+            l.skip -= static_cast<int>(lead);
+            l.ref.insert(l.ref.end(), l.scratch.begin() + static_cast<ptrdiff_t>(lead),
+                         l.scratch.end());
+        } else {
+            l.ref.insert(l.ref.end(), ref, ref + n_ref);
+        }
+    }
+
+    const size_t pairs = std::min(l.mic.size(), l.ref.size());
+    if (pairs > 0) {
+        l.scratch.clear();
+        l.aec->process(&l.mic[0], &l.ref[0], pairs, &l.scratch);
+        l.mic.erase(l.mic.begin(), l.mic.begin() + static_cast<ptrdiff_t>(pairs));
+        l.ref.erase(l.ref.begin(), l.ref.begin() + static_cast<ptrdiff_t>(pairs));
+        for (size_t i = 0; i < l.scratch.size(); ++i) {
+            l.ready.push_back(aec_pcm16(l.scratch[i]));
+        }
+    }
+
+    const size_t n = std::min(l.ready.size(), static_cast<size_t>(out_capacity));
+    if (n > 0) {
+        std::copy(l.ready.begin(), l.ready.begin() + static_cast<ptrdiff_t>(n), out);
+        l.ready.erase(l.ready.begin(), l.ready.begin() + static_cast<ptrdiff_t>(n));
+    }
+    return static_cast<int>(n);
+}
+
+extern "C" const char* yoai_aec_last_error(void) {
+    return aec_error().c_str();
 }
 
 //------------------------------------------------------------------------------

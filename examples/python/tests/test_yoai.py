@@ -5,7 +5,8 @@ Checks the INSTALLED yoai package -- the wheel examples/python/build.py makes,
 after pip install -- against the core it carries. With no options it needs no
 model and no network: the binding itself, the day log, the prompts, the
 provider registry, a turn streamed from a local stand-in for a provider and
-two that fail, and prosody on a synthetic tone. Each option adds a lane, run
+two that fail, prosody on a synthetic tone, and echo cancellation on
+synthetic echo. Each option adds a lane, run
 on the model given:
 
   --talker, --codec   speech output: one sentence spoken, then the reader
@@ -210,6 +211,34 @@ def prosody():
     return "keys: %s" % ", ".join(sorted(result))
 
 
+def echo_cancellation():
+    # Six seconds of noise played, heard 10ms later at half the level. At a
+    # 16 kHz reference the resampler is out of it, so the echo can be made
+    # here sample for sample. Six because on white noise the canceller passes
+    # 20 dB only in its fourth second.
+    import random
+    rate, delay = 16000, 160
+    rng = random.Random(1)
+    noise = array.array("f", (rng.uniform(-0.3, 0.3) for _ in range(6 * rate)))
+    mic = array.array("h", (int(0.5 * noise[i - delay] * 32767) if i >= delay else 0
+                            for i in range(6 * rate)))
+    yoai.aec_set_reference_rate(rate)
+    try:
+        yoai.aec_reset()
+        out = yoai.aec_process(mic, noise)
+    finally:
+        yoai.aec_set_reference_rate(24000)
+        yoai.aec_reset()
+    expect(len(out) == len(mic) // 256 * 256, "%d samples out of %d" % (len(out), len(mic)))
+    tail = slice(4 * rate, len(out))
+    heard = sum(float(v) * v for v in mic[tail])
+    left = sum(float(v) * v for v in out[tail]) or 1.0
+    erle = 10 * math.log10(heard / left)
+    expect(erle > 20, "ERLE %.1f dB over the last two seconds" % erle)
+    e = raises(lambda: yoai.aec_set_reference_rate(7))
+    return "ERLE %.1f dB over the last two seconds; rate 7: %s" % (erle, e)
+
+
 def bandwidth():
     result = yoai.memory_bandwidth(1, 16, 1)
     expect(result["gbPerSecond"] > 0, "no figure: %r" % result)
@@ -360,6 +389,7 @@ def main():
     check("streamed turn", streamed_turn)
     check("failed turn", failed_turn)
     check("prosody", prosody)
+    check("echo cancellation", echo_cancellation)
     check("memory bandwidth", bandwidth)
     check("not a bundle", not_a_bundle)
     if args.talker:

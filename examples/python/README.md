@@ -63,6 +63,9 @@ What the wrapper adds to the C ABI:
   threads.
 - `voice_analyze(pcm)` takes 16-bit samples at 16000 Hz: `bytes`, `array('h')`
   or a list of ints.
+- `aec_process(mic, ref)` takes the microphone as `voice_analyze` does and the
+  reference as `array('f')` or a list of floats, and returns `array('h')`
+  with everything ready, the output that did not fit in one call included.
 - `yoai.lib` is the ctypes library itself, every signature declared.
 
 Do not `import yoai` from inside `examples/python/`: the `yoai/` directory
@@ -77,8 +80,9 @@ python tests/test_yoai.py
 
 With no options it needs no model and no network: every function bound, the
 day log, the prompts, the provider registry, a turn streamed from a local
-stand-in for a provider, two turns that fail, and prosody on a synthetic tone.
-Each option adds a lane, run on the model given:
+stand-in for a provider, two turns that fail, prosody on a synthetic tone, and
+echo cancellation on synthetic echo. Each option adds a lane, run on the model
+given:
 
 ```
 python tests/test_yoai.py --talker qwen-talker-0.6b-customvoice-Q4_K_M.gguf ^

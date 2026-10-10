@@ -10,6 +10,7 @@ title: "Voice streaming"
 section { font-size: 26px; }
 section.lead h1 { font-size: 72px; }
 section.lead p { color: #57606a; }
+section.cover { padding-top: 48px; padding-bottom: 40px; }
 section.cover h1 { font-size: 60px; }
 section.cover p { color: #57606a; }
 table { font-size: 20px; }
@@ -25,32 +26,36 @@ svg.fig { display: block; width: 100%; height: auto; margin-top: 12px; }
 
 # Voice streaming
 
-<svg class="fig" viewBox="0 -32 1250 504" role="img" aria-label="The microphone feeds an echo canceller, which takes what the speaker plays back out of the microphone signal, with the PCM played as its reference; its output feeds three paths to the speaker. The main line, framed and labeled The Qwen-Omni experience, without Qwen-Omni: ASR hands a chat model, local or remote, whole sentences cut at pauses, and the chat model streams its reply to TTS token by token. Beside ASR, emotion in reads the user's arousal from the sound, cut and timed by the transcript, and passes it to the chat model; the chat model hands its reply's valence, arousal and dominance to emotion out, which steers the TTS voice file. Below it, two omni paths, where one model takes the audio and speaks the reply itself: Qwen3-Omni-30B-A3B on vLLM-Omni, a remote provider on a GPU server or desktop, kept, made of a MoE thinker (30B total, 3B active, 48 layers, a router per layer picking 8 of 128 experts), a MoE talker (3B total, 0.3B active, 20 layers, 6 of 128 experts plus one shared), and a dense codec; and Qwen2.5-Omni-3B on MNN, a local provider on the device at RTF 3.0 on a phone, replaced by the main line.">
+<svg class="fig" viewBox="0 -102 1250 574" role="img" aria-label="The microphone feeds an echo canceller, which takes what the speaker plays back out of the microphone signal, with the PCM played as its reference; its output feeds barge-in and three paths to the speaker. The main line, framed and labeled The Qwen-Omni experience, without Qwen-Omni: ASR hands a chat model, local or remote, whole sentences cut at pauses, and the chat model streams its reply to TTS token by token. Above ASR, barge-in takes the echo-cancelled microphone and ASR's words: a voice over the reply pauses the speaker, and words stop the chat model, TTS and speaker, the history keeping only what was played. Beside ASR, emotion in reads the user's arousal from the sound, cut and timed by the transcript, and passes it to the chat model; the chat model hands its reply's valence, arousal and dominance to emotion out, which steers the TTS voice file. Below it, two omni paths, where one model takes the audio and speaks the reply itself: Qwen3-Omni-30B-A3B on vLLM-Omni, a remote provider on a GPU server or desktop, kept, which handles barge-in itself by its server VAD, made of a MoE thinker (30B total, 3B active, 48 layers, a router per layer picking 8 of 128 experts), a MoE talker (3B total, 0.3B active, 20 layers, 6 of 128 experts plus one shared), and a dense codec; and Qwen2.5-Omni-3B on MNN, a local provider on the device at RTF 3.0 on a phone, replaced by the main line.">
 <defs>
 <marker id="arrow-chain" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#57606a"/></marker>
 <marker id="arrow-ref" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#bc4c00"/></marker>
+<marker id="bar-stop" viewBox="0 0 4 22" refX="2" refY="11" markerWidth="4" markerHeight="22" markerUnits="userSpaceOnUse" orient="auto"><rect width="4" height="22" fill="#cf222e"/></marker>
 </defs>
-<rect x="352" y="8" width="706" height="210" rx="16" fill="none" stroke="#24292f" stroke-width="2" stroke-dasharray="8 5"/>
-<text x="354" y="-6" font-size="24" font-weight="700" fill="#24292f">The Qwen-Omni experience, without Qwen-Omni</text>
+<rect x="352" y="-62" width="706" height="280" rx="16" fill="none" stroke="#24292f" stroke-width="2" stroke-dasharray="8 5"/>
+<text x="354" y="-76" font-size="24" font-weight="700" fill="#24292f">The Qwen-Omni experience, without Qwen-Omni</text>
 <g text-anchor="middle">
-<rect x="16" y="20" width="130" height="100" rx="10" fill="#f6f8fa" stroke="#d0d7de" stroke-width="2"/>
-<text x="81" y="64" font-size="20" font-weight="700" fill="#24292f">Microphone</text>
-<text x="81" y="94" font-size="17" fill="#57606a">16 kHz mono</text>
-<rect x="185" y="20" width="130" height="100" rx="10" fill="#fff1e5" stroke="#bc4c00" stroke-width="2"/>
-<text x="250" y="64" font-size="22" font-weight="700" fill="#24292f">AEC</text>
-<text x="250" y="94" font-size="17" fill="#57606a">echo canceller</text>
-<rect x="375" y="20" width="150" height="100" rx="10" fill="#ddf4ff" stroke="#0969da" stroke-width="2"/>
-<text x="450" y="64" font-size="22" font-weight="700" fill="#24292f">ASR</text>
-<text x="450" y="94" font-size="17" fill="#57606a">SenseVoice-Small</text>
-<rect x="655" y="20" width="140" height="100" rx="10" fill="#f6f8fa" stroke="#d0d7de" stroke-width="2"/>
-<text x="725" y="64" font-size="22" font-weight="700" fill="#24292f">Chat model</text>
-<text x="725" y="94" font-size="17" fill="#57606a">local or remote</text>
-<rect x="925" y="20" width="120" height="100" rx="10" fill="#dafbe1" stroke="#1a7f37" stroke-width="2"/>
-<text x="985" y="64" font-size="22" font-weight="700" fill="#24292f">TTS</text>
-<text x="985" y="94" font-size="17" fill="#57606a">Qwen3-TTS</text>
-<rect x="1104" y="20" width="130" height="100" rx="10" fill="#f6f8fa" stroke="#d0d7de" stroke-width="2"/>
-<text x="1169" y="64" font-size="22" font-weight="700" fill="#24292f">Speaker</text>
-<text x="1169" y="94" font-size="17" fill="#57606a">24 kHz mono</text>
+<rect x="16" y="36" width="130" height="84" rx="10" fill="#f6f8fa" stroke="#d0d7de" stroke-width="2"/>
+<text x="81" y="72" font-size="20" font-weight="700" fill="#24292f">Microphone</text>
+<text x="81" y="100" font-size="17" fill="#57606a">16 kHz mono</text>
+<rect x="185" y="36" width="130" height="84" rx="10" fill="#fff1e5" stroke="#bc4c00" stroke-width="2"/>
+<text x="250" y="72" font-size="22" font-weight="700" fill="#24292f">AEC</text>
+<text x="250" y="100" font-size="17" fill="#57606a">echo canceller</text>
+<rect x="375" y="36" width="150" height="84" rx="10" fill="#ddf4ff" stroke="#0969da" stroke-width="2"/>
+<text x="450" y="72" font-size="22" font-weight="700" fill="#24292f">ASR</text>
+<text x="450" y="100" font-size="17" fill="#57606a">SenseVoice-Small</text>
+<rect x="655" y="36" width="140" height="84" rx="10" fill="#f6f8fa" stroke="#d0d7de" stroke-width="2"/>
+<text x="725" y="72" font-size="22" font-weight="700" fill="#24292f">Chat model</text>
+<text x="725" y="100" font-size="17" fill="#57606a">local or remote</text>
+<rect x="925" y="36" width="120" height="84" rx="10" fill="#dafbe1" stroke="#1a7f37" stroke-width="2"/>
+<text x="985" y="72" font-size="22" font-weight="700" fill="#24292f">TTS</text>
+<text x="985" y="100" font-size="17" fill="#57606a">Qwen3-TTS</text>
+<rect x="1104" y="36" width="130" height="84" rx="10" fill="#f6f8fa" stroke="#d0d7de" stroke-width="2"/>
+<text x="1169" y="72" font-size="22" font-weight="700" fill="#24292f">Speaker</text>
+<text x="1169" y="100" font-size="17" fill="#57606a">24 kHz mono</text>
+<rect x="375" y="-50" width="250" height="56" rx="10" fill="#ffebe9" stroke="#cf222e" stroke-width="2"/>
+<text x="500" y="-27" font-size="18" font-weight="700" fill="#24292f">Barge-in</text>
+<text x="500" y="-6" font-size="15" fill="#57606a">pause on voice, stop on words</text>
 <rect x="375" y="150" width="150" height="56" rx="10" fill="#fff1e5" stroke="#bc4c00" stroke-width="2"/>
 <text x="450" y="173" font-size="18" font-weight="700" fill="#24292f">Emotion in</text>
 <text x="450" y="194" font-size="15" fill="#57606a">arousal from sound</text>
@@ -59,7 +64,7 @@ svg.fig { display: block; width: 100%; height: auto; margin-top: 12px; }
 <text x="965" y="194" font-size="15" fill="#57606a">V, A, D → voice file</text>
 <rect x="375" y="238" width="680" height="132" rx="10" fill="#fbefff" stroke="#8250df" stroke-width="2"/>
 <text x="715" y="262" font-size="20" font-weight="700" fill="#24292f">Qwen3-Omni-30B-A3B</text>
-<text x="715" y="284" font-size="16" fill="#57606a">vLLM-Omni · remote provider, on a GPU server or desktop</text>
+<text x="715" y="284" font-size="16" fill="#57606a">vLLM-Omni · remote provider, on a GPU server or desktop · <tspan fill="#cf222e">barge-in by its server VAD</tspan></text>
 <rect x="389" y="296" width="240" height="62" rx="8" fill="#ffffff" stroke="#8250df" stroke-width="1.5"/>
 <text x="509" y="316" font-size="16" font-weight="700" fill="#24292f">Thinker · MoE</text>
 <text x="509" y="334" font-size="14" fill="#57606a">30B total, 3B active · 48 layers</text>
@@ -80,13 +85,14 @@ svg.fig { display: block; width: 100%; height: auto; margin-top: 12px; }
 <rect x="955" y="406" width="86" height="24" rx="12" fill="#ffffff" stroke="#8250df" stroke-width="1.5"/>
 <text x="998" y="423" font-size="14" fill="#8250df">replaced</text>
 <g font-size="15" fill="#57606a">
-<text x="589" y="56">whole sentences</text>
-<text x="589" y="100">cut at pauses</text>
-<text x="859" y="56">streamed</text>
-<text x="859" y="100">token by token</text>
-<text x="1082" y="56">PCM</text>
+<text x="589" y="64">whole sentences</text>
+<text x="589" y="108">cut at pauses</text>
+<text x="859" y="64">streamed</text>
+<text x="859" y="108">token by token</text>
+<text x="1082" y="64">PCM</text>
 <text x="613" y="170">user's arousal</text>
 <text x="458" y="140" text-anchor="start">text + timing</text>
+<text x="458" y="28" text-anchor="start">words</text>
 <text x="817" y="170">reply's V, A, D</text>
 </g>
 </g>
@@ -95,14 +101,16 @@ svg.fig { display: block; width: 100%; height: auto; margin-top: 12px; }
 <text x="240" y="319">PCM played</text>
 </g>
 <g stroke="#57606a" stroke-width="2" fill="none" marker-end="url(#arrow-chain)">
-<line x1="148" y1="70" x2="181" y2="70"/>
-<line x1="340" y1="70" x2="371" y2="70"/>
+<line x1="148" y1="78" x2="181" y2="78"/>
+<line x1="340" y1="78" x2="371" y2="78"/>
 <line x1="340" y1="178" x2="371" y2="178"/>
 <line x1="340" y1="327" x2="371" y2="327"/>
 <line x1="340" y1="418" x2="371" y2="418"/>
-<line x1="527" y1="70" x2="651" y2="70"/>
-<line x1="797" y1="70" x2="921" y2="70"/>
-<line x1="1047" y1="70" x2="1100" y2="70"/>
+<line x1="527" y1="78" x2="651" y2="78"/>
+<line x1="797" y1="78" x2="921" y2="78"/>
+<line x1="1047" y1="78" x2="1100" y2="78"/>
+<path d="M340,78 V-22 H371"/>
+<line x1="450" y1="34" x2="450" y2="10"/>
 <path d="M527,178 H700 V124"/>
 <path d="M750,122 V178 H881"/>
 <line x1="985" y1="148" x2="985" y2="124"/>
@@ -111,23 +119,135 @@ svg.fig { display: block; width: 100%; height: auto; margin-top: 12px; }
 <line x1="895" y1="327" x2="913" y2="327"/>
 </g>
 <g stroke="#57606a" stroke-width="2" fill="none">
-<path d="M317,70 H340 V418"/>
-<path d="M1057,327 H1076 V70"/>
+<path d="M317,78 H340 V418"/>
+<path d="M1057,327 H1076 V78"/>
 <path d="M1057,418 H1076 V327"/>
 </g>
 <g fill="#57606a">
-<circle cx="340" cy="70" r="4"/>
+<circle cx="340" cy="78" r="4"/>
 <circle cx="340" cy="178" r="4"/>
 <circle cx="340" cy="327" r="4"/>
-<circle cx="1076" cy="70" r="4"/>
+<circle cx="1076" cy="78" r="4"/>
 </g>
 <path d="M1169,122 V462 H250 V124" stroke="#bc4c00" stroke-width="2" fill="none" marker-end="url(#arrow-ref)"/>
-<g fill="#0969da">
-<rect x="540" y="64" width="40" height="12" rx="3"/>
-<rect x="590" y="64" width="40" height="12" rx="3"/>
+<g stroke="#cf222e" stroke-width="2" fill="none" marker-end="url(#bar-stop)">
+<path d="M627,-22 H1169 V32"/>
+<line x1="725" y1="-22" x2="725" y2="32"/>
+<line x1="985" y1="-22" x2="985" y2="32"/>
 </g>
-<line x1="801" y1="70" x2="904" y2="70" stroke="#0969da" stroke-width="12" stroke-dasharray="6 4"/>
+<g fill="#cf222e">
+<circle cx="725" cy="-22" r="4"/>
+<circle cx="985" cy="-22" r="4"/>
+</g>
+<text x="733" y="-30" font-size="15" fill="#cf222e">history keeps what was played</text>
+<g fill="#0969da">
+<rect x="540" y="72" width="40" height="12" rx="3"/>
+<rect x="590" y="72" width="40" height="12" rx="3"/>
+</g>
+<line x1="801" y1="78" x2="904" y2="78" stroke="#0969da" stroke-width="12" stroke-dasharray="6 4"/>
 </svg>
+
+---
+
+<style scoped>
+section { font-size: 18px; padding: 36px 56px; }
+h2 { font-size: 32.5px; margin-bottom: 0.2em; }   /* the other slides' size: 1.25em of 26px */
+p { margin: 0.3em 0; }
+svg.fig { margin-top: 6px; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; font-size: 15px; line-height: 1.35; margin-top: 4px; }
+.cols h3 { font-size: 19px; margin: 0.3em 0 0.2em; }
+.cols ul { margin: 0; padding-left: 1.1em; }
+.cols li { margin: 0.2em 0; }
+.cols p { margin: 0.3em 0; }
+table { font-size: 14px; margin: 4px 0; }
+th, td { padding: 3px 9px !important; }
+.note { font-size: 14px; margin-top: 12px; padding-top: 6px; border-top: 1px solid #d0d7de; }
+</style>
+
+## AEC: take the reply out of the microphone
+
+The microphone hears the reply as well as the user. The AEC learns how the reply reaches the microphone and subtracts it, leaving the user.
+
+<svg class="fig" viewBox="0 0 1250 286" role="img" aria-label="Left to right. What was played, the reference x, goes two ways. Along the top, the speaker plays it and the echo path h, buffering, loudspeaker and room, carries it to the microphone, which also hears the user talking. Along the bottom, the adaptive filter, its model of h, turns x into an echo estimate. The microphone minus the estimate is the output, roughly the user's voice; it is also the error that goes back to the filter to learn from.">
+<defs>
+<marker id="arrow-aec" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#57606a"/></marker>
+<marker id="arrow-aec-echo" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#bc4c00"/></marker>
+</defs>
+<g stroke-width="2">
+<rect x="20" y="170" width="180" height="60" rx="10" fill="#dafbe1" stroke="#1a7f37"/>
+<rect x="370" y="50" width="160" height="60" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+<rect x="760" y="50" width="180" height="60" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+<rect x="320" y="170" width="260" height="60" rx="10" fill="#fff1e5" stroke="#bc4c00"/>
+<rect x="1050" y="170" width="180" height="60" rx="10" fill="#ddf4ff" stroke="#0969da"/>
+<circle cx="850" cy="200" r="16" fill="#ffffff" stroke="#57606a"/>
+</g>
+<g text-anchor="middle" fill="#24292f">
+<text x="110" y="196" font-size="20" font-weight="700">Played</text>
+<text x="110" y="218" font-size="14" fill="#57606a">the reply: reference x</text>
+<text x="450" y="76" font-size="20" font-weight="700">Speaker</text>
+<text x="450" y="98" font-size="14" fill="#57606a">plays x</text>
+<text x="850" y="76" font-size="20" font-weight="700">Microphone</text>
+<text x="850" y="98" font-size="14" fill="#57606a">echo + user</text>
+<text x="450" y="196" font-size="20" font-weight="700">Adaptive filter</text>
+<text x="450" y="218" font-size="14" fill="#57606a">ĥ: its model of h</text>
+<text x="1140" y="196" font-size="20" font-weight="700">Output</text>
+<text x="1140" y="218" font-size="14" fill="#57606a">e ≈ the user</text>
+<text x="850" y="206" font-size="18">Σ</text>
+</g>
+<g font-size="15" fill="#57606a" text-anchor="middle">
+<text x="850" y="18">the user talks</text>
+<text x="706" y="190">ŷ: the echo estimate</text>
+<text x="650" y="260">e: the error, which it learns from</text>
+<text x="819" y="190">−</text>
+<text x="864" y="160">+</text>
+<text x="956" y="190">e</text>
+</g>
+<g font-size="15" fill="#bc4c00" text-anchor="middle">
+<text x="644" y="70">echo path h</text>
+<text x="644" y="101">buffering, loudspeaker, room</text>
+</g>
+<g stroke="#57606a" stroke-width="2" fill="none" marker-end="url(#arrow-aec)">
+<line x1="202" y1="200" x2="316" y2="200"/>
+<path d="M250,200 V80 H366"/>
+<line x1="850" y1="26" x2="850" y2="46"/>
+<line x1="850" y1="112" x2="850" y2="180"/>
+<line x1="582" y1="200" x2="830" y2="200"/>
+<line x1="866" y1="200" x2="1046" y2="200"/>
+<path d="M850,216 V270 H450 V234"/>
+</g>
+<g fill="#57606a">
+<circle cx="250" cy="200" r="4"/>
+</g>
+<line x1="532" y1="80" x2="756" y2="80" stroke="#bc4c00" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-aec-echo)"/>
+</svg>
+
+<div class="cols">
+<div>
+
+### How it learns
+
+- **A partitioned frequency-domain filter (MDF).** 16 partitions of 16ms model 256ms of echo path; the output is at most 16ms late.
+- **Step size per bin (Valin, 2007):** the residual echo's share of the error. When the user talks, the error grows but the echo estimate does not, so the step falls and the filter holds. No double-talk detector.
+- **Safeguards.** The first second learns on a fixed step. A filter that leaves the output louder than its input for 0.8s is reset.
+
+</div>
+<div>
+
+### Measured on synthetic echo
+
+| case | ERLE |
+| --- | --- |
+| white noise, 145ms path, at 8–10s | 59.5 dB |
+| a voice at the echo's level: before, during, after | 33.1, 29.8, 48.0 dB |
+| the path moves 5ms, into another room | −2 dB, then 32.3 dB 6–8s later |
+| speech, the echo 6 dB over the user: while talking, at 18–22s | 17–20, 27–29 dB |
+
+ERLE: how far the echo is pushed down. RTF 0.011 on the PC's CPU.
+
+</div>
+</div>
+
+<p class="note">Linear only. What it cannot model stays, such as loudspeaker distortion, and recognition transcribes echo even 20 dB down. An echo path longer than 256ms, buffering included, is not cancelled at all.</p>
 
 ---
 

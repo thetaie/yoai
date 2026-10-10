@@ -91,6 +91,7 @@ def _str(raw):
 # Where a lane keeps the reason for its last failure. Any other failure is
 # reported by the function's name and what it returned.
 _LAST_ERROR = (("timeline_", "yoai_timeline_last_error"),
+               ("aec_", "yoai_aec_last_error"),
                ("tts_", "yoai_tts_last_error"),
                ("reader_", "yoai_reader_last_error"),
                ("prompt_get", "yoai_prompt_last_error"))
@@ -231,6 +232,11 @@ _FUNCTIONS = (
     ("voice_unload", "v", ""),
     ("voice_set_itn", "z", "i"),
     ("voice_set_threads", "z", "i"),
+    # Echo cancellation
+    ("aec_set_high_latency", "v", "i"),
+    ("aec_set_reference_rate", "z", "i"),
+    ("aec_reset", "v", ""),
+    ("aec_last_error", "s", ""),
     # Omni
     ("omni_available", "b", ""),
     ("omni_load", "z", "s"),
@@ -315,6 +321,8 @@ def _raw(name, restype, *argtypes):
 _providers = _raw("providers", c_char_p)
 _chat = _raw("chat", c_int, c_char_p, c_char_p, c_char_p, c_char_p, _CHAT_HANDLER, c_void_p)
 _voice_analyze = _raw("voice_analyze", c_char_p, POINTER(c_short), c_int, c_int)
+_aec_process = _raw("aec_process", c_int, POINTER(c_short), c_int, POINTER(c_float), c_int,
+                    POINTER(c_short), c_int)
 _omni_ask = _raw("omni_ask", c_char_p, POINTER(c_short), c_int, c_char_p,
                  _AUDIO_HANDLER, _TEXT_HANDLER, c_void_p)
 _tts_say = _raw("tts_say", c_char_p, c_char_p, _AUDIO_HANDLER, c_void_p)
@@ -435,6 +443,29 @@ def voice_analyze(pcm, sample_rate=16000):
     array('h'), or a sequence of ints."""
     samples, n = _pcm16(pcm)
     return _result("voice_analyze", "j", _voice_analyze(samples, n, int(sample_rate)))
+
+
+def aec_process(mic, ref):
+    """yoai_aec_process(). `mic` is 16-bit mono at 16000 Hz, as voice_analyze
+    takes; `ref` is float mono at the reference rate -- an array('f'), as
+    tts_say hands it over, or any sequence of numbers. Returns array('h') with
+    everything ready, the output that did not fit included."""
+    mic_buf, n_mic = _pcm16(mic)
+    ref = ref if isinstance(ref, array.array) and ref.typecode == "f" else array.array("f", ref)
+    n_ref = len(ref)
+    ref_buf = (c_float * n_ref).from_buffer_copy(ref) if n_ref else None
+    out = array.array("h")
+    room = n_mic + 512
+    buf = (c_short * room)()
+    while True:
+        n = _aec_process(mic_buf, n_mic, ref_buf, n_ref, buf, room)
+        if n < 0:
+            _fail("aec_process", "returned %d" % n)
+        out.frombytes(ctypes.string_at(buf, n * 2))
+        if n < room:
+            return out
+        # Full: the rest is drained by calls with no input.
+        mic_buf, n_mic, ref_buf, n_ref = None, 0, None, 0
 
 
 def omni_ask(pcm, prompt, on_audio=None, on_text=None):
