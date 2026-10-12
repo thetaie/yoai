@@ -510,22 +510,36 @@ def qtts_sdk(gen):
     # Configured every run, for the reason given under llama_sdk().
     crt = ["-DCMAKE_POLICY_DEFAULT_CMP0091=NEW"] + STATIC_CRT if b.WINDOWS else []
     b.fresh_tree(qbuild, src)
+
+    # Re-running cmake cannot take /MD back out of a cache that already has it:
+    # CMAKE_CXX_FLAGS_RELEASE is initialised once and then kept. So the flags
+    # above only work on a tree configured WITH them, and a tree configured
+    # without them keeps building happily and failing at the addon's link. The
+    # tree is build output, so one like that is started over, as fresh_tree()
+    # does for a moved checkout; `clean` leaves sdk/ alone and cannot.
+    def md_runtime():
+        return b.WINDOWS and any(
+            line.startswith("CMAKE_CXX_FLAGS_RELEASE:STRING") and "/MD" in line
+            for line in b.read(os.path.join(qbuild, "CMakeCache.txt")).splitlines())
+
+    if md_runtime():
+        say("[build] the qtts tree at %s was configured for the /MD runtime; starting it over"
+            % qbuild)
+        b.rmtree(qbuild)
+
     run(["cmake", "-S", src, "-B", qbuild] + gen + [
         "-DCMAKE_BUILD_TYPE=Release"] + crt + PIC + b.QUIET_THIRD + [
         "-DGGML_SOURCE_DIR=" + b.fwd(ggml) + "/ggml",
         "-DBUILD_SHARED_LIBS=OFF",
         "-DQWEN_SHARED=OFF"] + backend)
 
-    # Re-running cmake cannot take /MD back out of a cache that already has it:
-    # CMAKE_CXX_FLAGS_RELEASE is initialised once and then kept. So the flags
-    # above only work on a tree configured WITH them, and a tree configured
-    # without them keeps building happily and failing at the addon's link. Said
+    # A tree configured from empty with the flags above and still /MD is these
+    # flags no longer working, which starting over again would not fix. Said
     # here, where the cache is, rather than 300 lines of LNK2038 later.
-    if b.WINDOWS:
-        for line in b.read(os.path.join(qbuild, "CMakeCache.txt")).splitlines():
-            if line.startswith("CMAKE_CXX_FLAGS_RELEASE:STRING") and "/MD" in line:
-                fail("[build] the qtts tree at %s is configured for the /MD runtime," % qbuild,
-                     "[build] which cannot link into cmake-js's /MT addon. Delete it and rebuild.")
+    if md_runtime():
+        fail("[build] the qtts tree at %s came out configured for the /MD runtime," % qbuild,
+             "[build] which cannot link into cmake-js's /MT addon, although it was configured",
+             "[build] with %s." % " ".join(crt))
 
     # Only qwen-core by name: qwen-tts, qwen-codec and tts-server all build by
     # default and all want a main(), which the addon has no use for.
@@ -927,12 +941,18 @@ def check_runtime_macos():
     foreign = []
     for path in sorted(glob.glob(os.path.join(STAGE, "*.node"))):
         text = b.output(["otool", "-L", path])
-        if text is None:
+        ident = b.output(["otool", "-D", path])
+        if text is None or ident is None:
             fail('[dist] otool could not read "%s"' % path)
+        # The addon's own install name, @rpath/yoai.node: a shared library
+        # (cmake-js builds one, not a bundle) lists it among what it loads,
+        # though it is the file itself. `otool -D` prints it under the path,
+        # and nothing under it for a bundle.
+        own = {line.strip() for line in ident.splitlines()[1:]}
         # The first line is the file itself; each after it is "<path> (...)".
         for line in text.splitlines()[1:]:
             dep = line.strip().split(" (")[0]
-            if dep and not dep.startswith(("/usr/lib/", "/System/Library/")):
+            if dep and dep not in own and not dep.startswith(("/usr/lib/", "/System/Library/")):
                 foreign.append("[dist]   %s, by %s" % (dep, os.path.basename(path)))
     if foreign:
         fail("[dist] loaded, and not part of macOS -- a fresh Mac would not load the addon:",
