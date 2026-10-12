@@ -108,6 +108,16 @@ Notes:
   installed, else on the CPU. A desktop package built with CUDA only runs
   where the CUDA runtime is installed; set `TTS_BACKEND=vulkan` in `.env` for
   one that runs anywhere.
+- Speech output speed, as RTF: seconds of computation per second of speech,
+  so below 1 keeps up with playback. Qwen3-TTS `Q4_K_M`; measure your own
+  machine with `tests/tts_rtf.py`, and see [docs/slides.md](docs/slides.md)
+  for the full table.
+
+  | talker | Kirin 9020 (CPU) | Core Ultra 9 185H (CPU) | Arc iGPU (Vulkan) | RTX 3090 (CUDA) |
+  |---|---|---|---|---|
+  | 0.6B | 2.61–2.87 | 0.91–0.97 | 0.44–0.45 | 0.10 |
+  | 1.7B | 3.15–3.64 | 1.12–1.14 | 0.55–0.57 | 0.11 |
+
 - More: [cli/README.md](cli/README.md) for the CLI tools,
   [examples/desktop/README.md](examples/desktop/README.md) for model files and
   packaging, [examples/python/README.md](examples/python/README.md) for the

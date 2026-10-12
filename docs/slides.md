@@ -646,18 +646,18 @@ tbody tr:nth-child(6) td, tbody tr:nth-child(10) td { border-top: 2px solid #8c9
 
 Below 1 the speech keeps up with playback; above 1 a stream needs duration×(RTF−1) of buffer.
 
-| `Q4_K_M` | Kirin 9020 (ARM)<span class="sub">6 threads; slows after ~30s; GPU unusable</span> | Core Ultra 9 185H (x86)<span class="sub">11 threads; ±15% day to day</span> | Arc iGPU (Vulkan)<span class="sub">RTF 1.64 if the chat model shares it</span> |
-| --- | --- | --- | --- |
-| **RTF** | | | |
-| 0.6B Base | 2.61 | 0.91–0.95 | 0.44 |
-| 1.7B Base | 3.15 | 1.14 | **0.55** |
-| 0.6B CustomVoice | 2.87 | 0.96–0.97 | 0.44–0.45<span class="sub">sounds worse; may be our code</span> |
-| 1.7B CustomVoice | 3.64 | 1.12–1.13 | 0.55–0.57 |
-| **Time per 80ms frame, 1.7B** | | | |
-| talker | — | 23.9ms | 17.3ms |
-| code predictor<span class="sub">set by the 16 codebooks: no GPU gain</span> | — | 20.0ms | 20.5ms |
-| codec | — | 34.9ms | 6.3ms |
-| reproduce | /tts → Benchmark | `tests/tts_rtf.py` | the same run |
+| `Q4_K_M` | Kirin 9020 (ARM)<span class="sub">6 threads; slows after ~30s; GPU unusable</span> | Core Ultra 9 185H (x86)<span class="sub">11 threads; ±15% day to day</span> | Arc iGPU (Vulkan)<span class="sub">RTF 1.64 if the chat model shares it</span> | RTX 3090 (CUDA)<span class="sub">a desktop card, for scale</span> |
+| --- | --- | --- | --- | --- |
+| **RTF** | | | | |
+| 0.6B Base | 2.61 | 0.91–0.95 | 0.44 | 0.10 |
+| 1.7B Base | 3.15 | 1.14 | **0.55** | 0.11 |
+| 0.6B CustomVoice | 2.87 | 0.96–0.97 | 0.44–0.45<span class="sub">sounds worse; may be our code</span> | 0.10 |
+| 1.7B CustomVoice | 3.64 | 1.12–1.13 | 0.55–0.57 | 0.11 |
+| **Time per 80ms, 1.7B** | | | | |
+| talker | — | 23.9ms | 17.3ms | 2.5ms |
+| code predictor<span class="sub">set by the 16 codebooks:<br>no iGPU gain</span> | — | 20.0ms | 20.5ms | 5.3ms |
+| codec | — | 34.9ms | 6.3ms | 0.5ms |
+| reproduce | /tts → Benchmark | `tests/tts_rtf.py` | the same run | `--backend CUDA0` |
 
 ---
 
