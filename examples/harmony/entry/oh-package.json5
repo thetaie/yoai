@@ -1,0 +1,11 @@
+{
+  "name": "entry",
+  "version": "0.1.0",
+  "description": "YoAI entry module",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {
+    "libyoai.so": "file:./src/main/cpp/types/libyoai"
+  }
+}

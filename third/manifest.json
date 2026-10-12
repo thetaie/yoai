@@ -1,0 +1,43 @@
+{
+  "llama.cpp": {
+    "env": "LLAMA_SRC",
+    "url": "https://github.com/ggml-org/llama.cpp",
+    "branch": "master",
+    "commit": "335b21fcbda972777e4e9e69decad1f719cafeb3",
+    "submodules": false,
+    "patches": [],
+    "used_by": "every lane: its ggml is the only one now built"
+  },
+  "MNN": {
+    "env": "MNN_SRC",
+    "url": "https://github.com/alibaba/MNN.git",
+    "branch": "master",
+    "commit": "04ab6f2dea609d3ea15614ad6b093874e87d49d1",
+    "submodules": false,
+    "patches": [
+      "mnn-talker-context.patch@.",
+      "mnn-vulkan-static-register.patch@.",
+      "mnn-vulkan-device-limits.patch@.",
+      "mnn-export-talker-quant-bit.patch@."
+    ],
+    "used_by": "harmony mnn (evaluation lane), desktop omni"
+  },
+  "cosyvoice.cpp": {
+    "env": "COSYVOICE_SRC",
+    "url": "https://github.com/Lourdle/cosyvoice.cpp.git",
+    "branch": "main",
+    "commit": "f46496b7a1f9da6cd0b0b8401f7e941235c6a413",
+    "submodules": true,
+    "patches": [],
+    "used_by": "evaluation only: CosyVoice3, built as its own CLI against llama.cpp's ggml, linked into nothing"
+  },
+  "qwentts.cpp": {
+    "env": "QTTS_SRC",
+    "url": "https://github.com/ServeurpersoCom/qwentts.cpp.git",
+    "branch": "master",
+    "commit": "0bfb9237c1aae55f6d279fc7e32b3416a6dbb93a",
+    "submodules": true,
+    "patches": ["qwentts-thread-count-override.patch@.", "qwentts-streaming-text.patch@."],
+    "used_by": "harmony qtts, desktop qtts, android qtts"
+  }
+}

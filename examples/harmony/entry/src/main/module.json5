@@ -1,0 +1,99 @@
+{
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "description": "$string:module_desc",
+    "mainElement": "EntryAbility",
+    "deviceTypes": [
+      "phone",
+      "tablet",
+      "2in1"
+    ],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "pages": "$profile:main_pages",
+    "requestPermissions": [
+      {
+        // Everything else this app does -- storing your keys, your settings, your
+        // conversations -- happens inside the app sandbox and needs nothing
+        // declared here.
+        "name": "ohos.permission.INTERNET",
+        "reason": "$string:perm_internet_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
+      },
+      {
+        // Only for on-device models. A .gguf is gigabytes and belongs to the user,
+        // so it is referenced where it already lives rather than copied into the
+        // sandbox -- and the engine mmaps it by path, which means the grant the
+        // file picker hands out has to survive a cold start. Without this,
+        // persistPermission answers 201 and a model that worked when it was picked
+        // stops opening on the next launch.
+        //
+        // It grants nothing on its own: only files the user has explicitly chosen
+        // through the picker are ever reachable.
+        "name": "ohos.permission.FILE_ACCESS_PERSIST",
+        "reason": "$string:perm_file_persist_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
+      },
+      {
+        // Voice input. The recording never leaves the device: it is analysed by
+        // the core in this process and the samples are dropped when the page
+        // does. Nothing is written to disk.
+        "name": "ohos.permission.MICROPHONE",
+        "reason": "$string:perm_microphone_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
+      }
+    ],
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        "description": "$string:EntryAbility_desc",
+        "icon": "$media:layered_image",
+        "label": "$string:EntryAbility_label",
+        "startWindowIcon": "$media:startIcon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "skills": [
+          {
+            "entities": [
+              "entity.system.home"
+            ],
+            "actions": [
+              "action.system.home"
+            ]
+          }
+        ]
+      }
+    ],
+    "extensionAbilities": [
+      {
+        "name": "EntryBackupAbility",
+        "srcEntry": "./ets/entrybackupability/EntryBackupAbility.ets",
+        "type": "backup",
+        "exported": false,
+        "metadata": [
+          {
+            "name": "ohos.extension.backup",
+            "resource": "$profile:backup_config"
+          }
+        ]
+      }
+    ]
+  }
+}

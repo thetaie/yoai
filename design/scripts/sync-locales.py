@@ -1,0 +1,184 @@
+"""Keep the untranslated locale directories in step with en_US, and report status.
+
+    python design/scripts/sync-locales.py
+
+The app offers eleven interface languages. Two are written -- `base` (Chinese)
+and `en_US`. The other nine exist so the picker has somewhere to point and a
+translator has somewhere to work; until real translations land they hold the
+English strings verbatim.
+
+Two jobs:
+
+1. Copy en_US into any locale that is still a verbatim English copy. A new UI
+   string has to reach them, or HarmonyOS falls back to `base` and shows
+   Chinese to, say, a French user. A locale that has started being translated
+   is left alone -- per key, so a half-translated locale keeps its work and
+   still picks up new strings.
+
+2. Write design/i18n-status.md, which is the answer to "what is left". The
+   status is DERIVED from the files every time rather than maintained by hand,
+   so it cannot quietly go stale.
+
+Deliberately no marker key inside string.json: a resource whose name starts
+with an underscore is not obviously legal, an unreferenced resource invites a
+lint warning, and the status belongs in one place rather than eleven.
+"""
+import hashlib
+import json
+import pathlib
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+RES = ROOT / "examples/harmony/entry/src/main/resources"
+STATUS = ROOT / "design/i18n-status.md"
+
+SOURCE = "en_US"
+
+# dir -> (language, endonym). Order is the order the picker shows them.
+LOCALES = [
+    ("base", "Chinese", "中文"),
+    ("en_US", "English", "English"),
+    ("fr_FR", "French", "Français"),
+    ("es_ES", "Spanish", "Español"),
+    ("de_DE", "German", "Deutsch"),
+    ("it_IT", "Italian", "Italiano"),
+    ("ja_JP", "Japanese", "日本語"),
+    ("ko_KR", "Korean", "한국어"),
+    ("ru_RU", "Russian", "Русский"),
+    ("ar_AE", "Arabic", "العربية"),
+    ("he_IL", "Hebrew", "עברית"),
+]
+
+WRITTEN = {"base", "en_US"}
+
+
+def strings(path):
+    if not path.exists():
+        return {}
+    return {e["name"]: e["value"] for e in json.load(open(path, encoding="utf-8"))["string"]}
+
+
+def plural_forms(path):
+    """Quantity names present per plural resource, e.g. {'drawer_msg_count': ['one','other']}."""
+    if not path.exists():
+        return {}
+    doc = json.load(open(path, encoding="utf-8"))
+    return {e["name"]: [v["quantity"] for v in e["value"]] for e in doc.get("plural", [])}
+
+
+def main() -> None:
+    src_path = RES / SOURCE / "element/string.json"
+    src_text = src_path.read_text(encoding="utf-8")
+    src = strings(src_path)
+    src_plural_path = RES / SOURCE / "element/plural.json"
+    src_plural_text = src_plural_path.read_text(encoding="utf-8") if src_plural_path.exists() else None
+
+    base = strings(RES / "base/element/string.json")
+    only_en = sorted(set(src) - set(base))
+    only_base = sorted(set(base) - set(src))
+
+    rows = []
+    copied, partial = [], []
+
+    for d, lang, endonym in LOCALES:
+        s_path = RES / d / "element/string.json"
+        p_path = RES / d / "element/plural.json"
+        cur = strings(s_path)
+
+        if d in WRITTEN:
+            rows.append((d, lang, endonym, "written", len(cur), len(cur), plural_forms(p_path)))
+            continue
+
+        # Per key: a value that differs from English is somebody's translation.
+        done = sorted(k for k, v in cur.items() if k in src and v != src[k])
+        if done:
+            # Fill in only what is missing or still English; never touch `done`.
+            merged = dict(src)
+            for k in done:
+                merged[k] = cur[k]
+            out = {"string": [{"name": k, "value": merged[k]} for k in src]}
+            s_path.write_text(json.dumps(out, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            partial.append(f"{d} ({len(done)}/{len(src)})")
+        else:
+            s_path.parent.mkdir(parents=True, exist_ok=True)
+            s_path.write_text(src_text, encoding="utf-8")
+            copied.append(d)
+
+        if src_plural_text is not None and not p_path.exists():
+            p_path.write_text(src_plural_text, encoding="utf-8")
+
+        rows.append((d, lang, endonym, "english copy" if not done else "in progress",
+                     len(done), len(src), plural_forms(p_path)))
+
+    # ---- report ----
+    print(f"{SOURCE}: {len(src)} strings")
+    print(f"english copies refreshed: {' '.join(copied) or '-'}")
+    if partial:
+        print("in progress, kept and topped up:")
+        for p in partial:
+            print(f"  {p}")
+    if only_en or only_base:
+        print("\nBASE/EN MISMATCH")
+        if only_en:
+            print(f"  in en_US only: {only_en}")
+        if only_base:
+            print(f"  in base only:  {only_base}")
+        sys.exit(1)
+    print(f"base and {SOURCE} agree on all {len(src)} keys")
+
+    # ---- status file ----
+    total = len(src)
+    lines = [
+        "# Interface language status",
+        "",
+        "Generated by `design/scripts/sync-locales.py` — do not edit. Re-run the",
+        "script after changing any string; it rewrites this file from what is on disk.",
+        "",
+        f"{total} strings per locale. Every locale below has a directory and the",
+        "complete key set, so nothing falls back to Chinese and a translator has",
+        "somewhere to put each string.",
+        "",
+        "| Directory | Language | Shown as | State | Translated | Plural forms |",
+        "|---|---|---|---|---|---|",
+    ]
+    for d, lang, endonym, state, done, tot, plurals in rows:
+        forms = ", ".join(sorted(set(sum(plurals.values(), [])))) or "—"
+        count = "—" if state == "written" else f"{done}/{tot}"
+        lines += [f"| `{d}` | {lang} | {endonym} | {state} | {count} | {forms} |"]
+
+    lines += [
+        "",
+        "## What \"english copy\" means",
+        "",
+        "The directory holds every key, with the English value in each. Choosing",
+        "that language today gets English — not a missing string, and not Chinese.",
+        "Translating it means replacing values in place; the script then leaves",
+        "those keys alone and keeps topping up the rest, so a locale can be",
+        "translated a few strings at a time.",
+        "",
+        "## Plural forms need adding, not just translating",
+        "",
+        "`plural.json` is a separate file with its own grammar, and the number of",
+        "forms is a property of the language, not a translation choice. The copies",
+        "carry English's two (`one`, `other`), which is wrong for several of these",
+        "locales — Russian and Arabic both need more, and Japanese and Korean need",
+        "fewer. Take the real set for each locale from CLDR rather than from this",
+        "table: the column above reports what is present, not what is required.",
+        "",
+        "## Not covered here",
+        "",
+        "- **RTL layout.** Arabic and Hebrew flip their text but not the frame:",
+        "  this app still positions with `left`/`right` padding rather than",
+        "  `start`/`end`. Translating those two locales does not make them usable.",
+        "- **Language names.** The \"Shown as\" column is each language's own name",
+        "  for itself, and is a literal string in the source, not a resource — the",
+        "  picker has to stay readable while the interface is in a language the",
+        "  reader cannot read.",
+        "",
+    ]
+    STATUS.write_text("\n".join(lines), encoding="utf-8")
+    print(f"wrote {STATUS.relative_to(ROOT)}")
+
+
+if __name__ == "__main__":
+    main()

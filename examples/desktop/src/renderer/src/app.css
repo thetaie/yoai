@@ -1,0 +1,765 @@
+/*
+ * The app's own styles. Colors come from palettes.css and nothing here invents
+ * one -- see design/README.md, "Never take a color off the canvas".
+ *
+ * Two variables are set by the app rather than by a palette: --bc-font-scale,
+ * which is the preference, and nothing else. Everything else is a token.
+ */
+
+@import './palettes.css';
+
+:root {
+  --bc-font-scale: 1;
+
+  /* The one thing a palette does not carry: a type stack that exists offline.
+     No webfont is loaded on purpose -- this client works with no network, and
+     a font fetched from a CDN would be the only thing in it that does not. */
+  --bc-font:
+    system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC',
+    sans-serif;
+  --bc-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Consolas, monospace;
+
+  --bc-radius: 10px;
+  --bc-gap: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: calc(16px * var(--bc-font-scale));
+}
+
+body {
+  margin: 0;
+  font-family: var(--bc-font);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--bc-text-primary);
+  background: var(--bc-bg-page);
+  /* The window chrome is the OS's; the page must not add a second scrollbar
+     around a layout that already manages its own. */
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+/*-----------------------------------------------------------------------------
+  Shell
+-----------------------------------------------------------------------------*/
+
+.shell {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  height: 100vh;
+}
+
+.shell[data-sidebar='hidden'] {
+  grid-template-columns: 0 1fr;
+}
+
+/*-----------------------------------------------------------------------------
+  Sidebar
+-----------------------------------------------------------------------------*/
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-right: 1px solid var(--bc-border);
+  background: var(--bc-bg-surface);
+  overflow: hidden;
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 14px 10px;
+}
+
+.wordmark {
+  flex: 1;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px 10px;
+}
+
+.sidebar-empty {
+  margin: 4px 10px;
+  font-size: 0.8125rem;
+  color: var(--bc-text-tertiary);
+}
+
+.session-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--bc-radius);
+}
+
+.session-row:hover {
+  background: var(--bc-bg-bubble);
+}
+
+.session-row[aria-current='true'] {
+  background: var(--bc-accent-soft);
+}
+
+.session-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+  border: 0;
+  padding: 0;
+  background: none;
+  text-align: left;
+}
+
+.session-count {
+  font-size: 0.75rem;
+  color: var(--bc-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.session-drop {
+  visibility: hidden;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 5px;
+  background: transparent;
+  color: var(--bc-text-tertiary);
+}
+
+.session-row:hover .session-drop {
+  visibility: visible;
+}
+
+.session-drop:hover {
+  color: var(--bc-danger);
+}
+
+.sidebar-foot {
+  border-top: 1px solid var(--bc-divider);
+  padding: 8px;
+}
+
+.sidebar-settings {
+  width: 100%;
+  text-align: left;
+}
+
+/*-----------------------------------------------------------------------------
+  Main column
+-----------------------------------------------------------------------------*/
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100vh;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--bc-divider);
+  background: var(--bc-bg-page);
+}
+
+.topbar-spacer {
+  flex: 1;
+}
+
+.thread {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 0 8px;
+}
+
+.thread-inner {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/*-----------------------------------------------------------------------------
+  Messages
+-----------------------------------------------------------------------------*/
+
+.msg {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.msg[data-role='user'] {
+  align-items: flex-end;
+}
+
+.bubble {
+  max-width: 88%;
+  padding: 10px 14px;
+  border-radius: var(--bc-radius);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.msg[data-role='user'] .bubble {
+  background: var(--bc-brand);
+  color: var(--bc-on-brand);
+}
+
+.msg[data-role='assistant'] .bubble {
+  background: var(--bc-bg-bubble);
+}
+
+.msg[data-transient='true'] .bubble {
+  background: transparent;
+  border: 1px dashed var(--bc-border);
+  color: var(--bc-danger);
+}
+
+/* Recording a reference voice, under the voice settings. */
+.recorder {
+  margin-top: 10px;
+}
+
+.recorder-script {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--bc-radius);
+  background: var(--bc-bg-page);
+  line-height: 1.8;
+}
+
+.recorder-clock {
+  font-variant-numeric: tabular-nums;
+  margin-right: 10px;
+}
+
+.recorder-meter {
+  display: inline-block;
+  vertical-align: middle;
+  width: 120px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bc-divider);
+  overflow: hidden;
+}
+
+.recorder-meter > span {
+  display: block;
+  height: 100%;
+  background: var(--bc-brand);
+}
+
+/* A reply rendered from markdown. `normal` because the bubble's pre-wrap would
+   show the newlines between rendered blocks as blank lines; a code block keeps
+   its own whitespace below. Margins only between blocks, so the bubble's
+   padding is the edge. */
+.md {
+  white-space: normal;
+  line-height: 1.65;
+}
+
+.md > :first-child {
+  margin-top: 0;
+}
+
+.md > :last-child {
+  margin-bottom: 0;
+}
+
+.md p,
+.md ul,
+.md ol,
+.md pre,
+.md blockquote,
+.md .md-table {
+  margin: 0 0 0.7em;
+}
+
+.md h1,
+.md h2,
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  margin: 1em 0 0.4em;
+  font-size: 1em;
+  font-weight: 600;
+}
+
+.md h1,
+.md h2 {
+  font-size: 1.1em;
+}
+
+.md ul,
+.md ol {
+  padding-left: 1.4em;
+}
+
+.md li + li {
+  margin-top: 0.2em;
+}
+
+.md li > p {
+  margin: 0;
+}
+
+.md blockquote {
+  padding-left: 0.8em;
+  border-left: 3px solid var(--bc-border);
+  color: var(--bc-text-secondary);
+}
+
+.md code {
+  font-family: var(--bc-mono);
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: var(--bc-bg-surface);
+}
+
+.md pre {
+  padding: 10px 12px;
+  border-radius: var(--bc-radius);
+  background: var(--bc-bg-surface);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.md pre code {
+  padding: 0;
+  background: none;
+  font-size: 0.85em;
+}
+
+.md .md-table {
+  overflow-x: auto;
+}
+
+.md table {
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.md th,
+.md td {
+  padding: 4px 10px;
+  border: 1px solid var(--bc-border);
+  text-align: left;
+}
+
+.md th {
+  font-weight: 600;
+  background: var(--bc-bg-surface);
+}
+
+.md hr {
+  border: 0;
+  border-top: 1px solid var(--bc-divider);
+  margin: 1em 0;
+}
+
+.md a {
+  color: var(--bc-brand);
+}
+
+.md .md-img {
+  color: var(--bc-text-tertiary);
+}
+
+/* The model's name, and whatever actions the message offers. Flex with a gap
+   rather than a margin on the button: the row is a list of items now, not a
+   label with something stuck after it, and without the gap the model name and
+   the speak button run together into "Qwen3.5-4B-Q4_K_M朗读". */
+.msg-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  line-height: 1.5;
+  font-size: 0.75rem;
+  color: var(--bc-text-tertiary);
+  padding: 0 4px;
+}
+
+/* A reasoning model's chain-of-thought is not part of the answer, so it is
+   collapsed by default and reads as an aside when opened. */
+.thinking {
+  border: 1px solid var(--bc-divider);
+  border-radius: var(--bc-radius);
+  background: transparent;
+  color: var(--bc-text-secondary);
+  max-width: 88%;
+}
+
+.thinking > summary {
+  cursor: pointer;
+  padding: 6px 12px;
+  font-size: 0.8125rem;
+  color: var(--bc-text-tertiary);
+  list-style: none;
+}
+
+.thinking > summary::-webkit-details-marker {
+  display: none;
+}
+
+.thinking-body {
+  padding: 0 12px 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+}
+
+/* The token summary, between the model's name and the speak button. Tabular
+   figures so the counts do not shuffle the button sideways as they change. */
+.msg-usage {
+  font-variant-numeric: tabular-nums;
+}
+
+.caret {
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  vertical-align: text-bottom;
+  background: currentColor;
+  opacity: 0.5;
+  animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caret {
+    animation: none;
+  }
+}
+
+/*-----------------------------------------------------------------------------
+  Composer
+-----------------------------------------------------------------------------*/
+
+.composer {
+  border-top: 1px solid var(--bc-divider);
+  background: var(--bc-bg-page);
+  padding: 12px 24px 16px;
+}
+
+.composer-inner {
+  max-width: 760px;
+  margin: 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 8px 8px 8px 12px;
+  border: 1px solid var(--bc-border);
+  border-radius: var(--bc-radius);
+  background: var(--bc-bg-surface);
+}
+
+.composer-inner:focus-within {
+  border-color: var(--bc-brand);
+}
+
+.composer textarea {
+  flex: 1;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  max-height: 40vh;
+  padding: 4px 0;
+}
+
+.composer-hint {
+  max-width: 760px;
+  margin: 6px auto 0;
+  font-size: 0.75rem;
+  color: var(--bc-text-tertiary);
+}
+
+/*-----------------------------------------------------------------------------
+  Buttons and controls
+-----------------------------------------------------------------------------*/
+
+.btn {
+  border: 1px solid var(--bc-border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  background: var(--bc-bg-surface);
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  border-color: var(--bc-text-tertiary);
+}
+
+.btn[disabled] {
+  color: var(--bc-text-disabled);
+  cursor: default;
+}
+
+.btn[disabled]:hover {
+  border-color: var(--bc-border);
+}
+
+.btn-primary {
+  border-color: transparent;
+  background: var(--bc-brand);
+  color: var(--bc-on-brand);
+}
+
+.btn-primary:hover {
+  border-color: transparent;
+  filter: brightness(1.06);
+}
+
+.btn-primary[disabled] {
+  background: var(--bc-bg-bubble);
+  color: var(--bc-text-disabled);
+  filter: none;
+}
+
+.btn-danger {
+  color: var(--bc-danger);
+}
+
+.btn-quiet {
+  border-color: transparent;
+  background: transparent;
+}
+
+.btn-quiet:hover {
+  background: var(--bc-bg-bubble);
+  border-color: transparent;
+}
+
+select.control,
+input.control {
+  border: 1px solid var(--bc-border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: var(--bc-bg-surface);
+  font-size: 0.875rem;
+  max-width: 100%;
+}
+
+input.control:focus,
+select.control:focus {
+  outline: none;
+  border-color: var(--bc-brand);
+}
+
+/*-----------------------------------------------------------------------------
+  Empty and error states
+-----------------------------------------------------------------------------*/
+
+.placeholder {
+  max-width: 560px;
+  margin: 12vh auto 0;
+  padding: 0 24px;
+  text-align: center;
+  color: var(--bc-text-tertiary);
+}
+
+.placeholder h2 {
+  margin: 0 0 8px;
+  font-size: 1.0625rem;
+  color: var(--bc-text-primary);
+}
+
+.banner {
+  margin: 16px auto;
+  max-width: 760px;
+  padding: 12px 16px;
+  border: 1px solid var(--bc-danger);
+  border-radius: var(--bc-radius);
+  color: var(--bc-danger);
+  font-size: 0.875rem;
+  white-space: pre-wrap;
+}
+
+/*-----------------------------------------------------------------------------
+  Settings
+-----------------------------------------------------------------------------*/
+
+/* A column: the top bar, then the part that scrolls. */
+.settings {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 0 48px;
+}
+
+.settings-inner {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.section > h3 {
+  margin: 0 0 4px;
+  font-size: 0.9375rem;
+}
+
+.section > p {
+  margin: 0 0 12px;
+  font-size: 0.8125rem;
+  color: var(--bc-text-tertiary);
+}
+
+.card {
+  border: 1px solid var(--bc-border);
+  border-radius: var(--bc-radius);
+  background: var(--bc-bg-surface);
+  overflow: hidden;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+}
+
+.row + .row {
+  border-top: 1px solid var(--bc-divider);
+}
+
+.row-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+}
+
+.row-sub {
+  font-size: 0.75rem;
+  color: var(--bc-text-tertiary);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+}
+
+.field > label {
+  font-size: 0.8125rem;
+  color: var(--bc-text-secondary);
+}
+
+.field-note {
+  font-size: 0.75rem;
+  color: var(--bc-text-tertiary);
+}
+
+.field-note[data-tone='danger'] {
+  color: var(--bc-danger);
+}
+
+.field-note[data-tone='success'] {
+  color: var(--bc-success);
+}
+
+.swatches {
+  display: inline-flex;
+  gap: 3px;
+  vertical-align: middle;
+}
+
+.swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--bc-divider);
+}
+
+/* The three come from the [data-swatch="<family>-<mode>"] block palettes.css
+   generates, which is set on the .swatches wrapper. */
+.swatch:nth-child(1) {
+  background: var(--bc-sw-1);
+}
+
+.swatch:nth-child(2) {
+  background: var(--bc-sw-2);
+}
+
+.swatch:nth-child(3) {
+  background: var(--bc-sw-3);
+}
+
+/* A download's progress: the platform's bar, in the brand colour. */
+progress.meter {
+  width: 100%;
+  height: 6px;
+  accent-color: var(--bc-brand);
+}
+
+.path {
+  font-family: var(--bc-mono);
+  font-size: 0.75rem;
+  color: var(--bc-text-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.link {
+  color: var(--bc-brand);
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+  /* Inherited, not the UA's `normal`: a button next to plain text sits on a
+     different baseline otherwise, and the row grows around it. */
+  line-height: inherit;
+  text-decoration: underline;
+}

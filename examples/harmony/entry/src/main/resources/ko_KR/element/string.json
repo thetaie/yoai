@@ -1,0 +1,320 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "YoAI entry module"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "YoAI"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "YoAI"
+    },
+    {
+      "name": "perm_internet_reason",
+      "value": "Send chat requests to the model service you configured yourself"
+    },
+    {
+      "name": "perm_file_persist_reason",
+      "value": "Read the on-device model file you picked, and keep reading it after a restart"
+    },
+    {
+      "name": "perm_microphone_reason",
+      "value": "Record your voice and analyse it on this device; the recording never leaves it"
+    },
+    {
+      "name": "chat_input_hint",
+      "value": "Message YoAI…"
+    },
+    {
+      "name": "chat_need_model",
+      "value": "No model available yet. Add a service key in Settings first."
+    },
+    {
+      "name": "chat_empty_reply",
+      "value": "The model returned nothing. Try another model, or again later."
+    },
+    {
+      "name": "chat_thinking_label",
+      "value": "Reasoning"
+    },
+    {
+      "name": "chat_stopped",
+      "value": "Stopped"
+    },
+    {
+      "name": "chat_disclaimer",
+      "value": "YoAI is an AI and can be wrong. Verify what matters."
+    },
+    {
+      "name": "chat_pick_model",
+      "value": "Choose a model"
+    },
+    {
+      "name": "chat_empty_title",
+      "value": "Your AI, running on your own device"
+    },
+    {
+      "name": "chat_empty_body",
+      "value": "Conversations stay on this device. Models are called with your own API key."
+    },
+    {
+      "name": "drawer_title",
+      "value": "Chats"
+    },
+    {
+      "name": "drawer_new_chat",
+      "value": "New chat"
+    },
+    {
+      "name": "drawer_empty",
+      "value": "No conversations yet"
+    },
+    {
+      "name": "drawer_local_only",
+      "value": "Kept on this device only"
+    },
+    {
+      "name": "drawer_untitled",
+      "value": "(empty chat)"
+    },
+    {
+      "name": "drawer_delete_title",
+      "value": "Delete this chat?"
+    },
+    {
+      "name": "drawer_delete_msg",
+      "value": "This cannot be undone."
+    },
+    {
+      "name": "settings_title",
+      "value": "Settings"
+    },
+    {
+      "name": "settings_models",
+      "value": "Configured models"
+    },
+    {
+      "name": "settings_models_empty",
+      "value": "No models configured yet"
+    },
+    {
+      "name": "settings_add",
+      "value": "Add a model"
+    },
+    {
+      "name": "settings_intro",
+      "value": "One key per service, held in this device's encrypted store. Never uploaded."
+    },
+    {
+      "name": "settings_vendor",
+      "value": "Service"
+    },
+    {
+      "name": "settings_base_url",
+      "value": "API base URL"
+    },
+    {
+      "name": "settings_base_url_hint",
+      "value": "https://…/v1 (no /chat/completions)"
+    },
+    {
+      "name": "settings_model",
+      "value": "Model"
+    },
+    {
+      "name": "settings_model_hint",
+      "value": "The model name to send in the request"
+    },
+    {
+      "name": "settings_key",
+      "value": "API key"
+    },
+    {
+      "name": "settings_key_hint",
+      "value": "Paste the key"
+    },
+    {
+      "name": "settings_key_saved",
+      "value": "A key is saved for this service"
+    },
+    {
+      "name": "settings_key_keep",
+      "value": "Leave blank to keep the saved key"
+    },
+    {
+      "name": "settings_save",
+      "value": "Save"
+    },
+    {
+      "name": "settings_cancel",
+      "value": "Cancel"
+    },
+    {
+      "name": "settings_delete",
+      "value": "Delete"
+    },
+    {
+      "name": "settings_get_key",
+      "value": "Get a key ›"
+    },
+    {
+      "name": "settings_local",
+      "value": "On-device models"
+    },
+    {
+      "name": "settings_local_intro",
+      "value": "Pick a GGUF file to run on this device, with no network. The file stays where it is -- nothing is copied into the app, and removing a model here never deletes it."
+    },
+    {
+      "name": "settings_local_add",
+      "value": "Pick a GGUF file"
+    },
+    {
+      "name": "settings_local_unavailable",
+      "value": "This build has no on-device engine (run examples/harmony/build llama first)."
+    },
+    {
+      "name": "settings_local_failed",
+      "value": "That file could not be read -- try another one"
+    },
+    {
+      "name": "settings_local_loading",
+      "value": "Loading the model…"
+    },
+    {
+      "name": "settings_local_ready",
+      "value": "Model ready"
+    },
+    {
+      "name": "settings_need_all",
+      "value": "Base URL, model and key are all required."
+    },
+    {
+      "name": "settings_saved",
+      "value": "Saved"
+    },
+    {
+      "name": "settings_theme",
+      "value": "Theme"
+    },
+    {
+      "name": "theme_system",
+      "value": "Follow system"
+    },
+    {
+      "name": "theme_light",
+      "value": "Light"
+    },
+    {
+      "name": "theme_dark",
+      "value": "Dark"
+    },
+    {
+      "name": "settings_core",
+      "value": "Core"
+    },
+    {
+      "name": "settings_clear_history",
+      "value": "Delete all conversations"
+    },
+    {
+      "name": "settings_clear_history_msg",
+      "value": "Every conversation on this device will be deleted. This cannot be undone."
+    },
+    {
+      "name": "toast_copied",
+      "value": "Copied"
+    },
+    {
+      "name": "action_copy",
+      "value": "Copy"
+    },
+    {
+      "name": "action_retry",
+      "value": "Regenerate"
+    },
+    {
+      "name": "settings_page_models",
+      "value": "Models"
+    },
+    {
+      "name": "settings_interface",
+      "value": "Interface"
+    },
+    {
+      "name": "settings_interface_intro",
+      "value": "Takes effect immediately -- no restart."
+    },
+    {
+      "name": "settings_palette",
+      "value": "Theme color"
+    },
+    {
+      "name": "settings_palette_amber",
+      "value": "Amber · warm"
+    },
+    {
+      "name": "settings_palette_arctic",
+      "value": "Arctic · cool"
+    },
+    {
+      "name": "settings_palette_quiet",
+      "value": "Quiet · muted"
+    },
+    {
+      "name": "settings_palette_note",
+      "value": "Family and light/dark are separate: pick the family here, the mode above. Each chip shows the palette those two currently add up to."
+    },
+    {
+      "name": "settings_text_size",
+      "value": "Text size"
+    },
+    {
+      "name": "settings_text_size_note",
+      "value": "Applies to conversation text; the interface itself keeps its size."
+    },
+    {
+      "name": "settings_text_preview",
+      "value": "Preview"
+    },
+    {
+      "name": "settings_text_smallest",
+      "value": "Smallest"
+    },
+    {
+      "name": "settings_text_smaller",
+      "value": "Smaller"
+    },
+    {
+      "name": "settings_text_normal",
+      "value": "Normal"
+    },
+    {
+      "name": "settings_text_larger",
+      "value": "Larger"
+    },
+    {
+      "name": "settings_text_largest",
+      "value": "Largest"
+    },
+    {
+      "name": "settings_text_sample",
+      "value": "Rewrite this so it reads more plainly."
+    },
+    {
+      "name": "settings_language",
+      "value": "Interface language"
+    },
+    {
+      "name": "settings_language_note",
+      "value": "Interface only. Existing conversations are left as they are, and the model answers in whatever language you ask in."
+    },
+    {
+      "name": "settings_language_partial",
+      "value": "Only Chinese and English are complete; the rest fall back for now."
+    }
+  ]
+}

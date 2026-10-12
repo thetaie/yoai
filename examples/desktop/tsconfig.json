@@ -1,0 +1,7 @@
+{
+  // Two projects, because the two halves do not share a global scope: the main
+  // process has Node and no DOM, the renderer has a DOM and no Node. One config
+  // covering both would type-check code that cannot run.
+  "files": [],
+  "references": [{ "path": "./tsconfig.node.json" }, { "path": "./tsconfig.web.json" }]
+}

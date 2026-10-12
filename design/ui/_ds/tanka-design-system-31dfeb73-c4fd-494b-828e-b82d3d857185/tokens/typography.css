@@ -1,0 +1,95 @@
+/* ============================================================
+   TANKA · TYPOGRAPHY TOKENS
+   Three families:
+   • Inter            → product UI (app, dashboard, chat)
+   • DM Serif Display → marketing display headings
+   • IBM Plex Sans    → marketing long-form body
+   • IBM Plex Mono    → code / memory IDs / metadata
+   Source: framer-textstyles-backup (16 styles).
+   ============================================================ */
+
+:root {
+  /* ---- Families ---- */
+  --font-ui:      'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; /* @kind font */
+  --font-display: 'DM Serif Display', Georgia, 'Times New Roman', serif; /* @kind font */
+  --font-body:    'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif; /* @kind font */
+  --font-mono:    'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace; /* @kind font */
+
+  /* ---- Weights ---- */
+  --weight-regular:  400; /* @kind font */
+  --weight-medium:   500; /* @kind font */
+  --weight-semibold: 600; /* @kind font */
+  --weight-bold:     700; /* @kind font */
+
+  /* ============ UI scale (Inter) — all @kind font ============ */
+  --ui-h1-size:        36px;     /* @kind font */
+  --ui-h1-line:        1.22;     /* @kind font */
+  --ui-h1-track:       -0.02em;  /* @kind font */
+  --ui-largetitle-size:30px;     /* @kind font */
+  --ui-largetitle-line:1.26;     /* @kind font */
+  --ui-largetitle-track:-0.018em;/* @kind font */
+  --ui-title-size:     25px;     /* @kind font */
+  --ui-title-line:     1.32;     /* @kind font */
+  --ui-title-track:    -0.015em; /* @kind font */
+  --ui-headline-size:  22px;     /* @kind font */
+  --ui-headline-line:  1.36;     /* @kind font */
+  --ui-headline-track: -0.01em;  /* @kind font */
+  --ui-body-size:      16px;     /* @kind font */
+  --ui-body-line:      1.54;     /* @kind font */
+  --ui-body-track:     0;        /* @kind font */
+  --ui-callout-size:   14px;     /* @kind font */
+  --ui-callout-line:   1.49;     /* @kind font */
+  --ui-callout-track:  0.005em;  /* @kind font */
+  --ui-detail-size:    12px;     /* @kind font */
+  --ui-detail-line:    1.44;     /* @kind font */
+  --ui-detail-track:   0.01em;   /* @kind font */
+  --ui-tiny-size:      11px;     /* @kind font */
+  --ui-tiny-line:      1.39;     /* @kind font */
+  --ui-tiny-track:     0.015em;  /* @kind font */
+
+  /* ============ Display scale (DM Serif Display) — all @kind font ============ */
+  --display-1-size: 55px;    /* @kind font */
+  --display-1-line: 1.2;     /* @kind font */
+  --display-1-track: -0.03em;/* @kind font */
+  --display-2-size: 44px;    /* @kind font */
+  --display-2-line: 1.22;    /* @kind font */
+  --display-2-track: -0.025em;/* @kind font */
+  --display-3-size: 35px;    /* @kind font */
+  --display-3-line: 1.25;    /* @kind font */
+  --display-3-track: -0.023em;/* @kind font */
+  --display-4-size: 29px;    /* @kind font */
+  --display-4-line: 1.3;     /* @kind font */
+  --display-4-track: -0.02em;/* @kind font */
+  --display-5-size: 25px;    /* @kind font */
+  --display-5-line: 1.35;    /* @kind font */
+  --display-5-track: -0.015em;/* @kind font */
+  --display-6-size: 21px;    /* @kind font */
+  --display-6-line: 1.4;     /* @kind font */
+  --display-6-track: -0.01em;/* @kind font */
+
+  /* ============ Prose scale (IBM Plex Sans) — all @kind font ============ */
+  --prose-size:       18px;    /* @kind font */
+  --prose-line:       1.69;    /* @kind font */
+  --prose-track:      0.015em; /* @kind font */
+  --prose-small-size: 14px;    /* @kind font */
+  --prose-small-line: 1.64;    /* @kind font */
+  --prose-small-track:0.02em;  /* @kind font */
+}
+
+/* ============================================================
+   Type utility classes — opt-in helpers mirroring the tokens.
+   Components may use these or the raw vars directly.
+   ============================================================ */
+.t-display-1 { font-family: var(--font-display); font-weight: 400; font-size: var(--display-1-size); line-height: var(--display-1-line); letter-spacing: var(--display-1-track); }
+.t-display-2 { font-family: var(--font-display); font-weight: 400; font-size: var(--display-2-size); line-height: var(--display-2-line); letter-spacing: var(--display-2-track); }
+.t-display-3 { font-family: var(--font-display); font-weight: 400; font-size: var(--display-3-size); line-height: var(--display-3-line); letter-spacing: var(--display-3-track); }
+
+.t-ui-h1        { font-family: var(--font-ui); font-weight: 700; font-size: var(--ui-h1-size);        line-height: var(--ui-h1-line);        letter-spacing: var(--ui-h1-track); }
+.t-ui-title     { font-family: var(--font-ui); font-weight: 700; font-size: var(--ui-title-size);     line-height: var(--ui-title-line);     letter-spacing: var(--ui-title-track); }
+.t-ui-headline  { font-family: var(--font-ui); font-weight: 600; font-size: var(--ui-headline-size);  line-height: var(--ui-headline-line);  letter-spacing: var(--ui-headline-track); }
+.t-ui-body      { font-family: var(--font-ui); font-weight: 400; font-size: var(--ui-body-size);      line-height: var(--ui-body-line);      letter-spacing: var(--ui-body-track); }
+.t-ui-callout   { font-family: var(--font-ui); font-weight: 400; font-size: var(--ui-callout-size);   line-height: var(--ui-callout-line);   letter-spacing: var(--ui-callout-track); }
+.t-ui-detail    { font-family: var(--font-ui); font-weight: 400; font-size: var(--ui-detail-size);    line-height: var(--ui-detail-line);    letter-spacing: var(--ui-detail-track); }
+
+.t-prose        { font-family: var(--font-body); font-weight: 400; font-size: var(--prose-size);       line-height: var(--prose-line);        letter-spacing: var(--prose-track); }
+.t-mono         { font-family: var(--font-mono); font-weight: 400; }

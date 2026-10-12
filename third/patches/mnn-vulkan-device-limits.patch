@@ -1,0 +1,159 @@
+Obey two Vulkan device limits the backend was ignoring.
+
+Both were found with the validation layer on an Intel Arc Pro, where the omni
+lane's diffusion transformer and vocoder produced VK_ERROR_DEVICE_LOST within a
+few dispatches. Neither is device-specific in nature; both are spec violations
+that most desktop drivers happen to tolerate.
+
+1. Storage buffer offsets were not aligned.
+
+   A tensor's offset inside its pool goes straight to vkUpdateDescriptorSets as
+   a storage buffer offset, so it must be a multiple of
+   minStorageBufferOffsetAlignment. The pools were built with nonCoherentAtomSize
+   instead, which is the flush granularity of mapped memory -- a different limit
+   answering a different question.
+
+   On most desktop drivers the two coincide at 64 and nothing shows. This Arc
+   reports nonCoherentAtomSize 1 and minStorageBufferOffsetAlignment 64, so every
+   offset was arbitrary: VUID-VkWriteDescriptorSet-descriptorType-00328 on every
+   descriptor write.
+
+   VulkanDevice::bufferAlignment() is the maximum of the two, and the four pools
+   that hand out tensor offsets now use it.
+
+2. 16-bit access to UNIFORM blocks was never enabled.
+
+   checkFP16 enables storageBuffer16BitAccess, which covers SSBOs. The shaders
+   also put 16-bit members in uniform blocks, and that is a separate feature:
+   uniformAndStorageBuffer16BitAccess. Without it every such read is undefined
+   behaviour -- VUID-RuntimeSpirv-uniformAndStorageBuffer16BitAccess-06332 -- and
+   the failure surfaces as a lost device with no other diagnostic.
+
+   Enabled on both paths, and only when the device reports it, so a device that
+   supports 16-bit storage buffers but not 16-bit uniforms is unaffected.
+
+WHAT THIS DOES NOT FIX. With both in place the device is no longer lost and every
+operator runs on the GPU, but the Qwen2.5-Omni token2wav graph still produces
+noise rather than speech, identically at fp16 and fp32 -- so there is at least
+one more defect in the buffer path's operators, and it is not a precision
+problem. The patch is kept because the two violations above are real and would
+mislead the next attempt, not because it makes the backend usable here.
+
+diff --git a/source/backend/vulkan/buffer/backend/VulkanBackend.cpp b/source/backend/vulkan/buffer/backend/VulkanBackend.cpp
+index 03d163b..b237dba 100644
+--- a/source/backend/vulkan/buffer/backend/VulkanBackend.cpp
++++ b/source/backend/vulkan/buffer/backend/VulkanBackend.cpp
+@@ -102,7 +102,7 @@ VulkanBackend::VulkanBackend(const VulkanRuntime* runtime) : Backend(MNN_FORWARD
+     mUseFP16 = (mRuntime->mPrecision != BackendConfig::Precision_High && mRuntime->mDevice->getFP16Support());
+     std::shared_ptr<BufferAllocator::Allocator> allocReal = BufferAllocator::Allocator::createRecurse(runtime->mBufferPool.get());
+     mDynamicBufferPool.resize(2);
+-    mDynamicBufferPool[0].reset(new EagerBufferAllocator(allocReal, mRuntime->mDevice->proty().limits.nonCoherentAtomSize));
++    mDynamicBufferPool[0].reset(new EagerBufferAllocator(allocReal, mRuntime->mDevice->bufferAlignment()));
+     mCurrentDynamicBufferPool = mDynamicBufferPool[0].get();
+ 
+     auto& dev              = device();
+@@ -249,7 +249,7 @@ bool VulkanBackend::onSelectDynamicAllocator(int index, int maxIndex) {
+     }
+     if (mDynamicBufferPool[1].get() == nullptr) {
+         std::shared_ptr<BufferAllocator::Allocator> allocReal = BufferAllocator::Allocator::createRecurse(mRuntime->mBufferPool.get());
+-        mDynamicBufferPool[1].reset(new EagerBufferAllocator(allocReal, mRuntime->mDevice->proty().limits.nonCoherentAtomSize));
++        mDynamicBufferPool[1].reset(new EagerBufferAllocator(allocReal, mRuntime->mDevice->bufferAlignment()));
+     }
+     mCurrentDynamicBufferPool = mDynamicBufferPool[index].get();
+     return true;
+diff --git a/source/backend/vulkan/component/VulkanDevice.cpp b/source/backend/vulkan/component/VulkanDevice.cpp
+index 3629078..381b05f 100644
+--- a/source/backend/vulkan/component/VulkanDevice.cpp
++++ b/source/backend/vulkan/component/VulkanDevice.cpp
+@@ -694,6 +694,15 @@ void VulkanDevice::checkFP16(const std::vector<VkExtensionProperties>& available
+             mFP16Info.supportFP16 = true;
+             mFP16Info.enabledVulkan12Features.shaderFloat16 = VK_TRUE;
+             mFP16Info.enabledVulkan11Features.storageBuffer16BitAccess = VK_TRUE;
++            // UNIFORM blocks are a separate feature from storage buffers, and
++            // the shaders put 16-bit members in both. Enabling only the storage
++            // half leaves every uniform read undefined behaviour: validation
++            // reports VUID-RuntimeSpirv-uniformAndStorageBuffer16BitAccess-06332
++            // and the device is lost shortly after, with VK_ERROR_DEVICE_LOST as
++            // the only clue. Drivers that tolerate it hide the bug completely.
++            if (vk11.uniformAndStorageBuffer16BitAccess == VK_TRUE) {
++                mFP16Info.enabledVulkan11Features.uniformAndStorageBuffer16BitAccess = VK_TRUE;
++            }
+             return;
+         }
+     }
+@@ -718,6 +727,10 @@ void VulkanDevice::checkFP16(const std::vector<VkExtensionProperties>& available
+             mFP16Info.FP16FromExtension = true;
+             mFP16Info.enabledShaderFloat16Int8Features.shaderFloat16 = VK_TRUE;
+             mFP16Info.enabled16BitStorageFeatures.storageBuffer16BitAccess = VK_TRUE;
++            // As above, for the extension path.
++            if (khrStorage.uniformAndStorageBuffer16BitAccess == VK_TRUE) {
++                mFP16Info.enabled16BitStorageFeatures.uniformAndStorageBuffer16BitAccess = VK_TRUE;
++            }
+             return;
+         }
+     }
+diff --git a/source/backend/vulkan/component/VulkanDevice.hpp b/source/backend/vulkan/component/VulkanDevice.hpp
+index 8c3b141..4d2a5c9 100644
+--- a/source/backend/vulkan/component/VulkanDevice.hpp
++++ b/source/backend/vulkan/component/VulkanDevice.hpp
+@@ -147,6 +147,25 @@ public:
+     const VkPhysicalDeviceProperties& proty() const {
+         return mDeviceProty;
+     }
++
++    // The alignment every sub-allocation in the buffer pools has to satisfy.
++    //
++    // A tensor's offset within its pool is handed straight to
++    // vkUpdateDescriptorSets as a storage buffer offset, so it must be a
++    // multiple of minStorageBufferOffsetAlignment. The pools were built with
++    // nonCoherentAtomSize alone, which is a different limit answering a
++    // different question -- the flush granularity of mapped memory.
++    //
++    // On most desktop drivers the two coincide at 64 and nothing shows. On an
++    // Intel Arc, nonCoherentAtomSize is 1, so the offsets are arbitrary:
++    // validation reports VUID-VkWriteDescriptorSet-descriptorType-00328 on
++    // every descriptor write, and the device is lost a few dispatches later
++    // with no diagnostic beyond VK_ERROR_DEVICE_LOST.
++    VkDeviceSize bufferAlignment() const {
++        const VkDeviceSize atom  = mDeviceProty.limits.nonCoherentAtomSize;
++        const VkDeviceSize store = mDeviceProty.limits.minStorageBufferOffsetAlignment;
++        return atom > store ? atom : store;
++    }
+     const VkPhysicalDeviceMemoryProperties& memProty() const {
+         return mMemoryProty;
+     }
+diff --git a/source/backend/vulkan/component/VulkanMemoryPool.cpp b/source/backend/vulkan/component/VulkanMemoryPool.cpp
+index 9d854e2..551581d 100644
+--- a/source/backend/vulkan/component/VulkanMemoryPool.cpp
++++ b/source/backend/vulkan/component/VulkanMemoryPool.cpp
+@@ -56,7 +56,7 @@ VulkanMemoryPool::VulkanMemoryPool(const VulkanDevice& dev, bool permitFp16) : m
+     mAllocators.resize(dev.memProty().memoryTypeCount);
+     for (int i=0; i<mAllocators.size(); ++i) {
+         std::shared_ptr<BufferAllocator::Allocator> allocReal(new VulkanAllocator(dev, i));
+-        mAllocators[i].reset(new EagerBufferAllocator(allocReal, dev.proty().limits.nonCoherentAtomSize));
++        mAllocators[i].reset(new EagerBufferAllocator(allocReal, dev.bufferAlignment()));
+     }
+     mPermitFp16 = permitFp16;
+ }
+@@ -65,7 +65,7 @@ VulkanMemoryPool::VulkanMemoryPool(const VulkanMemoryPool* parent) : mDevice(par
+     mAllocators.resize(mDevice.memProty().memoryTypeCount);
+     for (int i=0; i<mAllocators.size(); ++i) {
+         std::shared_ptr<BufferAllocator::Allocator> allocReal = BufferAllocator::Allocator::createRecurse(parent->mAllocators[i].get());
+-        mAllocators[i].reset(new EagerBufferAllocator(allocReal, mDevice.proty().limits.nonCoherentAtomSize));
++        mAllocators[i].reset(new EagerBufferAllocator(allocReal, mDevice.bufferAlignment()));
+     }
+ }
+ 
+diff --git a/source/backend/vulkan/runtime/VulkanRuntime.cpp b/source/backend/vulkan/runtime/VulkanRuntime.cpp
+index 8e52117..befbf5e 100644
+--- a/source/backend/vulkan/runtime/VulkanRuntime.cpp
++++ b/source/backend/vulkan/runtime/VulkanRuntime.cpp
+@@ -107,7 +107,7 @@ VulkanRuntime::VulkanRuntime(const Backend::Info& info, std::shared_ptr<VulkanDe
+     }
+     mMemoryPool        = std::make_shared<VulkanMemoryPool>(dev, mPrecision != BackendConfig::Precision_High);
+     std::shared_ptr<BufferAllocator::Allocator> allocReal(new VulkanBufferAllocator(dev, *mMemoryPool));
+-    mBufferPool.reset(new EagerBufferAllocator(allocReal, dev.proty().limits.nonCoherentAtomSize));
++    mBufferPool.reset(new EagerBufferAllocator(allocReal, dev.bufferAlignment()));
+     mSampler         = std::make_shared<VulkanSampler>(dev, VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER);
+     mClampSampler         = std::make_shared<VulkanSampler>(dev, VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+     mPipelineFactory = std::make_shared<VulkanPipelineFactory>(dev);

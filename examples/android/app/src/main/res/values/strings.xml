@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The default locale is CHINESE, matching harmony's `base`. English is in
+  values-en/. The other nine of the eleven interface languages do not have
+  directories here yet, so they currently fall back to this file; see
+  design/i18n-status.md for what exists on the HarmonyOS side and needs
+  bringing across.
+-->
+<resources>
+    <string name="app_name">YoAI</string>
+    <string name="bench_name">YoAI 测量台</string>
+
+    <!-- Home: the current-state header -->
+    <string name="home_current">当前状态</string>
+    <string name="home_end">结束</string>
+    <string name="home_note_add">补一句</string>
+    <string name="home_hint">切换到 —— 上一个状态会自动结束并记下时长</string>
+
+    <!-- Home: nothing is running. The gap that follows is left as a gap. -->
+    <string name="home_idle_title">此刻没有状态</string>
+    <string name="home_idle_hint">空着的时间不会被填补——点下面的格子开始新的一段</string>
+    <string name="home_undo">撤销，回到「%1$s」</string>
+    <string name="home_just_ended">刚结束「%1$s」· 共 %2$s</string>
+
+    <!-- Home: the rolling window. Deliberately not "today"; see design/README.md. -->
+    <string name="home_recent">最近 24 小时</string>
+    <string name="home_recent_empty">还没有记录。点一个格子开始。</string>
+
+    <!-- Durations. The clock itself is always LTR, even in Arabic and Hebrew. -->
+    <string name="dur_hms">%1$d 小时 %2$d 分 %3$d 秒</string>
+    <string name="dur_ms">%1$d 分 %2$d 秒</string>
+    <string name="dur_hm">%1$d 小时 %2$d 分</string>
+    <string name="dur_m">%1$d 分</string>
+
+    <!-- The nine built-in states. Ids are in day/States.kt and are never shown. -->
+    <string name="state_work">工作中</string>
+    <string name="state_work_hint">专注 / 会议</string>
+    <string name="state_eat">用餐中</string>
+    <string name="state_eat_hint">早中晚 / 加餐</string>
+    <string name="state_nap">午睡中</string>
+    <string name="state_nap_hint">小睡 / 补觉</string>
+    <string name="state_commute">通勤中</string>
+    <string name="state_commute_hint">地铁 / 步行</string>
+    <string name="state_exercise">运动中</string>
+    <string name="state_exercise_hint">跑步 / 力量</string>
+    <string name="state_read">阅读中</string>
+    <string name="state_read_hint">书 / 长文</string>
+    <string name="state_social">社交中</string>
+    <string name="state_social_hint">朋友 / 家人</string>
+    <string name="state_rest">休息中</string>
+    <string name="state_rest_hint">发呆 / 刷手机</string>
+    <string name="state_childcare">带娃中</string>
+    <string name="state_childcare_hint">接送 / 陪玩</string>
+
+    <!-- The floating button's pills. There is no bottom navigation bar. -->
+    <string name="nav_ask">问它</string>
+    <string name="nav_now">此刻</string>
+    <string name="nav_today">今天</string>
+    <string name="nav_settings">设置</string>
+    <string name="nav_open">更多</string>
+    <string name="nav_close">收起</string>
+
+    <!-- Palette families, same resource names as the HarmonyOS table. -->
+    <string name="settings_palette_amber">琥珀 · 暖</string>
+    <string name="settings_palette_arctic">极地 · 冷</string>
+    <string name="settings_palette_quiet">静默 · 低饱和</string>
+</resources>

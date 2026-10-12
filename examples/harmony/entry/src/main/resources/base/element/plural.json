@@ -1,0 +1,13 @@
+{
+  "plural": [
+    {
+      "name": "drawer_msg_count",
+      "value": [
+        {
+          "quantity": "other",
+          "value": "%d 条"
+        }
+      ]
+    }
+  ]
+}

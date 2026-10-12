@@ -1,0 +1,588 @@
+Upstream's other text layout for the talker: the text read one token per frame.
+
+modeling_qwen3_tts.py builds the non ICL prompt two ways, switched by
+non_streaming_mode. True puts the whole utterance in the prefill, summed with
+codec_pad, and adds only tts_pad during generation. False ends the prefill on
+the first text token summed with codec_bos, and adds the rest, then tts_eos,
+one row per generated frame. qwentts.cpp builds only the first. Upstream's
+generate_voice_clone defaults to the second -- the one its docstring says
+"simulates streaming text input" -- so the voice this project uses, Base with
+a speaker vector, was being read in the layout upstream does not default to
+for it.
+
+The second layout is also the only way a reply could be read as it is
+written, in one generation rather than piece by piece: the text already
+arrives frame by frame, so appending to it while generating is the next
+step. This patch does not do that. It adds the layout, off by default, so it
+can be listened to first.
+
+qt_tts_params.streaming_text, appended at the tail, and QT_ABI_VERSION 5 -> 6
+as the header's own rule asks; v5 callers are still accepted and read as off.
+QWEN_TTS_STREAMING_TEXT marks a patched header, so a caller can test for the
+field without comparing ABI numbers. ICL ignores the flag: its layout is
+already the streaming one.
+
+The same layout ends worse. Its tts_eos is read at frame N_text, seconds
+before the speech is over, and from there the talker decides alone when to
+stop: on the weather passage, three seeds of three stopped mid vowel, the
+last 20 ms at -38 dBFS with no silence after. qt_tts_params.eos_hold_frames
+keeps it going: from the first draw of codec_eos, eos is masked for that many
+frames and each is drawn from what remains, the first one redrawn. Two frames
+(160 ms) brought all three down to -69 to -88 dBFS with 0.14 to 0.30 s of
+silence; four sounded the same. 0, the default, stops at the first eos as
+upstream does. QWEN_TTS_EOS_HOLD marks it.
+
+Held past its stop, the talker usually stops again within a few frames --
+the longest measured was six past the first eos -- and once did not: 62
+frames, five seconds of coughing after a thirteen character sentence, on
+the desktop's GPU. So at three times the hold past the first eos the
+utterance ends regardless -- and what came after the hold is dropped,
+because the talker made it after declining to stop, and the one time the
+ceiling was hit on the desktop it was heard as a faint noise at the end.
+Dropping needs the frames not to have gone out yet, so a single
+streaming lane keeps its frames past the first eos back and sends them
+when it finishes; a natural stop sends all of them, byte for byte what
+it sent before. Several lanes flush in lockstep and cannot wait, so
+there the ceiling only stops.
+
+And the step the layout was added for: qt_tts_params.text_pull, a callback
+the talker pulls the text through as it reaches it, so one generation can
+follow a writer instead of the text being cut into pieces that each start
+from the top. A frame whose text token has not been written yet waits for
+it -- the callback blocks -- rather than being handed a tts_pad it only
+ever saw after tts_eos, so the talker is given exactly what it would have
+been given all at once. Tokens are committed a pre-tokenizer chunk at a
+time with the last chunk held back, since more text can extend it and no
+other, which makes them the whole text's tokens. On the CPU the pulled
+audio matched the all-at-once audio sample for sample. The writer has to
+stay above 12.5 tokens a second, one a frame at playback rate, or the
+audio comes out slower than it plays. QWEN_TTS_TEXT_PULL marks it.
+
+diff --git a/src/pipeline-tts.cpp b/src/pipeline-tts.cpp
+index 7e64d76..bfd824e 100644
+--- a/src/pipeline-tts.cpp
++++ b/src/pipeline-tts.cpp
+@@ -19,6 +19,7 @@
+ #include "talker-forward.h"
+ #include "timer.h"
+ 
++#include <cmath>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
+@@ -514,8 +515,17 @@ struct TtsSlot {
+     std::vector<int32_t> prev_ids;        // previous frame codes [num_code_groups]
+     const float *        prev_overlay;    // trailing text row or tts_pad row
+     std::vector<float>   logits;          // pending c0 logits [vocab]
++    std::vector<float>   logits_kept;     // the same before sampling, for an eos redraw
+     int                  pending_c0;      // c0 of the frame in flight
+     bool                 has_frame;       // slot emits a frame this engine step
++    int                  eos_held;        // frames made past the first eos; -1 before it
++    int                  hold_from;       // all_codes index of the first frame past it; -1 before it
++
++    // Pulled text (qt_tts_params.text_pull): whether more may come, what
++    // has arrived and not been tokenized yet, and the time spent waiting.
++    bool                 text_open;
++    std::string          text_pending;
++    double               text_wait_ms;
+ 
+     // Streaming state: the slot's codec stream lane, an index into the
+     // compacted [0, codec_M) span of the shared multi set codec state.
+@@ -712,6 +722,85 @@ static bool tts_engine_codec_admit(TtsEngine * e, TtsSlot * s) {
+     return true;
+ }
+ 
++// The part of s.text_pending that more text can no longer change, cut off
++// the front and returned as text. The BPE pre-tokenizer splits into chunks
++// and merges only within one, and text appended later can extend the last
++// chunk and no other -- so every chunk but the last is settled, and the
++// tokens of the settled text are exactly those of the whole. Once the text
++// has ended the last chunk is settled too.
++static std::string tts_text_settled(TtsSlot & s) {
++    const std::vector<std::string> chunks = gpt2_pre_tokenize(s.text_pending);
++    const size_t                   take   = s.text_open ? (chunks.empty() ? 0 : chunks.size() - 1) : chunks.size();
++    size_t                         bytes  = 0;
++    for (size_t i = 0; i < take; i++) {
++        bytes += chunks[i].size();
++    }
++    if (!s.text_open) {
++        bytes = s.text_pending.size();  // the chunks cover it; this also takes anything they did not
++    }
++    std::string settled = s.text_pending.substr(0, bytes);
++    s.text_pending.erase(0, bytes);
++    return settled;
++}
++
++// Pull from the host until some text settles or the text ends. Returns the
++// settled text, possibly empty at the end; false in *ok when the host
++// cancelled. Blocks the compute worker for as long as the host takes.
++static std::string tts_text_pull(TtsSlot & s, bool * ok) {
++    const struct qt_tts_params * p = s.job->params;
++    Timer                        t;
++    std::string                  settled;
++    char                         buf[1024];
++    *ok = true;
++    while (settled.empty() && s.text_open) {
++        const int n = p->text_pull(buf, (int) sizeof(buf), p->text_pull_user_data);
++        if (n < 0) {
++            *ok = false;
++            break;
++        }
++        if (n == 0) {
++            s.text_open = false;
++        } else {
++            s.text_pending.append(buf, (size_t) (n < (int) sizeof(buf) ? n : (int) sizeof(buf)));
++        }
++        settled = tts_text_settled(s);
++    }
++    s.text_wait_ms += t.ms();
++    return settled;
++}
++
++// Append pulled text to the trailing overlay: its tokens, projected like
++// the prompt's, and tts_eos once the text has ended. Returns false when the
++// host cancelled.
++static bool tts_text_extend(TtsEngine * e, TtsSlot & s) {
++    bool              ok      = true;
++    const std::string settled = tts_text_pull(s, &ok);
++    if (!ok) {
++        return false;
++    }
++    std::vector<int> ids;
++    if (!settled.empty()) {
++        for (const std::string & chunk : gpt2_pre_tokenize(settled)) {
++            encode_chunk(e->tok, chunk, ids);
++        }
++    }
++    const int    hidden = s.prompt.hidden;
++    const int    add    = (int) ids.size() + (s.text_open ? 0 : 1);
++    const size_t at     = (size_t) s.prompt.T_trailing * (size_t) hidden;
++    s.prompt.trailing_text_hidden.resize(at + (size_t) add * (size_t) hidden, 0.0f);
++    if (!ids.empty()) {
++        std::vector<int32_t> ids32(ids.begin(), ids.end());
++        project_text_ids(e->pt, ids32, s.prompt.trailing_text_hidden.data() + at);
++    }
++    if (!s.text_open) {
++        std::memcpy(s.prompt.trailing_text_hidden.data() + at + ids.size() * (size_t) hidden,
++                    e->pt->prompt_cache.tts_eos_emb.data(), (size_t) hidden * sizeof(float));
++    }
++    s.prompt.T_trailing += add;
++    s.prompt.N_text += (int) ids.size();
++    return true;
++}
++
+ static bool tts_admit_fail(TtsJob * job, qt_status st) {
+     job->status = st;
+     job->error  = qt_last_error();
+@@ -821,6 +910,11 @@ bool tts_engine_admit(TtsEngine * e, TtsJob * job) {
+     s.prev_overlay     = NULL;
+     s.pending_c0       = -1;
+     s.has_frame        = false;
++    s.eos_held         = -1;
++    s.hold_from        = -1;
++    s.text_open        = false;
++    s.text_pending.clear();
++    s.text_wait_ms     = 0.0;
+     s.streaming        = (params->on_chunk != NULL);
+     s.codec_set        = -1;
+     s.finished         = false;
+@@ -870,9 +964,33 @@ bool tts_engine_admit(TtsEngine * e, TtsJob * job) {
+     // language id and the model infers it from the text.
+     const char * lang = params->lang ? params->lang : "auto";
+ 
++    // A v5 struct ends before streaming_text, so it is read only from v6.
++    const bool streaming_text = params->abi_version >= 6 && params->streaming_text != 0;
++
++    // Pulled text: the prompt needs its first token, so the first settled
++    // chunk is waited for here, and the rest arrives in the generation
++    // loop. qt_synthesize has already refused it outside the streaming
++    // text layout and with ICL.
++    std::string utterance = params->text ? params->text : "";
++    if (params->abi_version >= 6 && params->text_pull) {
++        s.text_open    = true;
++        s.text_pending = utterance;
++        bool ok        = true;
++        utterance      = tts_text_pull(s, &ok);
++        if (!ok) {
++            e->slots.pop_back();
++            return tts_admit_fail(job, QT_STATUS_CANCELLED);
++        }
++        if (utterance.empty()) {
++            qt_set_error("tts_engine_admit: the pulled text ended before any of it arrived");
++            e->slots.pop_back();
++            return tts_admit_fail(job, QT_STATUS_INVALID_PARAMS);
++        }
++    }
++
+     Timer t_build;
+-    if (!prompt_builder_build(pt, e->tok, params->text, lang, instruct, speaker, ref_spk_emb_ptr, ref_text,
+-                              s.ref_codes_ptr, s.ref_codes_T, &s.prompt)) {
++    if (!prompt_builder_build(pt, e->tok, utterance, lang, instruct, speaker, ref_spk_emb_ptr, ref_text,
++                              s.ref_codes_ptr, s.ref_codes_T, streaming_text, s.text_open, &s.prompt)) {
+         e->slots.pop_back();
+         return tts_admit_fail(job, QT_STATUS_GENERATE_FAILED);
+     }
+@@ -953,6 +1071,10 @@ static void tts_slot_complete(TtsEngine * e, TtsSlot & s) {
+ 
+     if (st == QT_STATUS_OK) {
+         qt_log(QT_LOG_INFO, "[Pipeline] Generation done : %zu frames", s.all_codes.size());
++        if (params->abi_version >= 6 && params->text_pull) {
++            qt_log(QT_LOG_INFO, "[Perf] TextWait %.1f ms (pulled text, %d tokens)", s.text_wait_ms,
++                   s.prompt.N_text);
++        }
+         s.perf.n_frames = (int) s.all_codes.size();
+ 
+         const int num_codebooks = pt->num_code_groups;
+@@ -1155,12 +1277,60 @@ void tts_engine_step(TtsEngine * e, std::vector<TtsJob *> * retired) {
+         // codec_eos. Then run the upstream sampling chain.
+         Timer t_host;
+         apply_suppress(s.logits.data(), vocab, vocab - 1024, vocab, codec_eos_id);
++
++        // eos_hold_frames: from the first draw of codec_eos, eos is masked
++        // for that many frames and each is drawn from what remains. The
++        // sampler works in place, so the logits are kept for the redraw of
++        // the frame where eos first came up.
++        const int eos_hold = p->abi_version >= 6 ? p->eos_hold_frames : 0;
++        // And a ceiling on the frames past it. Pushed on past its stop, the
++        // talker usually stops again within a few frames, and occasionally
++        // does not: once, 62 frames -- five seconds of coughing after a
++        // thirteen character sentence. Three times the hold covers every
++        // good ending measured, the longest six frames past the first eos.
++        //
++        // What it made after the hold ran out is then not what anybody wants
++        // to hear -- it chose not to stop -- so it is dropped wherever it has
++        // not been sent yet: a buffered slot, or the one streaming lane,
++        // whose frames past the first eos step 5 keeps back. Several lanes
++        // stream in lockstep, and there those frames are already out.
++        if (eos_hold > 0 && s.eos_held >= 3 * eos_hold) {
++            int dropped = 0;
++            if (s.hold_from >= 0 && (!s.streaming || e->codec_M == 1)) {
++                const size_t keep = (size_t) s.hold_from + (size_t) eos_hold;
++                if (s.all_codes.size() > keep) {
++                    dropped = (int) (s.all_codes.size() - keep);
++                    s.all_codes.resize(keep);
++                }
++            }
++            qt_log(QT_LOG_INFO, "[Pipeline] EOS forced at step %d, %d frame(s) past the first, %d dropped (slot %d)",
++                   s.step, s.eos_held, dropped, i);
++            s.finished = true;
++            continue;
++        }
++        if (eos_hold > 0 && s.eos_held < 0) {
++            s.logits_kept.assign(s.logits.begin(), s.logits.end());
++        } else if (eos_hold > 0 && s.eos_held < eos_hold) {
++            s.logits[(size_t) codec_eos_id] = -INFINITY;
++        }
++
+         float u_c0 = 0.0f;
+         int   c0   = sample_top_k_p(s.logits.data(), vocab, p->temperature, p->top_k, p->top_p, p->repetition_penalty,
+                                     s.talker_history.data(), (int) s.talker_history.size(), s.job->resolved_seed,
+                                     s.subseq_counter, &u_c0);
+-        s.perf.host_ms += t_host.ms();
+         s.subseq_counter++;
++        if (c0 == codec_eos_id && eos_hold > 0 && s.eos_held < 0) {
++            qt_log(QT_LOG_INFO, "[Pipeline] EOS at step %d held for %d frame(s) (slot %d)", s.step, eos_hold, i);
++            s.eos_held  = 0;
++            s.hold_from = (int) s.all_codes.size();  // the frame this redraw makes
++            s.logits.assign(s.logits_kept.begin(), s.logits_kept.end());
++            s.logits[(size_t) codec_eos_id] = -INFINITY;
++            c0 = sample_top_k_p(s.logits.data(), vocab, p->temperature, p->top_k, p->top_p, p->repetition_penalty,
++                                s.talker_history.data(), (int) s.talker_history.size(), s.job->resolved_seed,
++                                s.subseq_counter, &u_c0);
++            s.subseq_counter++;
++        }
++        s.perf.host_ms += t_host.ms();
+         if (c0 < 0) {
+             qt_set_error("tts_engine_step: c0 sample returned no candidate");
+             qt_log(QT_LOG_ERROR, "[Pipeline] c0 sample returned no candidate");
+@@ -1184,6 +1354,9 @@ void tts_engine_step(TtsEngine * e, std::vector<TtsJob *> * retired) {
+         }
+         s.pending_c0 = c0;
+         s.has_frame  = true;
++        if (s.eos_held >= 0) {
++            s.eos_held++;
++        }
+     }
+ 
+     // 3) Batched code predictor over all N lanes in lockstep. Lanes
+@@ -1279,6 +1452,15 @@ void tts_engine_step(TtsEngine * e, std::vector<TtsJob *> * retired) {
+                     for (int g = 0; g < num_codebooks; g++) {
+                         s.prev_ids[(size_t) g] = codes[(size_t) g];
+                     }
++                    // Pulled text the talker has read to the end of: wait
++                    // for more, so the next frame gets its text token and
++                    // not a tts_pad it would only ever have seen after
++                    // tts_eos. Appending may move the overlay's storage,
++                    // which is why the row is taken only after.
++                    if (s.text_open && s.step >= s.prompt.T_trailing && !tts_text_extend(e, s)) {
++                        s.finished   = true;
++                        s.fin_status = QT_STATUS_CANCELLED;
++                    }
+                     s.prev_overlay = (s.step < s.prompt.T_trailing) ?
+                                          s.prompt.trailing_text_hidden.data() + (size_t) s.step * (size_t) hidden :
+                                          s.prompt.tts_pad_embed.data();
+@@ -1349,11 +1531,45 @@ void tts_engine_step(TtsEngine * e, std::vector<TtsJob *> * retired) {
+             any_finish = any_finish || s.finished;
+             any_stage  = any_stage || s.has_frame;
+         }
++
++        // eos_hold_frames on the one streaming lane: from the first eos on,
++        // its frames are kept back in all_codes instead of staged, and go to
++        // the codec only once the slot finishes -- every one of them when
++        // the talker stopped by itself, only the held ones when the ceiling
++        // stopped it (step 2 trims the rest). A lane of several cannot sit a
++        // frame out, since they flush in lockstep, so there nothing waits.
++        TtsSlot * held = NULL;
++        if (e->codec_M == 1) {
++            TtsSlot * s0 = tts_engine_codec_lane_slot(e, 0);
++            if (s0 && s0->hold_from >= 0) {
++                held = s0;
++            }
++        }
++
+         bool ok = true;
+-        if (any_finish && e->codec_pending_n > 0) {
++        if (held && !held->finished) {
++            // Kept back: nothing is staged this step.
++        } else if (held) {
++            const int maxT = 1 << (CODEC_STREAM_CLASSES - 1);
++            for (size_t t = (size_t) held->hold_from; ok && t < held->all_codes.size(); t++) {
++                std::memcpy(e->codec_pending.data() + (size_t) e->codec_pending_n * (size_t) num_cg,
++                            held->all_codes[t].data(), (size_t) num_cg * sizeof(int32_t));
++                e->codec_live[0] = 1;
++                e->codec_pending_n++;
++                if (e->codec_pending_n >= e->codec_target) {
++                    ok = tts_engine_codec_flush(e);
++                    if (ok && e->codec_target < maxT) {
++                        e->codec_target <<= 1;
++                    }
++                }
++            }
++            if (ok && e->codec_pending_n > 0) {
++                ok = tts_engine_codec_flush(e);
++            }
++        } else if (any_finish && e->codec_pending_n > 0) {
+             ok = tts_engine_codec_flush(e);
+         }
+-        if (ok && any_stage) {
++        if (ok && any_stage && !held) {
+             int32_t * row =
+                 e->codec_pending.data() + (size_t) e->codec_pending_n * (size_t) e->codec_M * (size_t) num_cg;
+             for (int m = 0; m < e->codec_M; m++) {
+diff --git a/src/prompt-builder.h b/src/prompt-builder.h
+index b5380fc..6051f7e 100644
+--- a/src/prompt-builder.h
++++ b/src/prompt-builder.h
+@@ -32,6 +32,15 @@
+ //                 + codec_emb([codec_pad x (N_text + 1)])
+ //   trailing_rhs  tts_pad + codec_emb([codec_bos])                  1 vec
+ //
++// With streaming_text (upstream non_streaming_mode=False) the prefill
++// ends after the first text token instead, and the rest arrives during
++// generation, one row per frame:
++//
++//   role, prefill_lhs as above
++//   first         text(input_id[3]) + codec_emb([codec_bos])        1 vec
++//   overlay       text(input_id[4:-5]) + tts_eos                    N_text vecs
++//                 then tts_pad for every later frame
++//
+ // CustomVoice inserts the speaker codec embedding row between think_eos
+ // and codec_pad in the prefill, growing the prefill by one vector and
+ // substituting one tts_pad with another in the text stream alignment.
+@@ -373,6 +382,8 @@ static bool prompt_builder_build(PipelineTTS *         pt,
+                                  const std::string &   ref_text,
+                                  const int32_t *       ref_codes,
+                                  int                   ref_codes_T,
++                                 bool                  streaming_text,
++                                 bool                  text_open,
+                                  PromptBuilderOutput * out) {
+     const int hidden = pt->talker.hidden_size;
+ 
+@@ -572,9 +583,16 @@ static bool prompt_builder_build(PipelineTTS *         pt,
+ 
+     // Allocate the full output buffer.
+     // Standard layout    : N_instruct + 3 (role) + (n_pad_pre + 1) + N_text + 1 (eos) + 1 (final)
++    // Streaming text     : N_instruct + 3 (role) + (n_pad_pre + 1) + 1 (first token)
+     // ICL layout         : N_instruct + 3 (role) + (n_pad_pre + 1) + icl_T
+-    const int T_ctx =
+-        icl ? (N_instruct + 3 + (n_pad_pre + 1) + icl_T) : (N_instruct + 3 + (n_pad_pre + 1) + N_text + 1 + 1);
++    const bool stream = streaming_text && !icl;
++    if (text_open && !stream) {
++        qt_log(QT_LOG_ERROR, "[Prompt] FATAL: text still being written needs the streaming text layout");
++        return false;
++    }
++    const int  T_ctx  = icl    ? (N_instruct + 3 + (n_pad_pre + 1) + icl_T) :
++                        stream ? (N_instruct + 3 + (n_pad_pre + 1) + 1) :
++                                 (N_instruct + 3 + (n_pad_pre + 1) + N_text + 1 + 1);
+     out->T_ctx  = T_ctx;
+     out->hidden = hidden;
+     out->input_embed.assign((size_t) T_ctx * (size_t) hidden, 0.0f);
+@@ -643,10 +661,33 @@ static bool prompt_builder_build(PipelineTTS *         pt,
+         }
+     }
+ 
+-    // From here, two paths: standard (no ICL) builds the trailing
+-    // utterance text + tts_eos + final_pad, ICL builds an aligned
+-    // text/codec block that replaces those rows entirely.
+-    if (!icl) {
++    // From here, three paths: streaming text puts the first text token
++    // with codec_bos and leaves the rest to the overlay, standard (no
++    // ICL) builds the trailing utterance text + tts_eos + final_pad, ICL
++    // builds an aligned text/codec block that replaces those rows entirely.
++    if (stream) {
++        // modeling_qwen3_tts.py, non_streaming_mode=False: the prefill
++        // ends on text(input_id[:, 3:4]) + codec_bos, and
++        // trailing_text_hidden is text(input_id[:, 4:-5]) then tts_eos.
++        {
++            float * r = row_ptr(row);
++            project_text_range(pt, ids.data(), 3, 4, r);
++            vec_add(r, codec_bos_emb.data(), hidden);
++            row++;
++        }
++        // N_text - 1 text rows, then tts_eos -- unless the text is still
++        // being written (text_open), when the generation loop appends the
++        // rest as it arrives and tts_eos after it.
++        out->T_trailing = N_text - 1 + (text_open ? 0 : 1);
++        out->trailing_text_hidden.assign((size_t) out->T_trailing * (size_t) hidden, 0.0f);
++        if (N_text > 1) {
++            project_text_range(pt, ids.data(), 4, 3 + N_text, out->trailing_text_hidden.data());
++        }
++        if (!text_open) {
++            std::memcpy(out->trailing_text_hidden.data() + (size_t) (N_text - 1) * (size_t) hidden,
++                        tts_eos_emb.data(), (size_t) hidden * sizeof(float));
++        }
++    } else if (!icl) {
+         // Standard layout: trailing utterance text + tts_eos rows summed
+         // with codec_pad, then a final tts_pad + codec_bos row.
+         project_text_range(pt, ids.data(), 3, 3 + N_text, row_ptr(row));
+@@ -757,9 +798,10 @@ static bool prompt_builder_build(PipelineTTS *         pt,
+     // falls through to the else branch and reads tts_pad_embed. One row,
+     // bit exact with the Python hook dump.
+     //
+-    // ICL mode populates out->trailing_text_hidden directly inside the
+-    // ICL branch above, so we only set the default here for non ICL.
+-    if (!icl) {
++    // ICL mode and streaming text populate out->trailing_text_hidden
++    // directly in their branches above, so we only set the default here
++    // for the standard layout.
++    if (!icl && !stream) {
+         out->T_trailing = 1;
+         out->trailing_text_hidden.assign((size_t) hidden, 0.0f);
+         std::memcpy(out->trailing_text_hidden.data(), tts_pad_emb.data(), (size_t) hidden * sizeof(float));
+diff --git a/src/qwen.cpp b/src/qwen.cpp
+index 14377e6..e3fda50 100644
+--- a/src/qwen.cpp
++++ b/src/qwen.cpp
+@@ -265,6 +265,10 @@ void qt_tts_default_params(struct qt_tts_params * p) {
+     p->ref_spk_dim           = 0;
+     p->ref_codes             = nullptr;
+     p->ref_T                 = 0;
++    p->streaming_text        = 0;
++    p->eos_hold_frames       = 0;
++    p->text_pull             = nullptr;
++    p->text_pull_user_data   = nullptr;
+ }
+ 
+ int qt_num_codebooks(const struct qt_context * q) {
+@@ -609,7 +613,17 @@ enum qt_status qt_synthesize(struct qt_context * q, const struct qt_tts_params *
+         return QT_STATUS_INVALID_PARAMS;
+     }
+ 
+-    if (!params->text || !params->text[0]) {
++    // Pulled text replaces the text up front, and only in the layout that
++    // reads it a token at a time.
++    const bool pulled = params->abi_version >= 6 && params->text_pull != NULL;
++    if (pulled && (params->streaming_text == 0 || (params->ref_text && params->ref_text[0]))) {
++        qt_set_error("qt_synthesize: text_pull needs streaming_text and no ref_text");
++        if (out) {
++            qt_audio_free(out);
++        }
++        return QT_STATUS_INVALID_PARAMS;
++    }
++    if (!pulled && (!params->text || !params->text[0])) {
+         qt_set_error("qt_synthesize: params->text is NULL or empty");
+         if (out) {
+             qt_audio_free(out);
+diff --git a/src/qwen.h b/src/qwen.h
+index 733564c..bc64677 100644
+--- a/src/qwen.h
++++ b/src/qwen.h
+@@ -59,7 +59,20 @@ extern "C" {
+ // git short hash + commit date string returned by qt_version(); for
+ // binding compat checks, QT_ABI_VERSION is the only number that
+ // matters.
+-#define QT_ABI_VERSION 5
++#define QT_ABI_VERSION 6
++
++// Defined by qwentts-streaming-text.patch: qt_tts_params carries
++// streaming_text. A caller built against both patched and unpatched
++// headers tests this instead of the ABI number.
++#define QWEN_TTS_STREAMING_TEXT 1
++
++// Defined by qwentts-streaming-text.patch too: qt_tts_params carries
++// eos_hold_frames.
++#define QWEN_TTS_EOS_HOLD 1
++
++// Defined by qwentts-streaming-text.patch as well: qt_tts_params carries
++// text_pull and text_pull_user_data.
++#define QWEN_TTS_TEXT_PULL 1
+ 
+ // Oldest struct layout this build addresses. A v4 or older
+ // qt_tts_params places its trailing fields at offsets this build does
+@@ -234,6 +247,17 @@ typedef bool (*qt_cancel_cb)(void * user_data);
+ // frames remain.
+ typedef bool (*qt_audio_chunk_cb)(const float * samples, int n_samples, void * user_data);
+ 
++// Text as it is written, for qt_tts_params.text_pull (from
++// qwentts-streaming-text.patch). Writes up to `cap` bytes of UTF-8 into
++// `buf` and returns how many, BLOCKING until there is at least one; 0
++// means the text has ended; negative cancels the synthesis. Runs on the
++// compute worker and stalls it while it waits, which is the point: the
++// streaming text layout feeds the talker one text token per frame, and a
++// frame whose token has not been written yet is generated once it has,
++// so the talker sees exactly what it would have been given all at once.
++// A character may be split across two calls.
++typedef int (*qt_text_pull_cb)(char * buf, int cap, void * user_data);
++
+ // Log severity. Numerically ordered so a callback can filter with a
+ // simple `if (level < threshold) return;`. ERROR is reserved for
+ // failure reports that the lib also surfaces via qt_status /
+@@ -348,6 +372,38 @@ struct qt_tts_params {
+     int             ref_spk_dim;
+     const int32_t * ref_codes;
+     int             ref_T;
++
++    // Text layout on the non ICL path (custom_voice, voice_design, base
++    // mode A); ICL ignores it. 0 puts the whole utterance in the prefill,
++    // upstream's non_streaming_mode=True. 1 puts only its first token
++    // there and feeds the rest, then tts_eos, one per generated frame
++    // through the trailing overlay: upstream's non_streaming_mode=False,
++    // which upstream's generate_voice_clone defaults to. Read from
++    // abi_version 6.
++    int streaming_text;
++
++    // Frames to keep generating after the talker first samples codec_eos:
++    // for that many frames eos is masked out and the frame is sampled
++    // from what remains, then eos is allowed again, and at three times
++    // that many frames past the first eos the utterance ends regardless,
++    // without the frames made after the hold ran out: buffered, or on a
++    // single streaming lane, which keeps its frames past the first eos
++    // back until it knows how it ended.
++    // 0 (the default) stops at the first eos, as upstream does. For an
++    // ending that stops while the last vowel is still sounding. Read from
++    // abi_version 6.
++    int eos_hold_frames;
++
++    // The rest of the text, pulled as the talker reaches it; see
++    // qt_text_pull_cb. Needs streaming_text 1 and no ref_text (ICL has
++    // a layout of its own). `text` may then be empty or hold the start.
++    // Tokens are committed a pre-tokenizer chunk at a time, the last one
++    // held back until the text after it shows where it ends, so the
++    // tokens are those of the whole text; in Chinese a chunk runs to the
++    // next punctuation, which is when the first frame can start.
++    // Read from abi_version 6.
++    qt_text_pull_cb text_pull;
++    void *          text_pull_user_data;
+ };
+ 
+ // Initialise to the standard defaults. Strings NULL, seed -1, sampling

@@ -1,0 +1,10 @@
+{
+  "src": [
+    "pages/Index",
+    "pages/Settings",
+    "pages/SettingsModels",
+    "pages/SettingsInterface",
+    "pages/VoiceDebug",
+    "pages/TtsDebug"
+  ]
+}

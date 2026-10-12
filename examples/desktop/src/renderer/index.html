@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN" data-family="arctic" data-mode="light">
+  <head>
+    <meta charset="UTF-8" />
+    <title>YoAI</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      The content security policy is a RESPONSE HEADER set in src/main/index.ts,
+      not a meta tag here. Two reasons: a header cannot be dropped by whatever
+      rewrites this document, and the development policy has to be looser than
+      the shipping one (Vite's refresh runtime is an inline script), which a
+      static tag cannot express.
+    -->
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

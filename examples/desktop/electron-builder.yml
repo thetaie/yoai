@@ -1,0 +1,65 @@
+# Packaging, for `python build.py dist`, which stages the native half into
+# stage/ and then runs electron-builder with this file. Run through build.py,
+# not on its own: stage/ is what puts the addon in the package.
+#
+# For the machine it runs on: build.py passes --win, --mac or --linux and the
+# host's arch. There is no cross packaging -- the addon is native code built
+# here.
+
+appId: ai.yoai.desktop   # the AppUserModelID src/main/index.ts sets
+productName: YoAI
+
+directories:
+  # A scratch directory: build.py moves the app out of it, to dist-<os>-<arch>/,
+  # and deletes the rest -- electron-builder's own notes among it.
+  output: stage-out
+  # Not build/, electron-builder's default: that is cmake-js's output
+  # directory, which it deletes whole when a compile fails.
+  buildResources: installer
+
+# The bundles electron-vite wrote, and nothing from node_modules: every
+# dependency is a devDependency, bundled into out/ or used only to build.
+files:
+  - out/**
+  - package.json
+
+# yoai.node, the libraries it loads, and the speaker's voice file, into
+# resources/ beside the asar -- where src/main/core.ts and
+# src/main/reader.ts look in a packaged app. A .node cannot load from inside
+# an asar, and Node loads a .node's own DLLs from its directory.
+extraResources:
+  - from: stage
+    to: .
+
+# The Electron runtime npm already installed, rather than a second download of
+# the same version.
+electronDist: node_modules/electron/dist
+
+# No native modules in node_modules to rebuild; the addon is built by build.py.
+npmRebuild: false
+nodeGypRebuild: false
+
+# No installer and no archive on any platform: the app is a directory that
+# runs where it is put. electron-builder writes it as stage-out/win-unpacked/,
+# stage-out/linux-unpacked/, stage-out/mac-arm64/ and so on, which build.py
+# moves to dist-<os>-<arch>/.
+win:
+  target: dir
+  icon: ../harmony/AppScope/resources/base/media/app_icon.png
+
+# Signed ad hoc ("-"), not with a Developer ID: an Apple Silicon Mac does not
+# run unsigned code at all, and the Electron binary's own ad hoc signature no
+# longer matches once the app's resources are added. Ad hoc runs on the machine
+# that built it; on another, Gatekeeper refuses a downloaded copy until it is
+# allowed in System Settings, or until the app is signed and notarized.
+mac:
+  target: dir
+  icon: ../harmony/AppScope/resources/base/media/app_icon.png
+  identity: "-"
+
+# yoai rather than package.json's yoai-desktop, which is what electron-builder
+# would name the executable otherwise.
+linux:
+  target: dir
+  executableName: yoai
+  icon: ../harmony/AppScope/resources/base/media/app_icon.png

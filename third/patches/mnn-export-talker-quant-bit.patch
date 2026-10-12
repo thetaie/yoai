@@ -1,0 +1,50 @@
+A command line for the Talker's weight bits.
+
+The export forces 8 bit for the Talker whenever hidden_size is 2048 or less,
+which is Qwen2.5-Omni-3B, and 4 bit above it. Nothing on the command line could
+reach that decision: there is --visual_quant_bit and --lm_quant_bit, and no
+--talker_quant_bit.
+
+It is worth reaching because the Talker is where the speech half's cost is.
+Measured on a desktop, 2.30 s of speech cost 3.57 s of Talker decode against
+3.07 s of token2wav -- and the decode is one forward per codec token at 50 Hz,
+so it is 0.392 GB of weights read fifty times a second, 30 ms a token, 1.55x
+real time before the vocoder contributes anything. dit_steps cannot touch it.
+Halving the weights is the only lever that addresses it directly.
+
+Whether 4 bit stays intelligible on the 3B is exactly what this makes it
+possible to ask, and the default it overrides suggests upstream had a reason for
+8 -- so the answer may well be no. The flag changes no default.
+
+diff --git a/transformers/llm/export/llmexport.py b/transformers/llm/export/llmexport.py
+index 7bbfdfb..5d25029 100644
+--- a/transformers/llm/export/llmexport.py
++++ b/transformers/llm/export/llmexport.py
+@@ -1018,6 +1018,7 @@ def build_args(parser):
+     parser.add_argument('--quant_block', type=int, default=64, help='mnn quant block, 0 mean channel-wise, default is 64.')
+     parser.add_argument('--visual_quant_bit', type=int, default=None, help='mnn visual weight bit, 4/8/16 (16 exports FP16 weights), default is setting in utils/vision.py by different vit model.')
+     parser.add_argument('--visual_quant_block', type=int, default=None, help='mnn quant block, default is setting in utils/vision.py by different vit model.')
++    parser.add_argument('--talker_quant_bit', type=int, default=None, help='mnn talker weight bit, 4/8/16 (16 exports FP16 weights), default is setting in utils/talker.py by model size (8 for Qwen2.5-Omni-3B).')
+     parser.add_argument('--lm_quant_bit', type=int, default=None, help='mnn lm_head weight bit, 4/8/16 (16 exports FP16 weights), default is `quant_bit`.')
+     parser.add_argument('--lm_quant_block', type=int, default=None, help='mnn lm_head quant block, 0 mean channle-wise, default is `quant_block`.')
+     parser.add_argument('--mnnconvert', type=str, default='../../../build/MNNConvert', help='local mnnconvert path, if invalid, using pymnn.')
+diff --git a/transformers/llm/export/utils/talker.py b/transformers/llm/export/utils/talker.py
+index 29383b1..9531583 100644
+--- a/transformers/llm/export/utils/talker.py
++++ b/transformers/llm/export/utils/talker.py
+@@ -24,6 +24,15 @@ class Talker(torch.nn.Module):
+         if self.hidden_size <= 2048:
+             # Qwen2.5-Omni-3B using 8 bit quantization
+             self.quant_bit = 8
++        # An override, because the line above is the single biggest cost in the
++        # speech half and nothing on the command line could reach it. The Talker
++        # decodes one codec token per forward at 50 Hz, so its weights are read
++        # 50 times a second: measured on a desktop, 0.392 GB at 8 bit cost 30 ms
++        # per token, which is 1.55x real time before the vocoder does anything.
++        # Whether 4 bit stays intelligible here is the question this makes it
++        # possible to ask.
++        if getattr(self.args, 'talker_quant_bit', None) is not None:
++            self.quant_bit = self.args.talker_quant_bit
+         self.init_config()
+         self.load()
+ 

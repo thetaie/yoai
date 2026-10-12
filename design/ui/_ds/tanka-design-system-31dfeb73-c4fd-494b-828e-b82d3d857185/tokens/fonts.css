@@ -1,0 +1,5 @@
+/* Tanka webfonts — loaded from Google Fonts CDN.
+   NOTE: no local binaries were provided in the source backups, so these are
+   referenced from Google Fonts. Swap the @import for self-hosted @font-face
+   rules + .woff2 files in /assets/fonts if you need offline/production hosting. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=DM+Serif+Display:ital@0;1&family=IBM+Plex+Mono:wght@400;500;600&display=swap');

@@ -1,0 +1,50 @@
+Let a STATIC libMNN register its Vulkan backend.
+
+MNN registers each optional backend from a file-scope initializer -- here a
+`gResistor` in VulkanRuntime.cpp that calls MNNInsertExtraRuntimeCreator. An
+initializer only runs if the linker pulls its object out of the archive, and
+nothing else in MNN references anything in that file.
+
+With MNN_SEP_BUILD=OFF and a static libMNN, which is what an addon that has to
+be one .node needs, the object is therefore dropped. The build compiles the
+whole Vulkan backend, links it into MNN.lib, and the runtime then reports
+
+    Can't Find type=7 backend, use 0 instead
+
+and runs on the CPU. Nothing else says anything is wrong: the model loads, the
+answer is correct, and only the timings are the CPU's. A shared libMNN does not
+have the problem, which is why upstream does not.
+
+This adds one extern "C" function for a host to reference. It does nothing on
+purpose -- the registration stays in the initializer, so a shared build is
+unchanged -- and referencing it is what drags the object into the link.
+
+Upstream solves the same problem for CUDA with /WHOLEARCHIVE on the MNN target
+(CMakeLists.txt:925), which is not available to a consumer of the archive
+without pulling all 298 MB of it in.
+
+diff --git a/source/backend/vulkan/runtime/VulkanRuntime.cpp b/source/backend/vulkan/runtime/VulkanRuntime.cpp
+index 676895f..8e52117 100644
+--- a/source/backend/vulkan/runtime/VulkanRuntime.cpp
++++ b/source/backend/vulkan/runtime/VulkanRuntime.cpp
+@@ -292,3 +292,20 @@ static bool gResistor = []() {
+     return false;
+ }();
+ }
++
++// A symbol to reference, for a libMNN linked as a STATIC library.
++//
++// The creator above registers itself from a file-scope initializer, and an
++// initializer only runs if the linker pulls its object out of the archive.
++// Nothing else in MNN references anything in this file, so with
++// MNN_SEP_BUILD=OFF and a static libMNN the object is never pulled in, the
++// creator is never registered, and a build that compiled Vulkan perfectly
++// reports "Can't Find type=7 backend, use 0 instead" and silently runs on the
++// CPU. A shared libMNN does not have the problem: every object is in the .so.
++//
++// Calling this from the host is enough -- one referenced symbol drags the whole
++// object in, initializer included. It does nothing itself, deliberately: the
++// registration must stay where it is so a shared build keeps working unchanged.
++extern "C" void MNNForceLinkVulkanRuntime() {
++    (void)MNN::gResistor;
++}

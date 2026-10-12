@@ -1,0 +1,54 @@
+{
+  "app": {
+    // Local signing lands in this TRACKED file: DevEco (Project Structure → Signing
+    // Configs → Automatically generate signature) writes cert paths under ~/.ohos plus
+    // store/key passwords into a "signingConfigs" block here, and rewrites them from
+    // time to time. Right after cloning — BEFORE opening the project in DevEco — run
+    //
+    //     git update-index --skip-worktree examples/harmony/build-profile.json5
+    //
+    // so those rewrites never reach a commit. To change the shared settings below
+    // (products / buildModeSet / modules), lift the flag, commit, and set it again:
+    //
+    //     git update-index --no-skip-worktree examples/harmony/build-profile.json5
+    //
+    // Deliberately absent here: nobody else's debug certificate is useful to you, and
+    // a key password in a repo is a key password in a repo.
+    "products": [
+      {
+        "name": "default",
+        "signingConfig": "default",
+        "compatibleSdkVersion": "5.0.0(12)",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true
+          }
+        },
+        "targetSdkVersion": "6.0.1(21)"
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}
