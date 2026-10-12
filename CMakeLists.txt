@@ -29,12 +29,6 @@ else()
     add_compile_options(-Wall -Wextra)
 endif()
 
-if (APPLE)
-    link_libraries("-framework Accelerate")
-    link_libraries("-framework Metal" "-framework Foundation" "-framework MetalKit")
-    add_link_options("-Wl,-undefined,dynamic_lookup")
-endif()
-
 #-------------------------------------------------------------------------------
 # Dependencies
 #-------------------------------------------------------------------------------
@@ -406,7 +400,8 @@ macro(yoai_require_ggml _why)
     # find_library caches, so without clearing it a changed directory (switching
     # target ABI, or the qtts lane appearing) would silently keep linking the
     # previously found libs.
-    foreach(_v GGML_LIB GGML_CPU_LIB GGML_BASE_LIB GGML_VULKAN_LIB GGML_CUDA_LIB)
+    foreach(_v GGML_LIB GGML_CPU_LIB GGML_BASE_LIB GGML_VULKAN_LIB GGML_CUDA_LIB
+               GGML_METAL_LIB GGML_BLAS_LIB)
         unset(${_v} CACHE)
     endforeach()
 
@@ -424,6 +419,11 @@ macro(yoai_require_ggml _why)
     # beside Vulkan wherever there is a CUDA Toolkit.
     find_library(GGML_VULKAN_LIB NAMES ggml-vulkan ${_ggml_find})
     find_library(GGML_CUDA_LIB   NAMES ggml-cuda   ${_ggml_find})
+    # Metal and BLAS on macOS, where ggml turns both on by itself for APPLE and
+    # libggml's registry names them. Leaving them out is a link error for
+    # ggml_backend_metal_reg and ggml_backend_blas_reg.
+    find_library(GGML_METAL_LIB  NAMES ggml-metal  ${_ggml_find})
+    find_library(GGML_BLAS_LIB   NAMES ggml-blas   ${_ggml_find})
 
     # A shared llama build puts all of ggml inside libllama, so finding none of
     # these is only an error when nothing else supplies them.
@@ -435,11 +435,24 @@ macro(yoai_require_ggml _why)
     # order, which is why the order this replaced, Vulkan first, linked on
     # Windows, Android and OHOS.
     set(YOAI_GGML_LIBS "")
-    foreach(_lib GGML_LIB GGML_VULKAN_LIB GGML_CUDA_LIB GGML_CPU_LIB GGML_BASE_LIB)
+    foreach(_lib GGML_LIB GGML_METAL_LIB GGML_BLAS_LIB GGML_VULKAN_LIB GGML_CUDA_LIB
+                 GGML_CPU_LIB GGML_BASE_LIB)
         if(${_lib})
             list(APPEND YOAI_GGML_LIBS "${${_lib}}")
         endif()
     endforeach()
+
+    # The frameworks those archives need and do not carry, as for CUDA's
+    # runtime below. Accelerate for ggml-cpu and ggml-blas, which use it for
+    # BLAS and vDSP; the other three only when the Metal backend is in.
+    if(APPLE AND YOAI_GGML_LIBS)
+        list(APPEND YOAI_GGML_LIBS "-framework Accelerate")
+        if(GGML_METAL_LIB)
+            list(APPEND YOAI_GGML_LIBS
+                 "-framework Foundation" "-framework Metal" "-framework MetalKit")
+            message(STATUS "yoai_core: ggml Metal backend ON -> ${GGML_METAL_LIB}")
+        endif()
+    endif()
 
     # The loader, which belongs to the platform and not to the SDK. Only when
     # the backend is actually in, so a CPU-only build does not pull a graphics
