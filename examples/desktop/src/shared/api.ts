@@ -31,6 +31,10 @@ export const CHANNELS = {
   modelsVendorsWithKeys: 'models:vendorsWithKeys',
   modelsPickLocal: 'models:pickLocal',
   modelsLoadStates: 'models:loadStates',
+  modelsOffer: 'models:offer',
+  modelsDownload: 'models:download',
+  modelsDownloadStatus: 'models:downloadStatus',
+  modelsCancelDownload: 'models:cancelDownload',
 
   keysSave: 'keys:save',
   keysHas: 'keys:has',
@@ -175,11 +179,19 @@ export interface TtsMissing {
   size: number
 }
 
+/** The on-device model a new user is offered to download. */
+export interface LocalOffer {
+  name: string
+  /** Bytes. */
+  size: number
+}
+
 /**
- * A download of the speech models into a folder the user chose. It runs in the
- * main process, so it carries on while the settings screen is closed.
+ * A download of model files into a folder the user chose: the speech models,
+ * or the on-device language model. It runs in the main process, so it carries
+ * on while the settings screen is closed.
  */
-export interface TtsDownload {
+export interface ModelDownload {
   running: boolean
   /** The folder being downloaded into. */
   dir: string
@@ -363,6 +375,18 @@ export interface YoaiApi {
      * when it is switched to.
      */
     loadStates(): Promise<Record<string, ModelLoadState>>
+    /** The model a download fetches, for the button to name. */
+    offer(): Promise<LocalOffer>
+    /**
+     * Choose a folder and download the offered model into it, unless it is
+     * already there. Resolves once it has started: false when the dialog was
+     * dismissed or one is running. The model is added, and selected when
+     * nothing else is, when it is done.
+     */
+    download(): Promise<boolean>
+    downloadStatus(): Promise<ModelDownload>
+    /** Stop the running download and delete the file it was part way through. */
+    cancelDownload(): Promise<void>
   }
 
   keys: {
@@ -439,7 +463,7 @@ export interface YoaiApi {
      * The voice loads by itself when it is done.
      */
     download(): Promise<boolean>
-    downloadStatus(): Promise<TtsDownload>
+    downloadStatus(): Promise<ModelDownload>
     /** Stop the running download and delete the file it was part way through. */
     cancelDownload(): Promise<void>
     /** Base or CustomVoice; the voice is reloaded with the other talker. */

@@ -16,19 +16,21 @@ import {
   CHANNELS,
   ChatSettings,
   ChatSettingsPatch,
+  LocalOffer,
+  ModelDownload,
   OmniStatus,
   PickedModel,
   ReaderStatus,
-  TtsDownload,
   TtsSlot,
   TtsStatus
 } from '../shared/api'
 import { ChatMessage, WireMessage } from '../shared/chat'
-import { KIND_LOCAL, ModelConfig } from '../shared/provider'
+import { KIND_LOCAL, LOCAL_VENDOR_ID, ModelConfig, modelId } from '../shared/provider'
 import { CoreStatus, InterfacePrefs } from '../shared/store'
 import { core, describeCore } from './core'
 import * as chat from './chat'
 import * as keystore from './keystore'
+import * as llmfiles from './llmfiles'
 import * as models from './models'
 import * as omni from './omni'
 import * as reader from './reader'
@@ -178,6 +180,51 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.modelsLoadStates, () => models.loadStates())
+
+  handle<[], LocalOffer>(CHANNELS.modelsOffer, () => llmfiles.offer())
+
+  handle<[], boolean>(CHANNELS.modelsDownload, async () => {
+    // The file, and so the URL, is decided here and not sent by the page, as
+    // for the speech models.
+    if (!core().nativeLocalAvailable() || llmfiles.downloadStatus().running) {
+      return false
+    }
+    const win = BrowserWindow.getFocusedWindow()
+    const opts = {
+      title: 'Pick a folder to download the model into',
+      // The speech models' folder: the files usually sit together.
+      defaultPath: tts.downloadDir() || app.getPath('downloads'),
+      properties: ['openDirectory' as const, 'createDirectory' as const]
+    }
+    const result =
+      win === null ? await dialog.showOpenDialog(opts) : await dialog.showOpenDialog(win, opts)
+    if (result.canceled || result.filePaths.length === 0) {
+      return false
+    }
+    const dir = result.filePaths[0]
+    tts.setDownloadDir(dir)
+    void llmfiles.download(dir, (path) => {
+      const name = basename(path)
+      const id = modelId(LOCAL_VENDOR_ID, name)
+      models.add({
+        id,
+        vendorId: LOCAL_VENDOR_ID,
+        baseUrl: '',
+        model: name,
+        kind: KIND_LOCAL,
+        modelPath: path
+      })
+      // Selected only when nothing else was (models.add), and then read now,
+      // as switching to it would.
+      if (models.activeId() === id) {
+        models.autoPreload()
+      }
+    })
+    return true
+  })
+
+  handle<[], ModelDownload>(CHANNELS.modelsDownloadStatus, () => llmfiles.downloadStatus())
+  handle<[], void>(CHANNELS.modelsCancelDownload, () => llmfiles.cancelDownload())
 
   //----------------------------------------------------------------------------
   // Keys
@@ -375,7 +422,7 @@ export function registerHandlers(): void {
     return true
   })
 
-  handle<[], TtsDownload>(CHANNELS.ttsDownloadStatus, () => ttsfiles.downloadStatus())
+  handle<[], ModelDownload>(CHANNELS.ttsDownloadStatus, () => ttsfiles.downloadStatus())
   handle<[], void>(CHANNELS.ttsCancelDownload, () => ttsfiles.cancelDownload())
 
   handle<[], string>(CHANNELS.ttsLoad, () => tts.load())

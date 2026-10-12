@@ -210,8 +210,9 @@ and all three are under 设置:
 
 1. **A remote model.** 添加远程模型, pick a vendor, paste its key. Nothing to
    download; 去获取 key › opens the vendor's sign-up page.
-2. **A model on this machine.** Download `Qwen3.5-2B-Q4_K_M.gguf` (below), then
-   添加本机模型 → 选择 GGUF 文件, and pick it as the model to talk to.
+2. **A model on this machine.** 添加本机模型 → 下载到文件夹 fetches
+   `Qwen3.5-4B-Q4_K_M.gguf`, adds it, and selects it when nothing else is
+   selected. 选择 GGUF 文件 uses one already on disk.
 3. **Speech output.** 语音输出 → 下载到文件夹 fetches the files it needs, and
    选择已有文件 uses ones already on disk. Once they are in place, replies are
    read aloud as they are written.
@@ -220,22 +221,23 @@ and all three are under 设置:
 
 | File | Size | For | Set in |
 |---|---|---|---|
-| `Qwen3.5-2B-Q4_K_M.gguf` | 1.28 GB | on-device chat | 添加本机模型 |
+| `Qwen3.5-4B-Q4_K_M.gguf` | 2.74 GB | on-device chat | 添加本机模型 |
 | `qwen-talker-1.7b-base-Q4_K_M.gguf` | 1.22 GB | speech, 克隆音色（Base） | 语音输出 |
 | `qwen-talker-1.7b-customvoice-Q4_K_M.gguf` | 1.18 GB | speech, 内置说话人（CustomVoice） | 语音输出 |
 | `qwen-tokenizer-12hz-Q8_0.gguf` | 291 MB | speech, either mode | 语音输出 |
 
-The 2B rather than the 4B: [docs/voice.md](../../docs/voice.md) measured
-Qwen3.5-2B at 14.0 tok/s and the 4B at 6.70 tok/s, too slow for a reply.
+For speed, `Qwen3.5-2B-Q4_K_M.gguf` (1.28 GB, below) is the alternative to
+pick by hand: [docs/voice.md](../../docs/voice.md) measured the 2B at 14.0
+tok/s and the 4B at 6.70 tok/s.
 Speech needs the talker of the chosen mode plus the tokenizer; the default mode
 is Base, so 1.5 GB to start. The reasons for the speech files' quantizations
 are beside their URLs in [src/main/ttsfiles.ts](src/main/ttsfiles.ts).
 
-The app downloads the speech files itself, but the chat model has to be fetched
-by hand. The speech files can be fetched the same way for a machine that will
-run offline:
+The app downloads these files itself. For a machine that will run offline they
+can be fetched by hand:
 
 ```
+curl -L -C - -O https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/e87f176479d0855a907a41277aca2f8ee7a09523/Qwen3.5-4B-Q4_K_M.gguf
 curl -L -C - -O https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/f6d5376be1edb4d416d56da11e5397a961aca8ae/Qwen3.5-2B-Q4_K_M.gguf
 curl -L -C - -O https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/resolve/b7ee2e8c7459c3bea99da23e3d178125a7d1713c/qwen-talker-1.7b-base-Q4_K_M.gguf
 curl -L -C - -O https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/resolve/b7ee2e8c7459c3bea99da23e3d178125a7d1713c/qwen-talker-1.7b-customvoice-Q4_K_M.gguf
@@ -247,9 +249,9 @@ curl -L -C - -O https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/resolve/b7ee2
   Invoke-WebRequest, which takes none of these options.
 - From mainland China, put `hf-mirror.com` in place of `huggingface.co`.
 - Each URL names a commit, so the file is the one measured here. The speech
-  files' SHA-256 are `KNOWN` in [src/main/ttsfiles.ts](src/main/ttsfiles.ts);
-  the chat model's is
-  `aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223`.
+  files' SHA-256 are `KNOWN` in [src/main/ttsfiles.ts](src/main/ttsfiles.ts),
+  the 4B's is `OFFER` in [src/main/llmfiles.ts](src/main/llmfiles.ts), and the
+  2B's is `aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223`.
 
 Keep the speech files in one folder and under these names. Picking any one of
 them then fills in the others, and 下载到文件夹 pointed at that folder fetches

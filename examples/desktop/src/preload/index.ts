@@ -17,13 +17,14 @@ import {
   YoaiApi,
   CHANNELS,
   ChatSettings,
+  LocalOffer,
+  ModelDownload,
   ModelLoadState,
   OmniEvent,
   OmniStatus,
   PickedModel,
   ReaderEvent,
   ReaderStatus,
-  TtsDownload,
   TtsEvent,
   TtsSlot,
   TtsStatus
@@ -47,7 +48,12 @@ const api: YoaiApi = {
       ipcRenderer.invoke(CHANNELS.modelsVendorsWithKeys, ids) as Promise<string[]>,
     pickLocal: () => ipcRenderer.invoke(CHANNELS.modelsPickLocal) as Promise<PickedModel | null>,
     loadStates: () =>
-      ipcRenderer.invoke(CHANNELS.modelsLoadStates) as Promise<Record<string, ModelLoadState>>
+      ipcRenderer.invoke(CHANNELS.modelsLoadStates) as Promise<Record<string, ModelLoadState>>,
+    offer: () => ipcRenderer.invoke(CHANNELS.modelsOffer) as Promise<LocalOffer>,
+    download: () => ipcRenderer.invoke(CHANNELS.modelsDownload) as Promise<boolean>,
+    downloadStatus: () =>
+      ipcRenderer.invoke(CHANNELS.modelsDownloadStatus) as Promise<ModelDownload>,
+    cancelDownload: () => ipcRenderer.invoke(CHANNELS.modelsCancelDownload) as Promise<void>
   },
 
   keys: {
@@ -98,7 +104,7 @@ const api: YoaiApi = {
       ipcRenderer.invoke(CHANNELS.ttsPickModel, which) as Promise<PickedModel | null>,
     pickAny: () => ipcRenderer.invoke(CHANNELS.ttsPickAny) as Promise<PickedModel | null>,
     download: () => ipcRenderer.invoke(CHANNELS.ttsDownload) as Promise<boolean>,
-    downloadStatus: () => ipcRenderer.invoke(CHANNELS.ttsDownloadStatus) as Promise<TtsDownload>,
+    downloadStatus: () => ipcRenderer.invoke(CHANNELS.ttsDownloadStatus) as Promise<ModelDownload>,
     cancelDownload: () => ipcRenderer.invoke(CHANNELS.ttsCancelDownload) as Promise<void>,
     load: () => ipcRenderer.invoke(CHANNELS.ttsLoad) as Promise<string>,
     unload: () => ipcRenderer.invoke(CHANNELS.ttsUnload) as Promise<void>,

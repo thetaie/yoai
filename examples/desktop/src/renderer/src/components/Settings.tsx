@@ -22,10 +22,11 @@ import {
 } from '@shared/provider'
 import type {
   ChatSettings,
+  LocalOffer,
+  ModelDownload,
   ModelLoadState,
   ReaderStatus,
   OmniStatus,
-  TtsDownload,
   TtsStatus
 } from '@shared/api'
 import type { CoreStatus, InterfacePrefs } from '@shared/store'
@@ -53,7 +54,7 @@ const SCALES: Array<{ value: number; label: string }> = [
   { value: 1.4, label: '更大' }
 ]
 
-const DOWNLOAD_ERROR: Record<Exclude<TtsDownload['error'], ''>, string> = {
+const DOWNLOAD_ERROR: Record<Exclude<ModelDownload['error'], ''>, string> = {
   space: S.settingsTtsErrSpace,
   network: S.settingsTtsErrNetwork,
   checksum: S.settingsTtsErrChecksum,
@@ -64,6 +65,91 @@ const DOWNLOAD_ERROR: Record<Exclude<TtsDownload['error'], ''>, string> = {
 /** Decimal units, the way model sizes are quoted: 1.5 GB, 291 MB. */
 function formatBytes(n: number): string {
   return n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`
+}
+
+/**
+ * Follow a download while it runs. It runs in the main process, so it may
+ * already be under way when this page opens. `run` is bumped when one is
+ * started here, which starts following it; `onOver` gets how it ended.
+ */
+function useDownload(
+  status: () => Promise<ModelDownload>,
+  run: number,
+  onOver: (d: ModelDownload) => void | Promise<void>
+): ModelDownload | null {
+  const [download, setDownload] = useState<ModelDownload | null>(null)
+  useEffect(() => {
+    let stopped = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    // Started from here: its end matters even if it was never seen running,
+    // which is what a folder already holding every file looks like.
+    let started = run > 0
+    const poll = async (): Promise<void> => {
+      const d = await status()
+      if (stopped) {
+        return
+      }
+      setDownload(d)
+      if (d.running) {
+        started = true
+        timer = setTimeout(() => void poll(), 500)
+      } else if (started) {
+        await onOver(d)
+      }
+    }
+    void poll()
+    return () => {
+      stopped = true
+      if (timer !== undefined) {
+        clearTimeout(timer)
+      }
+    }
+  }, [run])
+  return download
+}
+
+/** A running download: what it is doing, how far it has got, and a way to stop it. */
+function DownloadProgress({ d, onCancel }: { d: ModelDownload; onCancel: () => void }): JSX.Element {
+  return (
+    <div className="field">
+      <label>
+        {d.retry > 0
+          ? S.settingsTtsRetrying
+              .replace('{s}', String(d.retryIn))
+              .replace('{n}', String(d.retry))
+              .replace('{max}', String(d.retries))
+          : d.file.length === 0
+            ? S.settingsTtsConnecting
+            : `${d.verifying ? S.settingsTtsVerifying : S.settingsTtsDownloading} ${d.file}`}
+      </label>
+      <progress className="meter" max={Math.max(d.total, 1)} value={d.received} />
+      <div className="row" style={{ padding: 0 }}>
+        <span className="row-label row-sub">
+          {formatBytes(d.received)} / {formatBytes(d.total)}
+          {d.host.length > 0 && ` · ${d.host}`}
+        </span>
+        <button className="btn" onClick={onCancel}>
+          {S.settingsCancel}
+        </button>
+      </div>
+      <div className="path">{d.dir}</div>
+    </div>
+  )
+}
+
+/** Why the last download stopped; nothing when it did not. */
+function DownloadFailure({ d }: { d: ModelDownload | null }): JSX.Element | null {
+  if (d === null || d.error === '') {
+    return null
+  }
+  return (
+    <>
+      <span className="field-note" data-tone={d.error === 'canceled' ? undefined : 'danger'}>
+        {DOWNLOAD_ERROR[d.error]}
+      </span>
+      {d.detail.length > 0 && <div className="path">{d.detail}</div>}
+    </>
+  )
 }
 
 export function Settings({
@@ -90,9 +176,11 @@ export function Settings({
   /** Bumped by a reset, which remounts the prompt box with the default in it. */
   const [promptRev, setPromptRev] = useState(0)
   const [ttsStatus, setTtsStatus] = useState<TtsStatus | null>(null)
-  const [download, setDownload] = useState<TtsDownload | null>(null)
   /** Bumped when a download is started here, which starts following it. */
   const [downloadRun, setDownloadRun] = useState(0)
+  /** The on-device model a download would fetch, and its download. */
+  const [offer, setOffer] = useState<LocalOffer | null>(null)
+  const [llmDownloadRun, setLlmDownloadRun] = useState(0)
   const [readerStatus, setReaderStatus] = useState<ReaderStatus | null>(null)
   /** A reference voice being picked, or extracted from a recording. */
   const [refBusy, setRefBusy] = useState(false)
@@ -209,39 +297,32 @@ export function Settings({
     }
   }
 
-  // Polled while a download runs. It runs in the main process, so it may
-  // already be under way when this page opens.
+  const download = useDownload(window.yoai.tts.downloadStatus, downloadRun, async (d) => {
+    // Over: show the paths it stored, and follow the load it started.
+    await refreshTts()
+    if (d.error === '') {
+      void followVoice()
+    }
+  })
+
   useEffect(() => {
-    let stopped = false
-    let timer: ReturnType<typeof setTimeout> | undefined
-    // Started from here: its end matters even if it was never seen running,
-    // which is what a folder already holding every file looks like.
-    let started = downloadRun > 0
-    const poll = async (): Promise<void> => {
-      const d = await window.yoai.tts.downloadStatus()
-      if (stopped) {
-        return
-      }
-      setDownload(d)
-      if (d.running) {
-        started = true
-        timer = setTimeout(() => void poll(), 500)
-      } else if (started) {
-        // Over: show the paths it stored, and follow the load it started.
-        await refreshTts()
-        if (d.error === '') {
-          void followVoice()
-        }
-      }
+    void (async () => {
+      setOffer(await window.yoai.models.offer())
+    })()
+  }, [])
+
+  const startLlmDownload = async (): Promise<void> => {
+    if (await window.yoai.models.download()) {
+      setLlmDownloadRun((n) => n + 1)
     }
-    void poll()
-    return () => {
-      stopped = true
-      if (timer !== undefined) {
-        clearTimeout(timer)
-      }
+  }
+
+  const llmDownload = useDownload(window.yoai.models.downloadStatus, llmDownloadRun, async (d) => {
+    // Over: list the model it added, whose preload the list then follows.
+    if (d.error === '') {
+      await onModelsChanged()
     }
-  }, [downloadRun])
+  })
 
   const testTts = async (): Promise<void> => {
     setReaderNote(null)
@@ -598,12 +679,43 @@ export function Settings({
             {/* Only the way to add one. Those already added are listed, with
                 their paths, under the configured models above. */}
             {status.localAvailable ? (
-              <div className="row" style={{ padding: 0 }}>
-                <span className="row-label" />
-                <button className="btn" onClick={() => void addLocal()}>
-                  {S.settingsLocalAdd}
-                </button>
-              </div>
+              <>
+                {/* What a new user with no on-device model sees: one to
+                    download, the way the speech models are offered below. */}
+                {offer !== null && (locals.length === 0 || llmDownload?.running === true) && (
+                  <div className="card" style={{ marginBottom: 12 }}>
+                    {llmDownload?.running === true ? (
+                      <DownloadProgress
+                        d={llmDownload}
+                        onCancel={() => void window.yoai.models.cancelDownload()}
+                      />
+                    ) : (
+                      <div className="field">
+                        <label>{S.settingsLocalOffer}</label>
+                        <div className="path">
+                          {offer.name} · {formatBytes(offer.size)}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => void startLlmDownload()}
+                          >
+                            {S.settingsTtsDownload}（{formatBytes(offer.size)}）
+                          </button>
+                        </div>
+                        <span className="field-note">{S.settingsLocalOfferNote}</span>
+                        <DownloadFailure d={llmDownload} />
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div className="row" style={{ padding: 0 }}>
+                  <span className="row-label" />
+                  <button className="btn" onClick={() => void addLocal()}>
+                    {S.settingsLocalAdd}
+                  </button>
+                </div>
+              </>
             ) : (
               <p className="field-note" data-tone="danger">
                 这个版本没有编译本机推理引擎。用 <code>python examples/desktop/build.py llama</code>
@@ -678,36 +790,10 @@ export function Settings({
                   (ttsStatus.missing.length > 0 || download?.running === true) && (
                     <div className="card" style={{ marginBottom: 12 }}>
                       {download?.running === true ? (
-                        <div className="field">
-                          <label>
-                            {download.retry > 0
-                              ? S.settingsTtsRetrying
-                                  .replace('{s}', String(download.retryIn))
-                                  .replace('{n}', String(download.retry))
-                                  .replace('{max}', String(download.retries))
-                              : download.file.length === 0
-                                ? S.settingsTtsConnecting
-                                : `${download.verifying ? S.settingsTtsVerifying : S.settingsTtsDownloading} ${download.file}`}
-                          </label>
-                          <progress
-                            className="meter"
-                            max={Math.max(download.total, 1)}
-                            value={download.received}
-                          />
-                          <div className="row" style={{ padding: 0 }}>
-                            <span className="row-label row-sub">
-                              {formatBytes(download.received)} / {formatBytes(download.total)}
-                              {download.host.length > 0 && ` · ${download.host}`}
-                            </span>
-                            <button
-                              className="btn"
-                              onClick={() => void window.yoai.tts.cancelDownload()}
-                            >
-                              {S.settingsCancel}
-                            </button>
-                          </div>
-                          <div className="path">{download.dir}</div>
-                        </div>
+                        <DownloadProgress
+                          d={download}
+                          onCancel={() => void window.yoai.tts.cancelDownload()}
+                        />
                       ) : (
                         <div className="field">
                           <label>{S.settingsTtsSetup}</label>
@@ -726,19 +812,7 @@ export function Settings({
                             </button>
                           </div>
                           <span className="field-note">{S.settingsTtsSetupNote}</span>
-                          {download !== null && download.error !== '' && (
-                            <>
-                              <span
-                                className="field-note"
-                                data-tone={download.error === 'canceled' ? undefined : 'danger'}
-                              >
-                                {DOWNLOAD_ERROR[download.error]}
-                              </span>
-                              {download.detail.length > 0 && (
-                                <div className="path">{download.detail}</div>
-                              )}
-                            </>
-                          )}
+                          <DownloadFailure d={download} />
                         </div>
                       )}
                     </div>

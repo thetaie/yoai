@@ -51,6 +51,9 @@ export const S = {
   settingsLocalIntro:
     '选一个 GGUF 文件，直接在这台设备上跑，不联网。文件留在原处，不会复制进应用，删除模型也不会删文件。',
   settingsLocalAdd: '选择 GGUF 文件',
+  settingsLocalOffer: '还没有本机模型，可以下载这一个：',
+  settingsLocalOfferNote:
+    'Qwen3.5 4B，4 位量化。选一个文件夹下载，文件夹里已有就不重复下载，下完自动加入模型列表；还没有选用的模型时直接选用并载入。已有其他 GGUF：点下面的「选择 GGUF 文件」。',
   settingsLocalLoading: '载入中…',
   settingsLocalReady: '已载入',
 
