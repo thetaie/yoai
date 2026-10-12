@@ -29,6 +29,12 @@ else()
     add_compile_options(-Wall -Wextra)
 endif()
 
+if (APPLE)
+    link_libraries("-framework Accelerate")
+    link_libraries("-framework Metal" "-framework Foundation" "-framework MetalKit")
+    add_link_options("-Wl,-undefined,dynamic_lookup")
+endif()
+
 #-------------------------------------------------------------------------------
 # Dependencies
 #-------------------------------------------------------------------------------
