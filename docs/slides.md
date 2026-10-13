@@ -255,6 +255,77 @@ ERLE: how far the echo is pushed down. RTF 0.011 on the PC's CPU.
 section { font-size: 18px; padding: 36px 56px; }
 h2 { font-size: 32.5px; margin-bottom: 0.2em; }   /* the other slides' size: 1.25em of 26px */
 p { margin: 0.3em 0; }
+svg.fig { margin-top: 6px; }
+table { font-size: 14px; margin: 12px 0 4px; }
+th, td { padding: 3px 9px !important; vertical-align: top; }
+.note { font-size: 14px; margin-top: 10px; padding-top: 6px; border-top: 1px solid #d0d7de; }
+</style>
+
+## Barge-in: a second sentence mid-reply
+
+ASR cuts at pauses, so one request can arrive as two sentences, and the user can add to a request or correct it while it is being answered. Two judgments, both on the words, decide what happens to the first reply.
+
+<svg class="fig" viewBox="0 0 1250 235" role="img" aria-label="Decision flow. Sentence 1, cut at a pause, goes to judgment 1, made before replying: can it be answered alone? If not, there is no reply, and it is merged with sentence 2, as in 我想问一下 followed by 明天上海天气怎么样. If it can, reply 1 plays, paused by a voice over it; when sentence 2 arrives, judgment 2 asks whether it adds or corrects. If it adds, the reply resumes and sentence 2 is the next turn, as in 明天上海天气怎么样 followed by 还有杭州. If it corrects, the reply stops and the history keeps what was played, as in 明天上海天气怎么样 followed by 不，我说错了，应该是杭州.">
+<defs>
+<marker id="arrow-turn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#57606a"/></marker>
+</defs>
+<g stroke-width="2">
+<rect x="10" y="85" width="140" height="60" rx="10" fill="#ddf4ff" stroke="#0969da"/>
+<rect x="190" y="85" width="210" height="60" rx="10" fill="#fff8c5" stroke="#9a6700"/>
+<rect x="440" y="85" width="150" height="60" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+<rect x="670" y="85" width="170" height="60" rx="10" fill="#fff8c5" stroke="#9a6700"/>
+<rect x="910" y="10" width="335" height="60" rx="10" fill="#dafbe1" stroke="#1a7f37"/>
+<rect x="910" y="85" width="335" height="60" rx="10" fill="#ffebe9" stroke="#cf222e"/>
+<rect x="910" y="165" width="335" height="60" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+</g>
+<g text-anchor="middle" fill="#24292f">
+<text x="80" y="111" font-size="19" font-weight="700">Sentence 1</text>
+<text x="80" y="133" font-size="14" fill="#57606a">cut at a pause</text>
+<text x="295" y="111" font-size="19" font-weight="700">Answerable alone?</text>
+<text x="295" y="133" font-size="14" fill="#57606a">judgment 1, before replying</text>
+<text x="515" y="111" font-size="19" font-weight="700">Reply 1 plays</text>
+<text x="515" y="133" font-size="14" fill="#57606a">paused by a voice</text>
+<text x="755" y="111" font-size="18" font-weight="700">Adds or corrects?</text>
+<text x="755" y="133" font-size="14" fill="#57606a">judgment 2</text>
+<text x="1077" y="36" font-size="17" font-weight="700">Resume; sentence 2 is the next turn</text>
+<text x="1077" y="58" font-size="13" fill="#57606a">明天上海天气怎么样 → 还有杭州</text>
+<text x="1077" y="111" font-size="17" font-weight="700">Stop; history keeps what was played</text>
+<text x="1077" y="133" font-size="13" fill="#57606a">明天上海天气怎么样 → 不，我说错了，应该是杭州</text>
+<text x="1077" y="191" font-size="17" font-weight="700">No reply; merge it with sentence 2</text>
+<text x="1077" y="213" font-size="13" fill="#57606a">我想问一下…… → 明天上海天气怎么样</text>
+</g>
+<g font-size="14" fill="#57606a">
+<text x="419" y="107" text-anchor="middle">yes</text>
+<text x="629" y="107" text-anchor="middle">sentence 2</text>
+<text x="874" y="107" text-anchor="middle">corrects</text>
+<text x="763" y="62">adds</text>
+<text x="303" y="175">no</text>
+</g>
+<g stroke="#57606a" stroke-width="2" fill="none" marker-end="url(#arrow-turn)">
+<line x1="152" y1="115" x2="186" y2="115"/>
+<line x1="402" y1="115" x2="436" y2="115"/>
+<line x1="592" y1="115" x2="666" y2="115"/>
+<line x1="842" y1="115" x2="906" y2="115"/>
+<path d="M755,83 V40 H906"/>
+<path d="M295,147 V195 H906"/>
+</g>
+</svg>
+
+| | OpenAI Realtime | Gemini Live | here, proposed |
+| --- | --- | --- | --- |
+| **End of turn** | silence (`server_vad`), or `semantic_vad`: a classifier on the words waits longer when they sound unfinished | silence only, about 800ms by default | judgment 1, on the words |
+| **A voice over the reply** | cancels it, or never: one switch per session | cancels it, or never: one switch per session (`activityHandling`) | pauses it; judgment 2 resumes or stops it |
+| **History** | cut to what was played: `conversation.item.truncate`, automatic over WebRTC | keeps what was sent to the client, which can run ahead of playback | keeps what was played |
+
+<p class="note">Proposed, not built; the two APIs as documented in October 2026. A judgment can be the chat model answering with only a wait marker, or a small classifier of its own; whether Qwen3.5-2B holds to a marker is untested.
+<br>Merging after reply 1 has begun rewinds a hybrid model's KV to before sentence 1, where no snapshot is kept yet: today that prefills the whole prompt again.</p>
+
+---
+
+<style scoped>
+section { font-size: 18px; padding: 36px 56px; }
+h2 { font-size: 32.5px; margin-bottom: 0.2em; }   /* the other slides' size: 1.25em of 26px */
+p { margin: 0.3em 0; }
 .cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; font-size: 15px; line-height: 1.35; }
 .cols h3 { font-size: 19px; margin: 0.4em 0 0.2em; }
 .cols svg { display: block; width: 100%; height: auto; margin: 6px 0 2px; }
@@ -657,7 +728,7 @@ Below 1 the speech keeps up with playback; above 1 a stream needs duration×(RTF
 | talker | — | 23.9ms | 17.3ms | 2.5ms |
 | code predictor<span class="sub">set by the 16 codebooks:<br>no iGPU gain</span> | — | 20.0ms | 20.5ms | 5.3ms |
 | codec | — | 34.9ms | 6.3ms | 0.5ms |
-| reproduce | /tts → Benchmark | `tests/tts_rtf.py` | the same run | `--backend CUDA0` |
+| reproduce | /tts → Benchmark | `tests/voice/tts/tts_rtf.py` | the same run | `--backend CUDA0` |
 
 ---
 

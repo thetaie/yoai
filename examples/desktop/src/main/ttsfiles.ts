@@ -28,7 +28,8 @@ const REVISION = 'b7ee2e8c7459c3bea99da23e3d178125a7d1713c'
  *
  * 1.7B at Q4_K_M for both talkers: the Base one is what the desktop reads with
  * in docs/voice.md, and the 0.6B Base at Q4_K_M misreads characters there
- * (调暗 as diào). The tokenizer at Q8_0, the one tests/tts_rtf.py loads.
+ * (调暗 as diào). The tokenizer at Q8_0, the one tests/voice/tts/tts_rtf.py
+ * loads.
  */
 export const KNOWN: Record<TtsSlot, KnownFile> = {
   talker: {

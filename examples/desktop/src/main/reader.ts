@@ -113,9 +113,9 @@ const DEFAULT_TEMPERATURE = 1.3
  * engine's "back to the default".
  *
  * DEFAULT_TEMPERATURE was picked on Base, every piece anchored to a speaker
- * vector (tests/tts_sweep.cpp). CustomVoice has a speaker id and no vector, and
- * at 1.3 a listener heard it read less naturally than Base. The settings screen
- * greys the field out on CustomVoice to match.
+ * vector (tests/voice/tts/tts_sweep.cpp). CustomVoice has a speaker id and no
+ * vector, and at 1.3 a listener heard it read less naturally than Base. The
+ * settings screen greys the field out on CustomVoice to match.
  */
 function talkerTemperature(s: Stored): number {
   return core().nativeReaderModelType() === 'custom_voice' ? -1 : s.temperature

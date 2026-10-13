@@ -13,7 +13,7 @@
 //   2. Placeholders. The rules -- declared arguments only, required ones
 //      enforced, a value never scanned again -- are checked on a table of the
 //      test's own, where every case can be set up; the built-ins that take
-//      arguments are rendered for real by tests/annotations_test.cpp.
+//      arguments are rendered for real by tests/llm/annotations_test.cpp.
 //   3. turn_system_prompt(). The local model's warm-up is spent on its result,
 //      and is wasted unless the turn builds the same string, so the cases a host
 //      actually sends -- the default, an empty base, a blank one, not reading --

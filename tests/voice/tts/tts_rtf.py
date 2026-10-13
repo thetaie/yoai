@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """RTF of the four Q4_K_M Qwen3-TTS talkers on this machine, one backend at a time.
 
-Usage: python tests/tts_rtf.py --models <dir> [--build <dir>] [--backend <name> ...]
-                               [--passes <n>] [--out <dir>]
+Usage: python tests/voice/tts/tts_rtf.py --models <dir> [--build <dir>]
+                                         [--backend <name> ...] [--passes <n>]
+                                         [--out <dir>]
 
   --models   the directory holding the GGUFs, named as qwentts.cpp names them
              (see its README for where to get them or how to convert them):
@@ -46,7 +47,7 @@ import subprocess
 import sys
 import tempfile
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 SPEAKER = os.path.join(REPO, "speaker", "01_female")
 TOKENIZER = "qwen-tokenizer-12hz-Q8_0.gguf"
 
@@ -62,9 +63,9 @@ TALKERS = [
 # be billed to the first passage. Read once and not counted.
 WARMUP = "你好。"
 
-# tests/tts_sweep.cpp's three passages. The phone's copy is BENCH_PASSAGES in
-# examples/harmony/entry/src/main/ets/pages/TtsDebug.ets; change all three together, or
-# the figures stop comparing.
+# tests/voice/tts/tts_sweep.cpp's three passages. The phone's copy is
+# BENCH_PASSAGES in examples/harmony/entry/src/main/ets/pages/TtsDebug.ets;
+# change all three together, or the figures stop comparing.
 PASSAGES = [
     "说起黄浦江，很多人第一个想到的是外滩。其实这条江的故事比外滩长得多。"
     "它从淀山湖一带流出来，一路向东北，穿过上海市区，最后在吴淞口汇入长江。"

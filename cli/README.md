@@ -9,7 +9,9 @@ from a shell.
 | `yoai-cli` | Chats with any OpenAI-compatible provider through the C ABI, the same path a host app uses | [main.cpp](main.cpp) |
 | `yoai-asr` | Transcribes WAV files with the on-device SenseVoice model | [asr.cpp](asr.cpp) |
 | `yoai-llama` | Chats with a GGUF, or embeds text with one, on llama.cpp | [llama.cpp](llama.cpp) |
-| `yoai-server` | Serves speech over a WebSocket: text in as it is written, audio out as it is made. Built with `python build.py tts server`; see [src/server/README.md](../src/server/README.md) | [server.cpp](server.cpp) |
+
+The speech server, `yoai-server`, is not here: it is a host of its own, with
+its own build; see [examples/server/README.md](../examples/server/README.md).
 
 ## Building
 

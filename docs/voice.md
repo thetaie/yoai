@@ -152,8 +152,8 @@ its three passages read as one `say()`, about 60–78s of speech per cell. Seed
 CustomVoice as `serena`. The CPU is forced with `GGML_BACKEND=CPU`, at
 qwentts.cpp's default of 11 threads; the iGPU is Vulkan with the shared-memory
 tuning. A warm-up sentence first, not counted. Two passes, nothing else running.
-The same protocol is `tests/tts_rtf.py`, which repeats this table on any
-machine with a `python build.py tts` build, one column per ggml backend:
+The same protocol is `tests/voice/tts/tts_rtf.py`, which repeats this table on
+any machine with a `python build.py tts` build, one column per ggml backend:
 
 | `Q4_K_M` talker | CPU, 11 threads | Arc iGPU, Vulkan |
 | --- | --- | --- |
@@ -176,7 +176,7 @@ throttles; see the note under the older figures.
 
 **Speech out, Qwen3-TTS.** One passage, one seed, two passes per cell;
 milliseconds per frame is the comparable column, as below. The Base rows were
-taken on 2026-09-29 through `tests/tts_pull.cpp`, seed 101, talker temperature
+taken on 2026-09-29 through `tests/voice/tts/tts_pull.cpp`, seed 101, talker temperature
 1.3, the streaming text layout, a 2-frame eos hold — the desktop's settings —
 and the last run had all three models in it, so those share a thermal state.
 Milliseconds per frame on these rows is RTF × 80.
@@ -382,7 +382,7 @@ not enter: the talker's reading runs ahead of its speaking — 54 tokens read by
 frame 54, about 21 characters spoken by then — and only the frames after the
 text runs out are free.
 
-With a simulated writer, `tests/tts_pull.cpp` on the iGPU, a player that waits
+With a simulated writer, `tests/voice/tts/tts_pull.cpp` on the iGPU, a player that waits
 for half a second of audio and then plays at real time. Seconds from the
 writer's first character; about 1.4 characters a token in these passages:
 
@@ -855,6 +855,9 @@ keeps recording in other forms.
 All three are detectable before any analysis runs, which is what makes them
 tolerable: the pipeline can decline instead of guessing.
 
+A fourth is not detectable yet: a second voice in the recording. It has a
+section of its own below.
+
 #### The second one is not an edge case — measured on the device
 
 A 16-second note, recorded on the phone, ordinary conversational Mandarin, cut
@@ -987,6 +990,111 @@ means anything" — rather than computing a confident number from four samples.
 own insight lines — "on days when your nap ran past 25 minutes, your working
 time averaged 47 minutes more" — rest on nap durations being accurate. They are
 self-reported. Anything built on them should say so.
+
+## One voice per recording: assumed, and not checked
+
+**Decided in outline, not scheduled.** Everything in "Within the recording,
+against itself" rests on one voice per recording: microphone distance, gain and
+pitch range cancel because they belong to one speaker in one take. A second
+voice — someone else in the room, a television — breaks that without a sign.
+Its utterances are scored against the user's distribution, and the change of
+speaker reads as a swing in arousal; a man's voice against a woman's is most of
+an octave. That is a confident wrong answer, the shape of every withdrawn
+conclusion in this file. Notes so far are the user alone, but nothing checks
+it.
+
+### Verification, not diarization
+
+Diarization answers who spoke when, for any number of voices. Verification
+answers one question: is this utterance the user. The analysis needs only the
+second. Score each utterance against the user's voiceprint, drop the ones that
+are not the user, and decline the recording when fewer than five remain — the
+floor in "Where it stops working". The voiceprint comes from the user's own
+notes.
+
+Diarization is needed only if the app records the user with other people and
+the model has to know who said what. Whether the app will do that is a product
+question, and open.
+
+The hard case is length. The analysis cuts units from 0.8s, and speaker
+embeddings are known to weaken under about 2s — a general property, not
+measured here.
+
+The same check would guard the cross-day baseline above, if that is built: a
+week of notes with another voice in a few of them moves the baseline and says
+nothing.
+
+### Not the Qwen3-TTS voice file
+
+The `.spk` the reader already extracts looks like a voiceprint and is not one.
+
+- **It barely separates people, measured.** Between serena's six styles the
+  cosine is 0.973–0.996; between any of them and 01_female, a different
+  person, 0.95–0.96 (the style section below). Same person and different
+  person are about 0.01 apart, on 9.6–73.5s of clean synthesized speech. Short
+  real recordings will not do better.
+- **It is trained the other way.** The encoder feeds the talker what it needs
+  to reproduce a voice, style included. A verification model is trained to
+  discard style and push people apart.
+- **It wants 24 kHz.** The recognition and analysis lane runs at 16 kHz; a
+  16 kHz recording upsampled leaves 8–12 kHz of the encoder's mel range empty,
+  which it never saw in training.
+- **It is tied to TTS.** Extraction needs a talker loaded, 0.8 GB at the
+  least. The width follows the talker's size, so switching sizes voids every
+  stored voiceprint unless the enrollment audio is kept. A user without TTS
+  downloaded gets no check.
+- **The file held now is the reply's voice** — 01_female, or what the user
+  picked — not the user's.
+
+It is still worth a row in the measurement below, as the baseline. Subtract
+the mean of the nine built-in speakers' vectors before taking the cosine: a
+cosine of 0.95 between two people says most of the vector is shared, and the
+shared part hides the difference.
+
+### A dedicated model, and what sherpa-onnx does with one
+
+The candidate is CAM++ from 3D-Speaker, about 7M parameters — the same network
+as the `campplus.onnx` in CosyVoice3's frontend (the CosyVoice3 section). Its
+accuracy and speed have not been measured here.
+
+**Read from sherpa-onnx's source, not run:**
+
+- **The voiceprint store** is one unit vector per person. Several enrollment
+  clips are summed, then normalized; scoring is the cosine, accepted at or
+  above a threshold. Simple enough to copy as is.
+- **The front end** for 3D-Speaker models is an 80-bin Kaldi fbank with the
+  per-utterance mean subtracted over time. `fbank_funasr` is the same 80 bins
+  and differs in three places: a Hamming window where Kaldi defaults to povey;
+  LFR stacking, which this model does not use; and input scaled by 32768, a
+  constant on the log energies that the mean subtraction removes. The first two
+  become options, and the result is checked against the reference bit for bit,
+  as the SenseVoice front end was.
+- **Diarization**, if it is ever needed: pyannote segmentation-3.0 over 10s
+  windows, up to three local speakers each; embeddings only from frames where
+  one speaker is active; complete-linkage agglomerative clustering on cosine
+  distance, cut at a given count or a threshold. That is a second model and a
+  clustering step on top of verification.
+
+**The runtime is open.** By the split in "Which runtime suits which shape", a
+fixed-shape convolutional network is what ONNX Runtime suits. Against that, the
+phone builds link ggml only, and ONNX Runtime would add a cross-compiled
+library on each platform. CAM++ is convolutions and pooling, which ggml has.
+Decided after the measurement, not before.
+
+### What to measure first, with no code
+
+sherpa-onnx's prebuilt binaries and its CAM++ model, on recordings already
+here, with the voice file as the baseline row:
+
+- utterances where one speaker's arousal swings — #5 of the birthday monologue
+  — stay above the threshold;
+- 0.8–2s utterances still separate people;
+- a recording with two voices is caught.
+
+The style section's synthesized material is a first pass before real
+recordings: serena reading six ways is one voice, and CustomVoice's nine named
+speakers are nine. A model's speech is not a person's, so it narrows the
+question rather than answering it.
 
 ## The dimensions past the three
 
@@ -3668,7 +3776,7 @@ place of a recorded one: the next section.
 
 ### The first two, measured: a style rides on the voice file
 
-**Measured on the PC, on the CPU**, with `tests/tts_style.cpp`
+**Measured on the PC, on the CPU**, with `tests/voice/tts/tts_style.cpp`
 (`yoai-tts-style`): 1.7B talkers at Q4_K_M, the 12 Hz tokenizer at Q8_0, and
 the desktop's reading settings (talker temperature 1.3, the streaming text
 layout, a 2-frame eos hold).

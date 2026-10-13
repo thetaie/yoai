@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Usage: python build.py [clean] [asr] [llama] [tts] [server] [cosyvoice]
+"""Usage: python build.py [clean] [asr] [llama] [tts] [cosyvoice]
 
 Builds the core library, the same core as a shared library (yoai.dll,
 libyoai.so or libyoai.dylib, for examples/python/), the desktop tools in cli/
 and the tests in tests/, into build/: configures if needed, then builds. This
-is not the desktop app -- that is examples/desktop/build.py.
+is not the desktop app -- that is examples/desktop/build.py -- nor the speech
+server, examples/server/build.py.
 
   asr        also compile speech recognition in. Needs a llama.cpp checkout
              for ggml; see LLAMA_SRC
@@ -13,8 +14,6 @@ is not the desktop app -- that is examples/desktop/build.py.
   tts        also compile speech output (Qwen3-TTS) in. Needs qwentts.cpp
              and llama.cpp checkouts; uses the GPU when there is one --
              Vulkan, and CUDA too where the CUDA Toolkit is installed
-  server     also build the WebSocket speech server, src/server/ and
-             cli/yoai-server. Installs libwebsockets; speaks only with tts
   cosyvoice  also build CosyVoice3's own CLI into build/cosyvoice/bin, for
              listening; linked into nothing. Needs cosyvoice.cpp and llama.cpp
              checkouts, and downloads ICU and ONNX Runtime on its first run
@@ -27,7 +26,7 @@ With no lane named, a build/ already configured is built again with the lanes
 it has. A fresh one fetches llama.cpp and qwentts.cpp into third/ if they are
 not there (third/sync.py clone: git and the network, once), then gets asr and
 tts, each when its checkouts are on what third/manifest.json pins; what is
-skipped is named. llama, server and cosyvoice are built only when named.
+skipped is named. llama and cosyvoice are built only when named.
 
 Settings, each read from .env at the repository root -- see .env.example --
 or the environment, .env winning:
@@ -47,8 +46,8 @@ or the environment, .env winning:
 """
 
 # Two things in one file. The bottom half is the root build. The top half is
-# what every build script shares -- examples/desktop/, examples/android/ and examples/harmony/ each have a
-# build.py of their own -- plus the .env loader third/sync.py reads its
+# what every build script shares -- each host under examples/ has a build.py
+# of its own -- plus the .env loader third/sync.py reads its
 # settings with. Those load this file BY PATH, under the name yoai_build: a
 # plain `import build` from examples/android/build.py would import examples/android/build.py.
 #
@@ -605,12 +604,24 @@ CHECKOUTS = {
 }
 
 
+def fetch_checkouts():
+    """CHECKOUTS that are not there, fetched through `third/sync.py clone` --
+    the pinned commit, patched. That needs git and the network, once; a fetch
+    that fails ends the build, as any failed command does. Returns the trees,
+    by name, whether or not the fetch made them whole."""
+    trees = {name: env(var, third_dir(name)) for name, (var, _) in CHECKOUTS.items()}
+    fetch = sorted(name for name, (_, probe) in CHECKOUTS.items()
+                   if not os.path.isfile(os.path.join(trees[name], probe)))
+    if fetch:
+        say("[build] fetching %s: %s" % (" ".join(fetch), sync_cmd("clone", *fetch)))
+        run([sys.executable, SYNC, "clone"] + fetch)
+    return trees
+
+
 def ready_checkouts():
     """CHECKOUTS made ready for a build with no lane named, and how that went.
 
-    What is not there is fetched first, through `third/sync.py clone` -- the
-    pinned commit, patched. That needs git and the network, once; a fetch
-    that fails ends the build, as any failed command does. Then each is
+    What is not there is fetched first, by fetch_checkouts(). Then each is
     checked against third/manifest.json. A tree moved past its pin on purpose
     is built only when its lane is named, as a named lane builds on whatever
     tree is there, with a warning.
@@ -618,12 +629,7 @@ def ready_checkouts():
     Returns (missing, moved), each a list of (name, tree): missing even after
     the fetch -- a checkout that is there to git but not whole, which clone
     leaves alone -- and present but not what the manifest records."""
-    trees = {name: env(var, third_dir(name)) for name, (var, _) in CHECKOUTS.items()}
-    fetch = sorted(name for name, (_, probe) in CHECKOUTS.items()
-                   if not os.path.isfile(os.path.join(trees[name], probe)))
-    if fetch:
-        say("[build] fetching %s: %s" % (" ".join(fetch), sync_cmd("clone", *fetch)))
-        run([sys.executable, SYNC, "clone"] + fetch)
+    trees = fetch_checkouts()
 
     missing, moved = [], []
     for name, (_, probe) in sorted(CHECKOUTS.items()):
@@ -813,17 +819,16 @@ def vcpkg_deps(vcpkg_root, triplet, dest, overlay=None):
 #
 # `tts` assembles a qwentts.cpp SDK into build/qtts-sdk/ and configures with
 # -DYOAI_QTTS=ON -- speech output for the tools in cli/, without the desktop
-# app.
+# app. examples/server/build.py builds and links the same SDK.
 # =============================================================================
 
 BUILD = os.path.join(ROOT, "build")
-WORDS = ("clean", "asr", "llama", "tts", "server", "cosyvoice")
+WORDS = ("clean", "asr", "llama", "tts", "cosyvoice")
 # CMake caches which lanes are on; these are the cache entries that say so.
-CACHED = (("asr", "YOAI_ASR"), ("llama", "YOAI_ONDEVICE_LLM"), ("tts", "YOAI_QTTS"),
-          ("server", "YOAI_SERVER"))
+CACHED = (("asr", "YOAI_ASR"), ("llama", "YOAI_ONDEVICE_LLM"), ("tts", "YOAI_QTTS"))
 # What a fresh build with no lane named adds by itself, and the checkouts each
 # needs. The others are built only when named: llama takes twenty minutes,
-# server needs libwebsockets, cosyvoice downloads its own dependencies.
+# cosyvoice downloads its own dependencies.
 AUTO = (("asr", ("llama.cpp",)), ("tts", ("qwentts.cpp", "llama.cpp")))
 # Position-independent code for the SDKs, off Windows: their archives go into
 # libyoai.so as well as into the tools, and every archive in a shared object
@@ -871,18 +876,11 @@ def main(argv):
     # Adding `asr`, `llama` or `tts` to a tree that was configured without it
     # would change nothing. Said here, before any SDK is built, rather than
     # after minutes of building one.
-    #
-    # `server` is the exception: it has no SDK, only a package and a switch,
-    # so the tree is configured again with it on instead. Everything else the
-    # cache holds stays as it was.
     reconfigure = False
     if configured(BUILD):
         cache = read(os.path.join(BUILD, "CMakeCache.txt"))
         for lane, var in CACHED:
             if lane in want and var + ":BOOL=ON" not in cache:
-                if lane == "server":
-                    reconfigure = True
-                    continue
                 fail("[build] build/ was configured without %s; re-run as: %s clean %s"
                      % (lane, script_cmd(__file__), lane))
 
@@ -907,9 +905,6 @@ def main(argv):
             args.append("-DCUDAToolkit_ROOT=" + fwd(os.path.dirname(os.path.dirname(nvcc()))))
         if configured(BUILD) and cached_lib(BUILD, "GGML_CUDA_LIB") != with_cuda:
             reconfigure = True
-    if "server" in want:
-        # The manifest feature is what makes vcpkg install libwebsockets.
-        args += ["-DYOAI_SERVER=ON", "-DVCPKG_MANIFEST_FEATURES=server"]
     if "cosyvoice" in want:
         cosyvoice(gen)
 
@@ -934,7 +929,7 @@ def default_lanes():
             % (" ".join(sorted(lanes)) or "the core alone"))
         say("[build]   to choose again: %s clean [lanes]" % script_cmd(__file__))
         return lanes
-    return pick_lanes(AUTO, __file__, "the core", "llama, server and cosyvoice")
+    return pick_lanes(AUTO, __file__, "the core", "llama and cosyvoice")
 
 
 def vcpkg_args():
@@ -1040,8 +1035,8 @@ def qtts_sdk(gen):
     #
     # CUDA the same way, beside Vulkan rather than instead of it: one ggml can
     # hold both, so one build compares them on the same card
-    # (tests/tts_rtf.py --backend Vulkan0 --backend CUDA0). ggml registers
-    # CUDA first, so the engine's own pick is CUDA when both are in.
+    # (tests/voice/tts/tts_rtf.py --backend Vulkan0 --backend CUDA0). ggml
+    # registers CUDA first, so the engine's own pick is CUDA when both are in.
     # TTS_BACKEND builds one of them alone, or neither; see tts_gpu().
     vulkan_sdk = env("VULKAN_SDK")
     nvcc_path, vulkan = (None, False) if MACOS else tts_gpu(False)

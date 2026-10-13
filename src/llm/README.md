@@ -133,7 +133,7 @@ not a degraded one. The default desktop build links with neither.
    an engine, give it a stub under that engine's flag, the way `chat/local.cpp`
    does. It goes in `chat/` or `embed/` by what it does, whatever it runs on.
 4. Give it a test under `tests/` that goes through the interface rather than
-   the concrete class, the way `tests/embed_test.cpp` does.
+   the concrete class, the way `tests/llm/embed_test.cpp` does.
 
 ## The C ABI
 

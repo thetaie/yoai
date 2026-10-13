@@ -1,7 +1,7 @@
 // Text in, speech out, over a WebSocket: voice::Reader's begin / feed / finish
 // behind a port.
 //
-// The protocol is in README.md beside this file, for whoever writes a client.
+// The protocol is in examples/server/README.md, for whoever writes a client.
 // This header is the C++ side: who owns what, and on which thread.
 //
 // **One stream at a time, server-wide.** The server drives ONE Reader, and a
@@ -11,9 +11,9 @@
 // is busy, not queued. Any number of clients may be connected.
 //
 // **The Reader is the caller's.** Loading it, the voice, the seed and the
-// cutting are all set before run(), by whatever main() this is linked into --
-// cli/server.cpp today, a container's entry point later. The server only reads
-// what it is given; nothing a client sends changes the configuration.
+// cutting are all set before run(), by main.cpp beside this file. The server
+// only reads what it is given; nothing a client sends changes the
+// configuration.
 //
 // Threads:
 //

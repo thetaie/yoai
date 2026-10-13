@@ -1,33 +1,56 @@
-# src/server
+# The speech server
 
 The core behind a port. Today that is one service: **text in, speech out, over
 a WebSocket**. The text can arrive a token at a time while a language model is
 still writing it, and the speech starts before the text ends.
 
-It is a library, `yoai_server`, so that anything serving it links the same
-code: `cli/server.cpp` (`yoai-server`) now, a container's entry point later.
-It is built only with `YOAI_SERVER`, the one target that needs libwebsockets:
+It is one executable, `yoai-server`, that links `yoai_core` from the root
+CMake project, the way `examples/desktop/native/` does. It is the one host
+that binds a port, and the one that needs libwebsockets.
 
 ```
-python build.py tts server
+src/main.cpp          the command line: loads the engine and the voice, then serves
+src/tts_server.hpp    the server: who owns what, and on which thread
+src/tts_server.cpp
+tts_client.py         a client for trying it from a shell
 ```
+
+## Building
+
+Needs what the root build needs; see the root [README](../../README.md).
+
+```
+cd examples/server
+python build.py
+```
+
+`python3` on macOS and Linux. The result is `build/yoai-server.exe`
+(`build/yoai-server` off Windows), with the DLLs it loads beside it on
+Windows.
+
+Speech output is always compiled in. Its SDK is the root build's,
+`build/qtts-sdk` at the repository root, built the same way `python build.py
+tts` builds it there: it uses the GPU through CUDA or Vulkan when there is one,
+and otherwise the CPU, with a warning. libwebsockets comes from vcpkg through
+`vcpkg.json`'s `server` feature, installed into `build/vcpkg_installed` here.
+`python build.py clean` starts `build/` over; `--help` lists the settings.
 
 ## Running
 
 ```
 build\yoai-server.exe Qwen3-TTS-12Hz-1.7B-Base-Q4_K_M.gguf qwen-tokenizer-12hz-Q8_0.gguf ^
-    --voice speaker\01_female\qwen3-tts-1.7b.spk
+    --voice ..\..\speaker\01_female\qwen3-tts-1.7b.spk
 ```
 
 `--help` lists the options. The reading settings are the desktop's (see
 `examples/desktop/src/main/reader.ts`). Clients cannot change them.
 
-`tests/tts_server_client.py` is a client for trying it: Python 3.8+, standard
-library only. It sends a passage at a fixed rate, as a language model would,
-and writes what comes back to a WAV:
+`tts_client.py` is a client for trying it: Python 3.8+, standard library only.
+It sends a passage at a fixed rate, as a language model would, and writes what
+comes back to a WAV:
 
 ```
-python tests/tts_server_client.py --rate 15 --out out.wav "你好，今天天气不错。"
+python tts_client.py --rate 15 --out out.wav "你好，今天天气不错。"
 ```
 
 ## Protocol
@@ -102,7 +125,7 @@ A minimal exchange:
 
 ## Threads
 
-See `tts_server.hpp`. In short:
+See `src/tts_server.hpp`. In short:
 
 - The libwebsockets event loop does every socket call, plus `Reader::begin`
   and `Reader::feed`.

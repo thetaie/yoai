@@ -13,7 +13,7 @@
 
 #include "yoai.h"
 
-#include "voice/algorithms/echo_canceller.hpp"
+#include "voice/aec/echo_canceller.hpp"
 #include "voice/algorithms/resampler.hpp"
 
 #include <algorithm>

@@ -6,7 +6,7 @@
 #endif
 #include <libwebsockets.h>
 
-#include "server/tts_server.hpp"
+#include "tts_server.hpp"
 
 #include "utils/log.hpp"
 

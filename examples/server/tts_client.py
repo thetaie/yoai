@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Usage: python tests/tts_server_client.py [options] [text]
+"""Usage: python tts_client.py [options] [text]
 
-A client for yoai-server (src/server/README.md), for trying it from a shell.
+A client for yoai-server (README.md beside this file), for trying it from a
+shell.
 It sends the text a character at a time at --rate characters a second, the
 way a language model writes a reply, and saves the audio it gets back.
 
   text          what to read; default is a short Chinese passage
   --url URL     default ws://127.0.0.1:8765/
   --rate N      characters a second; 0 sends everything at once (default 15)
-  --out FILE    WAV to write (default tts_server_client.wav)
+  --out FILE    WAV to write (default tts_client.wav)
   --cancel S    send cancel S seconds after the first text, to try that path
 
 The first-audio time it prints is from the first text sent, which is the
@@ -115,7 +116,7 @@ def main():
     ap.add_argument("text", nargs="?", default=PASSAGE)
     ap.add_argument("--url", default="ws://127.0.0.1:8765/")
     ap.add_argument("--rate", type=float, default=15.0)
-    ap.add_argument("--out", default="tts_server_client.wav")
+    ap.add_argument("--out", default="tts_client.wav")
     ap.add_argument("--cancel", type=float, default=0.0)
     a = ap.parse_args()
 

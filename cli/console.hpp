@@ -1,5 +1,5 @@
 // UTF-8 in and out of a terminal, on Windows too. Header-only, for the tools
-// in cli/.
+// in cli/ and for examples/server/.
 //
 // Everything in the core is UTF-8, and on macOS and Linux so is the terminal.
 // A Windows console is not: it hands main() its arguments in the ANSI code

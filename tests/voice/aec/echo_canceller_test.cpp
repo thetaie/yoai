@@ -1,4 +1,4 @@
-// The echo canceller in voice/algorithms, against echo whose every component is
+// The echo canceller in voice/aec, against echo whose every component is
 // known.
 //
 // A synthetic microphone is the sum of three things this file made: the
@@ -24,7 +24,7 @@
 //         [--delay-ms D]  output and input buffering ahead of the room (default 30)
 //         [--distort]     a loudspeaker that saturates, which no linear filter models
 
-#include "voice/algorithms/echo_canceller.hpp"
+#include "voice/aec/echo_canceller.hpp"
 #include "voice/algorithms/resampler.hpp"
 
 #include "wav.hpp"

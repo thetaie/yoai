@@ -3,12 +3,13 @@
 //   yoai-server <talker.gguf> <tokenizer.gguf> --voice <reference.spk> [options]
 //
 // Loads one Reader, configures it the way the desktop does, and serves it with
-// src/server/. The protocol is in src/server/README.md. Ctrl-C, or SIGTERM from
-// a container runtime, stops it; a stream still running is cancelled first.
+// tts_server.cpp. The protocol is in examples/server/README.md. Ctrl-C, or
+// SIGTERM from a container runtime, stops it; a stream still running is
+// cancelled first.
 
 #include "console.hpp"
 
-#include "server/tts_server.hpp"
+#include "tts_server.hpp"
 #include "utils/log.hpp"
 #include "voice/tts/reader.hpp"
 
@@ -141,10 +142,6 @@ int main(int argc, char** argv) {
     if (opt.port <= 0 || opt.port > 65535) {
         err("yoai-server: --port must be 1 to 65535\n");
         return 2;
-    }
-    if (!Reader::available()) {
-        err("yoai-server: this build has no speech engine; build with `python build.py tts server`\n");
-        return 1;
     }
 
     Reader reader;

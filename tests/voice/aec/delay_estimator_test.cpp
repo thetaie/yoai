@@ -1,4 +1,4 @@
-// The delay estimator in voice/algorithms, against delays this file chose.
+// The delay estimator in voice/aec, against delays this file chose.
 //
 // With no arguments: noise through synthetic rooms at delays from 0 to 480ms,
 // the same with the reference in bursts and coloured like speech, someone
@@ -13,7 +13,7 @@
 //
 //     build/yoai-delay-estimator-test <ref.wav> <mic.wav> [--true-ms D]
 
-#include "voice/algorithms/delay_estimator.hpp"
+#include "voice/aec/delay_estimator.hpp"
 
 #include "wav.hpp"
 
@@ -78,8 +78,9 @@ std::vector<float> bursts(size_t n, double amplitude, uint32_t seed) {
     return x;
 }
 
-// The same room as tests/echo_canceller_test.cpp: nothing for `delay_ms`, a
-// direct path, then a reverberant tail decaying 60dB over `rt60_ms`.
+// The same room as tests/voice/aec/echo_canceller_test.cpp: nothing for
+// `delay_ms`, a direct path, then a reverberant tail decaying 60dB over
+// `rt60_ms`.
 std::vector<float> room(double delay_ms, double rt60_ms, double len_ms, uint32_t seed) {
     Lcg rng(seed);
     const int delay = static_cast<int>(delay_ms * kRate / 1000);

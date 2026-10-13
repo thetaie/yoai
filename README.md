@@ -110,8 +110,8 @@ Notes:
   one that runs anywhere.
 - Speech output speed, as RTF: seconds of computation per second of speech,
   so below 1 keeps up with playback. Qwen3-TTS `Q4_K_M`; measure your own
-  machine with `tests/tts_rtf.py`, and see [docs/slides.md](docs/slides.md)
-  for the full table.
+  machine with `tests/voice/tts/tts_rtf.py`, and see
+  [docs/slides.md](docs/slides.md) for the full table.
 
   | talker | Kirin 9020 (CPU) | Core Ultra 9 185H (CPU) | Arc iGPU (Vulkan) | RTX 3090 (CUDA) |
   |---|---|---|---|---|
@@ -121,7 +121,8 @@ Notes:
 - More: [cli/README.md](cli/README.md) for the CLI tools,
   [examples/desktop/README.md](examples/desktop/README.md) for model files and
   packaging, [examples/python/README.md](examples/python/README.md) for the
-  core as a Python package, [third/README.md](third/README.md) for the engine
+  core as a Python package, [examples/server/README.md](examples/server/README.md)
+  for the speech server, [third/README.md](third/README.md) for the engine
   checkouts.
 
 ## Layout
@@ -132,16 +133,16 @@ src/                the core: a static library plus a C ABI
   llm/                chat and embedding models, on device or remote
   store/              yoai.db: the day timeline and the vectors
   voice/              speech in and out
-  server/             the WebSocket speech server
   utils/              logging, HTTP + TLS, bundles, a memory benchmark
 cli/                desktop tools that drive the core from a shell
-tests/              one program per test
+tests/              one program per test, laid out like src/
 tools/              workstation scripts for model files
 third/              vendored sources, and where the engine checkouts go
 design/             the interface: palettes, icons, logo, and their generators
 docs/               what was decided and why: speech, embedding
 examples/desktop/   the desktop client (Electron) and its Node-API addon
 examples/python/    the core as a Python package (ctypes), built as a wheel
+examples/server/    the speech server: text in, speech out, over a WebSocket
 ```
 
 `examples/harmony/` and `examples/android/` hold the phone hosts; their own

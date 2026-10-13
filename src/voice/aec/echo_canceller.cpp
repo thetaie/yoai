@@ -1,4 +1,4 @@
-#include "voice/algorithms/echo_canceller.hpp"
+#include "voice/aec/echo_canceller.hpp"
 
 #include "voice/algorithms/fft.hpp"
 

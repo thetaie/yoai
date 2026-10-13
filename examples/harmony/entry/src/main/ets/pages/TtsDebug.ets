@@ -114,9 +114,9 @@ const PINNED_SEED: number = 23;
 
 /**
  * The PC's RTF protocol (docs/voice.md, "All four talkers, one session"):
- * tests/tts_sweep.cpp's three passages, each read as one say(), after a
- * warm-up that is not counted. Seed, temperature, text layout and eos hold are
- * the desktop's reading settings, not this page's.
+ * tests/voice/tts/tts_sweep.cpp's three passages, each read as one say(),
+ * after a warm-up that is not counted. Seed, temperature, text layout and eos
+ * hold are the desktop's reading settings, not this page's.
  */
 const BENCH_WARMUP: string = '你好。';
 const BENCH_PASSAGES: string[] = [

@@ -25,7 +25,7 @@
 #include "utils/memory_bandwidth.hpp"
 #include "store/db.hpp"
 #include "store/timeline.hpp"
-#include "voice/algorithms/echo_canceller.hpp"
+#include "voice/aec/echo_canceller.hpp"
 #include "voice/algorithms/resampler.hpp"
 #include "voice/omni/qwen25_omni.hpp"
 #include "voice/prosody/prosody.hpp"

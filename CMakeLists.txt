@@ -4,9 +4,9 @@ project(yoai C CXX)
 # The YoAI core: a static library plus a C ABI (src/yoai.h), built to be linked
 # INTO a host app -- the HarmonyOS native module today, an Android one next --
 # rather than run as a process. The core binds no port: the host owns storage
-# and settings and reaches the core through the C ABI. The one exception is
-# opt-in and outside the core -- src/server/, speech over a WebSocket, behind
-# YOAI_SERVER.
+# and settings and reaches the core through the C ABI. The one host that does
+# serve is examples/server/, speech over a WebSocket, which links yoai_core
+# from a CMake project of its own like the other hosts.
 #
 # A desktop CLI (cli/) links the same library, so the core can be exercised on a
 # workstation without a device in the loop. It is a test harness, not a product.
@@ -249,18 +249,19 @@ add_library(yoai_core STATIC
     src/utils/memory_bandwidth.cpp
 
     # Voice. One subsystem, two halves with different appetites -- the same split
-    # docs/voice.md is built on. algorithms/ and prosody are arithmetic over a
-    # sample buffer and build everywhere; sensevoice needs ggml and compiles to a
-    # truthful stub without it, the way llm/chat/local.cpp does for the LLM lane.
+    # docs/voice.md is built on. algorithms/, aec/ and prosody are arithmetic
+    # over a sample buffer and build everywhere; sensevoice needs ggml and
+    # compiles to a truthful stub without it, the way llm/chat/local.cpp does for
+    # the LLM lane.
     src/voice/algorithms/fft.cpp
     src/voice/algorithms/fbank_funasr.cpp
     # For the echo canceller's reference signal only; see its header for why
     # the core's no-resampler rule does not cover that.
     src/voice/algorithms/resampler.cpp
     # What the speaker played, taken back out of what the microphone heard.
-    src/voice/algorithms/echo_canceller.cpp
+    src/voice/aec/echo_canceller.cpp
     # How far behind the reference the echo is, from what is being played.
-    src/voice/algorithms/delay_estimator.cpp
+    src/voice/aec/delay_estimator.cpp
     src/voice/asr/sensevoice.cpp
     src/voice/prosody/prosody.cpp
     # A SECOND engine, for the one thing the other two cannot do between them:
@@ -814,44 +815,6 @@ if(YOAI_MNN)
 endif()
 
 #-------------------------------------------------------------------------------
-# yoai_server -- the core behind a WebSocket
-#-------------------------------------------------------------------------------
-
-# Text in, speech out, over a WebSocket: src/server/, a library of its own so
-# that a container's entry point and cli/server.cpp link the same thing. Not in
-# yoai_core, which goes into apps that serve nothing.
-#
-# OFF by default, since it is the one target that needs libwebsockets. vcpkg
-# installs it through the manifest's `server` feature, which `build.py server`
-# turns on with the option; elsewhere a distro's libwebsockets-dev does.
-option(YOAI_SERVER "Build the WebSocket speech server (src/server/)" OFF)
-
-if(YOAI_SERVER)
-    find_package(libwebsockets CONFIG REQUIRED)
-    # The shared library where there is one -- the only one a dynamic vcpkg
-    # triplet builds -- and the static one otherwise.
-    if(TARGET websockets_shared)
-        set(_yoai_lws websockets_shared)
-    elseif(TARGET websockets)
-        set(_yoai_lws websockets)
-    else()
-        message(FATAL_ERROR "libwebsockets was found but exports neither websockets_shared "
-                            "nor websockets.")
-    endif()
-
-    add_library(yoai_server STATIC src/server/tts_server.cpp)
-    target_link_libraries(yoai_server PUBLIC yoai_core PRIVATE ${_yoai_lws})
-    target_include_directories(yoai_server PRIVATE ${LIBWEBSOCKETS_INCLUDE_DIRS})
-    # tts_server.cpp includes rapidjson, and with the MNN lane on that has to
-    # be MNN's copy for the reason given at the MNN section above.
-    if(YOAI_MNN)
-        target_include_directories(yoai_server BEFORE PRIVATE "${MNN_DIR}/include")
-    endif()
-
-    message(STATUS "yoai_server: ON -> ${_yoai_lws}")
-endif()
-
-#-------------------------------------------------------------------------------
 # cli -- a desktop harness for the core
 #-------------------------------------------------------------------------------
 
@@ -888,105 +851,100 @@ if(YOAI_BUILD_CLI)
     # desktop harnesses for the core, and a HAP has nowhere to put an
     # executable. The timeline's rules are the one part of the core that fails
     # silently in the data rather than loudly at runtime, so they get a test.
-    add_executable(yoai-timeline-test tests/timeline_test.cpp)
+    add_executable(yoai-timeline-test tests/store/timeline_test.cpp)
     target_link_libraries(yoai-timeline-test PRIVATE yoai_core)
 
     # The same store through the door a HOST uses, which is a separate thing to
     # get wrong: the rules can be perfect while a JSON key is spelled
     # differently than yoai.h says, and a host only ever reads the header.
-    add_executable(yoai-timeline-abi-test tests/timeline_abi_test.cpp)
+    add_executable(yoai-timeline-abi-test tests/store/timeline_abi_test.cpp)
     target_link_libraries(yoai-timeline-abi-test PRIVATE yoai_core)
 
     # Vector search over an in-memory database. Checks that sqlite-vec is
     # compiled in and registers, and that a nearest-neighbor query returns
     # what was stored, in distance order.
-    add_executable(yoai-vector-index-test tests/vector_index_test.cpp)
+    add_executable(yoai-vector-index-test tests/store/vector_index_test.cpp)
     target_link_libraries(yoai-vector-index-test PRIVATE yoai_core)
 
     # The embedder and the index together: text in, the related text out.
     # Builds whether or not YOAI_ONDEVICE_LLM is on, and says which.
-    add_executable(yoai-embed-test tests/embed_test.cpp)
+    add_executable(yoai-embed-test tests/llm/embed_test.cpp)
     target_link_libraries(yoai-embed-test PRIVATE yoai_core)
 
     # Builds whether or not YOAI_ASR is on. Without it the front-end checks
     # still run and still mean something -- the filterbank is the half that has
     # one right answer -- and the transcription half says it is not compiled in.
-    add_executable(yoai-sensevoice-test tests/sensevoice_test.cpp)
+    add_executable(yoai-sensevoice-test tests/voice/asr/sensevoice_test.cpp)
     target_link_libraries(yoai-sensevoice-test PRIVATE yoai_core)
+    target_include_directories(yoai-sensevoice-test PRIVATE tests)
 
     # Needs neither a model nor ggml, so it builds in the plain desktop
     # configuration and its table can be checked against the tool that produced
     # the result docs/voice.md records.
-    add_executable(yoai-prosody-test tests/prosody_test.cpp)
+    add_executable(yoai-prosody-test tests/voice/prosody/prosody_test.cpp)
     target_link_libraries(yoai-prosody-test PRIVATE yoai_core)
+    target_include_directories(yoai-prosody-test PRIVATE tests)
 
     # The resampler alone: closed-form checks with no arguments, a WAV
     # converted to 16 kHz with two, to be listened to against the original.
-    add_executable(yoai-resampler-test tests/resampler_test.cpp)
+    add_executable(yoai-resampler-test tests/voice/algorithms/resampler_test.cpp)
     target_link_libraries(yoai-resampler-test PRIVATE yoai_core)
+    target_include_directories(yoai-resampler-test PRIVATE tests)
 
     # The echo canceller against synthetic echo whose every part is known, so
     # the residual can be measured exactly, even while someone talks over it.
-    add_executable(yoai-echo-canceller-test tests/echo_canceller_test.cpp)
+    add_executable(yoai-echo-canceller-test tests/voice/aec/echo_canceller_test.cpp)
     target_link_libraries(yoai-echo-canceller-test PRIVATE yoai_core)
+    target_include_directories(yoai-echo-canceller-test PRIVATE tests)
 
     # The same canceller through the door a host uses: its reference resampled,
     # the two streams paired however they arrive, against the class run directly.
-    add_executable(yoai-aec-abi-test tests/aec_abi_test.cpp)
+    add_executable(yoai-aec-abi-test tests/voice/aec/aec_abi_test.cpp)
     target_link_libraries(yoai-aec-abi-test PRIVATE yoai_core)
 
     # The delay estimator against delays it was not told, through synthetic
     # rooms; with two WAVs, a window-by-window trace of a real pair.
-    add_executable(yoai-delay-estimator-test tests/delay_estimator_test.cpp)
+    add_executable(yoai-delay-estimator-test tests/voice/aec/delay_estimator_test.cpp)
     target_link_libraries(yoai-delay-estimator-test PRIVATE yoai_core)
+    target_include_directories(yoai-delay-estimator-test PRIVATE tests)
 
     # One file in, a directory out. Checked against tools/pack-mnn-model.py:
     # a truncated weight file is the one failure MNN would answer through
     # rather than report.
-    add_executable(yoai-bundle-test tests/bundle_test.cpp)
+    add_executable(yoai-bundle-test tests/utils/bundle_test.cpp)
     target_link_libraries(yoai-bundle-test PRIVATE yoai_core)
 
     # The sentence splitter, which needs no engine. It has a test because its
     # predecessor failed in the one way nothing reports: the reply was read
     # aloud and simply did not say everything.
-    add_executable(yoai-reader-test tests/reader_test.cpp)
+    add_executable(yoai-reader-test tests/voice/tts/reader_test.cpp)
     target_link_libraries(yoai-reader-test PRIVATE yoai_core)
 
     # The prompt table, through the class and through the C ABI a host reads.
     # With --dump it prints yoai_prompts() instead, to see what a host gets.
-    add_executable(yoai-prompts-test tests/prompts_test.cpp)
+    add_executable(yoai-prompts-test tests/llm/prompts_test.cpp)
     target_link_libraries(yoai-prompts-test PRIVATE yoai_core)
 
     # When a message's time and arousal reach the model, and that adding a turn
     # never rewrites an earlier one -- the property every cached prefix rests on.
-    add_executable(yoai-annotations-test tests/annotations_test.cpp)
+    add_executable(yoai-annotations-test tests/llm/annotations_test.cpp)
     target_link_libraries(yoai-annotations-test PRIVATE yoai_core)
 
     # One passage at several talker temperatures and seeds, written out to be
     # listened to. Needs the engine to do anything; builds everywhere.
-    add_executable(yoai-tts-sweep tests/tts_sweep.cpp)
+    add_executable(yoai-tts-sweep tests/voice/tts/tts_sweep.cpp)
     target_link_libraries(yoai-tts-sweep PRIVATE yoai_core)
 
     # Whether a CustomVoice reading style reaches the Base checkpoint, through a
     # voice file or a reference in the prompt. Needs the engine; builds everywhere.
-    add_executable(yoai-tts-style tests/tts_style.cpp)
+    add_executable(yoai-tts-style tests/voice/tts/tts_style.cpp)
     target_link_libraries(yoai-tts-style PRIVATE yoai_core)
 
     # A passage read while it is still being "written" at a fixed rate,
     # against the same passage given whole: the audio must match, and the
     # playback it would feed must not run dry.
-    add_executable(yoai-tts-pull tests/tts_pull.cpp)
+    add_executable(yoai-tts-pull tests/voice/tts/tts_pull.cpp)
     target_link_libraries(yoai-tts-pull PRIVATE yoai_core)
-
-    # The speech server from the command line. shell32 for the same reason as
-    # yoai-llama.
-    if(YOAI_SERVER)
-        add_executable(yoai-server cli/server.cpp)
-        target_link_libraries(yoai-server PRIVATE yoai_server)
-        if(WIN32)
-            target_link_libraries(yoai-server PRIVATE shell32)
-        endif()
-    endif()
 endif()
 
 #-------------------------------------------------------------------------------
