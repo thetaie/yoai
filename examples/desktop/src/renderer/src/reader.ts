@@ -164,6 +164,14 @@ export async function begin(): Promise<boolean> {
 }
 
 /**
+ * Seconds of speech the stream has produced, and whether it has ended: with
+ * what the player has played, how much of a reply has been heard.
+ */
+export function produced(): { seconds: number; done: boolean } {
+  return { seconds, done: !open }
+}
+
+/**
  * Add a delta, exactly as the model wrote it. Fire and forget.
  *
  * Markdown and all: the core turns the reply into what should be spoken

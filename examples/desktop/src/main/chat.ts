@@ -82,7 +82,12 @@ export function set(patch: ChatSettingsPatch): ChatSettings {
  * The turn and the local model's warm-up both take it from here, and the core
  * builds it from the same two inputs, so they agree to the token -- a warm-up
  * spent on a prompt nobody sends is wasted.
+ *
+ * `live` is a turn in a voice conversation: read aloud, and allowed to answer
+ * <wait> alone when the user's speech, cut at a pause, has nothing to answer
+ * yet (YOAI_TURN_LIVE in src/yoai.h). It only adds to the end, so the
+ * warm-up of a read turn still covers most of it.
  */
-export function turnPrompt(reading: boolean): string {
-  return core().nativePromptTurnSystem(stored(), reading)
+export function turnPrompt(reading: boolean, live = false): string {
+  return core().nativePromptTurnSystem(stored(), (reading ? 1 : 0) | (live ? 2 : 0))
 }

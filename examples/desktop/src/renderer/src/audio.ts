@@ -129,6 +129,24 @@ export interface Player {
   /** Call `listener` whenever active() changes. Returns the unsubscribe function. */
   watch(listener: () => void): () => void
   /**
+   * Hold the speaker where it is, everything scheduled with it, until resume().
+   * For a voice heard over the reply: whether it is the user taking a turn is
+   * known only once its words are, and a reply that kept talking meanwhile
+   * would talk over them. stop() ends a pause as well.
+   */
+  pause(): void
+  resume(): void
+  paused(): boolean
+  /** Seconds of the speech since the last stop() that have been heard. */
+  playedSeconds(): number
+  /**
+   * Hand `listener` what the speaker plays, a block at a time at 24 kHz,
+   * silence included: the echo canceller's reference. Nothing arrives while
+   * paused, which is also what the speaker plays. Returns the function that
+   * ends it.
+   */
+  tap(listener: (pcm: Float32Array) => void): () => void
+  /**
    * Seconds of audio this stream should have in hand before it starts.
    *
    * Per lane, because the cushion has to cover what that lane stalls for and
@@ -189,6 +207,16 @@ export function createPlayer(): Player {
   /** What watchers were last told, so they hear about changes only. */
   let wasActive = false
 
+  /**
+   * Every source connects here rather than to the destination, so the tap can
+   * hear exactly what goes out. Made with the context.
+   */
+  let bus: GainNode | null = null
+  /** Set by pause(): the context is suspended on purpose, and stays so. */
+  let pausedByCaller = false
+  /** Where and how long each chunk since the last stop() plays, for playedSeconds(). */
+  let scheduled: Array<{ at: number; seconds: number }> = []
+
   const isActive = (): boolean =>
     expected || pending.length > 0 || queue.length > 0 || live.length > 0
 
@@ -213,6 +241,8 @@ export function createPlayer(): Player {
       // moves that to a single resample on the way to the device, where it
       // belongs, and the chunk boundaries become exact.
       ctx = new AudioContext({ sampleRate: SAMPLE_RATE })
+      bus = ctx.createGain()
+      bus.connect(ctx.destination)
     }
     // Chromium starts an AudioContext SUSPENDED until the page has seen a user
     // gesture, and `resume()` before one is refused. A speak button is a click
@@ -221,7 +251,10 @@ export function createPlayer(): Player {
     // arrives. A suspended context does not advance currentTime, so everything
     // scheduled against it waits -- which looks like playback holding back for
     // the whole synthesis, and is not.
-    if (ctx.state === 'suspended') {
+    //
+    // Not while paused on purpose: a chunk arriving then must wait with the
+    // rest, not start the speaker again.
+    if (ctx.state === 'suspended' && !pausedByCaller) {
       void ctx.resume()
     }
     return ctx
@@ -269,7 +302,7 @@ export function createPlayer(): Player {
 
     const src = c.createBufferSource()
     src.buffer = buf
-    src.connect(c.destination)
+    src.connect(bus ?? c.destination)
 
     if (late) {
       // Its slot has already gone past: the speech has a hole exactly here.
@@ -291,6 +324,7 @@ export function createPlayer(): Player {
     }
 
     src.start(nextAt)
+    scheduled.push({ at: nextAt, seconds: buf.duration })
     nextAt += buf.duration
 
     live.push(src)
@@ -525,6 +559,12 @@ export function createPlayer(): Player {
       // counter report the pause between two replies -- seconds of it -- as if
       // the speech had a hole in it.
       nextAt = 0
+      scheduled = []
+      // A stop ends a pause too: what comes next must be heard.
+      if (pausedByCaller) {
+        pausedByCaller = false
+        void ctx?.resume()
+      }
       notify()
     },
 
@@ -541,6 +581,57 @@ export function createPlayer(): Player {
       watchers.add(listener)
       return () => {
         watchers.delete(listener)
+      }
+    },
+
+    pause(): void {
+      if (ctx === null || pausedByCaller) {
+        return
+      }
+      pausedByCaller = true
+      void ctx.suspend()
+    },
+
+    resume(): void {
+      if (!pausedByCaller) {
+        return
+      }
+      pausedByCaller = false
+      void ctx?.resume()
+    },
+
+    paused(): boolean {
+      return pausedByCaller
+    },
+
+    playedSeconds(): number {
+      if (ctx === null) {
+        return 0
+      }
+      const now = ctx.currentTime
+      let heard = 0
+      for (const s of scheduled) {
+        heard += Math.min(s.seconds, Math.max(0, now - s.at))
+      }
+      return heard
+    },
+
+    tap(listener: (pcm: Float32Array) => void): () => void {
+      const c = ensure()
+      // A ScriptProcessor for the same reason recorder.ts uses one: a worklet
+      // is a module loaded by URL, and this page loads nothing it did not ship
+      // with. 1024 frames at 24 kHz is a block every 43ms. Its output is
+      // silence, and goes to the destination only so that it runs.
+      const node = c.createScriptProcessor(1024, 1, 1)
+      node.onaudioprocess = (e): void => {
+        listener(new Float32Array(e.inputBuffer.getChannelData(0)))
+      }
+      bus?.connect(node)
+      node.connect(c.destination)
+      return () => {
+        node.onaudioprocess = null
+        bus?.disconnect(node)
+        node.disconnect()
       }
     },
 

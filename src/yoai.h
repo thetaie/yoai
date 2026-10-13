@@ -544,6 +544,17 @@ int yoai_prompt_set(const char* name, const char* text);
 // keeps no copy of the default, and a new default reaches every user who never
 // changed it. "" is a user who cleared it: nothing of theirs is sent, and on a
 // turn that is not read aloud, no system prompt at all.
+//
+// `reading` is a set of flags; 0 and 1 mean what they always did.
+// YOAI_TURN_LIVE is a turn in a voice conversation, whose user message is
+// speech cut at a pause: read aloud as YOAI_TURN_READ is, and with the
+// "live_turn" prompt after the spoken-style one, which asks for the reply
+// YOAI_WAIT_MARKER and nothing else when the message has nothing in it to
+// answer yet. A host that sees that reply sends no audio and no reply to the
+// history, and waits for the rest of the user's speech.
+#define YOAI_TURN_READ   1
+#define YOAI_TURN_LIVE   2
+#define YOAI_WAIT_MARKER "<wait>"
 const char* yoai_prompt_turn_system(const char* base, int reading);
 
 // Why the last yoai_prompt_get on this thread failed, or "" after a success.
@@ -638,6 +649,25 @@ int yoai_voice_set_threads(int threads);
 const char* yoai_voice_analyze(const short* pcm,
                                int n_samples,
                                int sample_rate);
+
+// What one utterance of a voice conversation, cut where the user paused, does
+// to it, judged on its words by rule -- src/voice/text/turn_cue.hpp has the
+// rules, why they are rules, and what they miss:
+//
+//   YOAI_CUE_ANSWER      something to answer, new or added to the last request
+//   YOAI_CUE_UNFINISHED  nothing to answer yet, as in "我想问一下"
+//   YOAI_CUE_CORRECT     takes back the request being answered and says what
+//                        instead, as in "不对，是杭州"
+//   YOAI_CUE_STOP        takes it back and says nothing else, as in "算了"
+//
+// Ask about UNFINISHED only when nothing is being answered, and about CORRECT
+// and STOP only while a reply is under way. Plain text processing: no model,
+// and on every build. NULL is ANSWER.
+#define YOAI_CUE_ANSWER     0
+#define YOAI_CUE_UNFINISHED 1
+#define YOAI_CUE_CORRECT    2
+#define YOAI_CUE_STOP       3
+int yoai_turn_cue(const char* text);
 
 //------------------------------------------------------------------------------
 // Echo cancellation

@@ -15,8 +15,10 @@ import {
   type InterfacePrefs,
   type SessionMeta
 } from '@shared/store'
+import type { AsrStatus } from '@shared/api'
 import { player } from './audio'
 import { newSessionId, runTurn } from './chatEngine'
+import { VoiceController, type VoiceHost } from './voice'
 import * as omni from './omni'
 import * as reader from './reader'
 import * as tts from './tts'
@@ -27,6 +29,22 @@ import { Thread } from './components/Thread'
 import { S } from './strings'
 
 type View = 'chat' | 'settings'
+
+/** How a turn ended: answered, stopped, or -- a live turn -- the model waited. */
+type TurnEnd = 'done' | 'stopped' | 'wait'
+
+interface TurnOptions {
+  voice?: boolean
+  live?: boolean
+  join?: boolean
+}
+
+/**
+ * The whole reply a live turn's model gives when the user's speech has nothing
+ * to answer yet: YOAI_WAIT_MARKER in src/yoai.h, which the core's prompt asks
+ * for. Never shown, read or kept.
+ */
+const WAIT_MARKER = '<wait>'
 
 export function App(): JSX.Element {
   const [status, setStatus] = useState<CoreStatus | null>(null)
@@ -60,10 +78,24 @@ export function App(): JSX.Element {
   const thinkRef = useRef('')
   const messagesRef = useRef<ChatMessage[]>([])
   const cancelerRef = useRef<{ cancel: () => void } | null>(null)
+  // `streaming`, for the voice controller, which runs between renders.
+  const streamingRef = useRef(false)
+  // Who is waiting for the turn to end; see startTurn().
+  const turnEndRef = useRef<((how: TurnEnd) => void) | null>(null)
+  // A live turn's model answered WAIT_MARKER.
+  const waitedRef = useRef(false)
+  // A stopped reply keeps this much of its text: what was heard of it. null
+  // keeps all of it, as a stop from the 停止 button does.
+  const keepRef = useRef<string | null>(null)
 
   const setThread = useCallback((next: ChatMessage[]) => {
     messagesRef.current = next
     setMessages(next)
+  }, [])
+
+  const markStreaming = useCallback((on: boolean) => {
+    streamingRef.current = on
+    setStreaming(on)
   }, [])
 
   //----------------------------------------------------------------------------
@@ -127,6 +159,8 @@ export function App(): JSX.Element {
     if (streaming) {
       return // switching mid-turn would stream into the wrong transcript
     }
+    // A voice conversation belongs to the transcript it was held in.
+    voiceRef.current?.close()
     setSessionId(id)
     setThread(await window.yoai.sessions.messages(id))
     setUsage(null)
@@ -137,6 +171,7 @@ export function App(): JSX.Element {
     if (streaming) {
       return
     }
+    voiceRef.current?.close()
     // The engines are told as well as the screen. Clearing the transcript is
     // enough for a remote provider, which is handed the whole conversation every
     // turn and keeps nothing; an on-device one keeps a KV cache, and the next
@@ -186,12 +221,27 @@ export function App(): JSX.Element {
    * they did not ask to lose it.
    */
   const finishTurn = (label: string, aborted: boolean, id: string): void => {
-    const parts: MessagePart[] = []
-    if (thinkRef.current.length > 0) {
-      parts.push({ kind: 'thinking', content: thinkRef.current })
+    // A live turn the model answered <wait> leaves nothing; one stopped by a
+    // voice keeps what was heard of it (keepRef), or nothing.
+    const waited = waitedRef.current
+    const keep = aborted ? keepRef.current : null
+    waitedRef.current = false
+    keepRef.current = null
+    let text = textRef.current
+    let thinking = thinkRef.current
+    if (waited || keep === '') {
+      text = ''
+      thinking = ''
+    } else if (keep !== null) {
+      text = keep
     }
-    if (textRef.current.length > 0) {
-      parts.push({ kind: 'text', content: textRef.current })
+
+    const parts: MessagePart[] = []
+    if (thinking.length > 0) {
+      parts.push({ kind: 'thinking', content: thinking })
+    }
+    if (text.length > 0) {
+      parts.push({ kind: 'text', content: text })
     }
 
     let next = messagesRef.current
@@ -200,7 +250,7 @@ export function App(): JSX.Element {
         ...next,
         {
           role: 'assistant',
-          content: textRef.current,
+          content: text,
           parts,
           model: label,
           ts: Date.now()
@@ -222,15 +272,20 @@ export function App(): JSX.Element {
     }
     setThread(next)
 
-    setStreaming(false)
+    markStreaming(false)
     setStreamText('')
     setStreamThinking('')
     textRef.current = ''
     thinkRef.current = ''
     cancelerRef.current = null
     void persist(id, next)
+
+    const end = turnEndRef.current
+    turnEndRef.current = null
+    end?.(waited ? 'wait' : aborted ? 'stopped' : 'done')
   }
 
+  /** What the box holds, sent. */
   const send = (): void => {
     const text = input.trim()
     if (text.length === 0 || streaming) {
@@ -240,19 +295,43 @@ export function App(): JSX.Element {
       note(S.chatNeedModel)
       return
     }
-
-    const withUser: ChatMessage[] = [
-      ...messagesRef.current,
-      { role: 'user', content: text, ts: Date.now() }
-    ]
-    setThread(withUser)
     setInput('')
-    setStreaming(true)
+    void startTurn(text)
+  }
+
+  /**
+   * Send `text` as the user and stream the reply. Resolves when the turn is
+   * over, saying how: 'wait' when a live turn's model answered WAIT_MARKER.
+   *
+   * `voice`: the text was spoken, so the reply is read aloud whenever the voice
+   * is loaded, whatever the reading setting says. `live`: a full-duplex turn,
+   * which the model may answer <wait> alone. `join`: the text replaces the last
+   * user message instead of following it -- the rest of a request held for it.
+   */
+  const startTurn = (text: string, opts: TurnOptions = {}): Promise<TurnEnd> => {
+    if (text.length === 0 || streamingRef.current) {
+      return Promise.resolve('stopped')
+    }
+    if (activeId.length === 0) {
+      note(S.chatNeedModel)
+      return Promise.resolve('stopped')
+    }
+
+    const prior = messagesRef.current
+    const base =
+      opts.join === true && prior[prior.length - 1]?.role === 'user' ? prior.slice(0, -1) : prior
+    const withUser: ChatMessage[] = [...base, { role: 'user', content: text, ts: Date.now() }]
+    setThread(withUser)
+    markStreaming(true)
     setStreamText('')
     setStreamThinking('')
     setUsage(null)
     textRef.current = ''
     thinkRef.current = ''
+    waitedRef.current = false
+    const ended = new Promise<TurnEnd>((resolve) => {
+      turnEndRef.current = resolve
+    })
 
     const active = models.find((m) => m.id === activeId)
     const label = active === undefined ? activeId : modelLabel(active)
@@ -316,26 +395,50 @@ export function App(): JSX.Element {
         // The reply has moved from the streaming bubble into the thread, so the
         // bubble has to be emptied -- it used to be empty for this whole lane
         // and is not any more.
-        setStreaming(false)
+        markStreaming(false)
         setStreamText('')
         textRef.current = ''
         cancelerRef.current = null
+        const end = turnEndRef.current
+        turnEndRef.current = null
+        end?.('done')
         return
       }
 
       // The reading lane, decided BEFORE the turn starts because it has to be
       // open before the first token arrives. Asked fresh for the same reason
-      // the speak flag is: the models load in the background.
-      const reading = await reader.ready()
+      // the speak flag is: the models load in the background. A spoken
+      // message is answered aloud whenever there is a voice to do it.
+      const reading = opts.voice === true ? await reader.loaded() : await reader.ready()
       if (reading) {
         await reader.begin()
       }
+
+      // A live turn's reply is held back until it cannot be WAIT_MARKER any
+      // more: a token or two. The marker is never shown, read or kept.
+      let head = ''
+      let decided = opts.live !== true
 
       // A reply that will be heard is asked to be written for the ear. The
       // main process builds that prompt the way the local model's warm-up
       // does, so the prompt computed ahead of this turn is the one it sends.
       cancelerRef.current = runTurn(activeId, withUser, reading, {
-        onDelta: (t) => {
+        onDelta: (delta) => {
+          let t = delta
+          if (!decided) {
+            head += t
+            const lead = head.trimStart()
+            if (lead.length < WAIT_MARKER.length && WAIT_MARKER.startsWith(lead)) {
+              return
+            }
+            decided = true
+            if (lead.startsWith(WAIT_MARKER)) {
+              waitedRef.current = true
+              cancelerRef.current?.cancel()
+              return
+            }
+            t = head
+          }
           textRef.current += t
           setStreamText(textRef.current)
           // The same delta the transcript gets. Not awaited: this runs once per
@@ -369,6 +472,13 @@ export function App(): JSX.Element {
           ])
         },
         onDone: (aborted) => {
+          // A reply shorter than the marker that began like it: it was a reply.
+          if (!decided && head.length > 0) {
+            textRef.current += head
+            if (reading) {
+              reader.feed(head)
+            }
+          }
           if (reading) {
             // The stream has to be closed either way -- there are engines and
             // threads behind it. When the user stopped the turn they asked for
@@ -381,8 +491,9 @@ export function App(): JSX.Element {
           }
           finishTurn(label, aborted, turnSession)
         }
-      })
+      }, opts.live === true)
     })()
+    return ended
   }
 
   /**
@@ -403,6 +514,109 @@ export function App(): JSX.Element {
   }
 
   //----------------------------------------------------------------------------
+  // Voice
+  //----------------------------------------------------------------------------
+
+  /** The last reply in the thread, which may still be being heard. */
+  const lastReplyIndex = (): number => {
+    const msgs = messagesRef.current
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === 'assistant' && msgs[i].transient !== true) {
+        return i
+      }
+      if (msgs[i].role === 'user') {
+        return -1
+      }
+    }
+    return -1
+  }
+
+  /**
+   * Stop the reply for a voice that took the turn back. `heard` is what the
+   * reply keeps -- '' for none of it -- or null for all of it. A reply still
+   * being written is kept when its turn ends (finishTurn); one already in the
+   * thread and still being read is cut there and then.
+   */
+  const stopReply = (heard: string | null): Promise<void> => {
+    if (streamingRef.current) {
+      keepRef.current = heard
+      const done = new Promise<void>((resolve) => {
+        const waiting = turnEndRef.current
+        turnEndRef.current = (how) => {
+          waiting?.(how)
+          resolve()
+        }
+      })
+      stop()
+      return done
+    }
+    stopSpeech()
+    const i = lastReplyIndex()
+    if (heard !== null && i >= 0) {
+      const msgs = messagesRef.current
+      const next =
+        heard.length === 0
+          ? [...msgs.slice(0, i), ...msgs.slice(i + 1)]
+          : msgs.map((m, k) =>
+              k === i ? { ...m, content: heard, parts: [{ kind: 'text' as const, content: heard }] } : m
+            )
+      setThread(next)
+      void persist(sessionId, next)
+    }
+    return Promise.resolve()
+  }
+
+  const voiceHost: VoiceHost = {
+    writing: () => streamingRef.current,
+    replyText: () => {
+      if (streamingRef.current) {
+        return textRef.current
+      }
+      const i = lastReplyIndex()
+      return player.active() && i >= 0 ? messagesRef.current[i].content : ''
+    },
+    lastUserText: () => {
+      const msgs = messagesRef.current
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === 'user') {
+          return msgs[i].content
+        }
+      }
+      return ''
+    },
+    send: (text, live, join) => startTurn(text, { voice: true, live, join }),
+    show: (text, join) => {
+      const prior = messagesRef.current
+      const base = join && prior[prior.length - 1]?.role === 'user' ? prior.slice(0, -1) : prior
+      const next: ChatMessage[] = [...base, { role: 'user', content: text, ts: Date.now() }]
+      setThread(next)
+      void persist(sessionId, next)
+    },
+    stopReply,
+    note
+  }
+  const voiceRef = useRef<VoiceController | null>(null)
+  if (voiceRef.current === null) {
+    voiceRef.current = new VoiceController(voiceHost)
+  } else {
+    voiceRef.current.setHost(voiceHost)
+  }
+  const voice = voiceRef.current
+  const micState = useSyncExternalStore(voice.watch, voice.current)
+
+  // Whether the microphone can be offered at all: recognition built in. Whether
+  // its model is loaded is asked on each click (VoiceController.click).
+  const [asrStatus, setAsrStatus] = useState<AsrStatus | null>(null)
+  useEffect(() => {
+    if (view === 'chat') {
+      void window.yoai.asr.status().then(setAsrStatus)
+    }
+  }, [view])
+
+  // The microphone goes with the window.
+  useEffect(() => () => voice.close(), [voice])
+
+  //----------------------------------------------------------------------------
   // Render
   //----------------------------------------------------------------------------
 
@@ -415,6 +629,7 @@ export function App(): JSX.Element {
         currentId={sessionId}
         onSelect={(id) => void openSession(id)}
         onNew={newSession}
+        streaming={streaming}
         onDelete={(id) => void dropSession(id)}
         onOpenSettings={() => setView('settings')}
       />
@@ -455,10 +670,6 @@ export function App(): JSX.Element {
                   ))
                 )}
               </select>
-              <div className="topbar-spacer" />
-              <button className="btn btn-quiet" onClick={newSession} disabled={streaming}>
-                {S.drawerNewChat}
-              </button>
             </div>
 
             {status !== null && !status.ok && <div className="banner">{status.detail}</div>}
@@ -487,6 +698,8 @@ export function App(): JSX.Element {
               onStop={stop}
               streaming={streaming}
               speaking={speaking}
+              mic={asrStatus?.available === true ? micState : null}
+              onMic={() => void voice.click()}
               ready={ready}
               hint={S.chatDisclaimer}
             />

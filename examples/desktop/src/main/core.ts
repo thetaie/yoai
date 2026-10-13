@@ -66,7 +66,7 @@ export interface YoaiNative {
    * who cleared it. The core adds the spoken style when `reading`, and a closing
    * line on everything being internal whenever there is anything before it.
    */
-  nativePromptTurnSystem(base: string | null, reading: boolean): string
+  nativePromptTurnSystem(base: string | null, flags: number): string
 
   //--- Speech output -----------------------------------------------------------
   // Present on every build. The qtts lane is a compile option and the C ABI
@@ -147,6 +147,22 @@ export interface YoaiNative {
   /** Abandon the open stream at its next block. It must still be finished. */
   nativeReaderCancel(): void
   nativeReaderLastError(): string
+
+  //--- Recognition (SenseVoice) and echo cancellation -------------------------
+  // Present on every build; without the lane, nativeVoiceAvailable() is 0 and
+  // a load fails saying so.
+  nativeVoiceAvailable(): number
+  nativeVoiceLoad(modelPath: string, onDone: NativeHandler): void
+  nativeVoiceLoaded(): number
+  nativeVoiceUnload(): void
+  /** pcm is 16-bit mono at 16 kHz. onDone gets 'end' with the core's JSON. */
+  nativeVoiceAnalyze(pcm: Int16Array, onDone: NativeHandler): void
+  /** yoai.h's YOAI_CUE_*: 0 answer, 1 unfinished, 2 correct, 3 stop. */
+  nativeTurnCue(text: string): number
+  /** A fresh canceller for a 24 kHz reference. '' on success, else the reason. */
+  nativeAecReset(highLatency: boolean): string
+  /** mic at 16 kHz, ref at 24 kHz over the same span; the mic, echo removed. */
+  nativeAecProcess(mic: Int16Array, ref: Float32Array): Int16Array
 
   //--- Omni (MNN + Qwen2.5-Omni) -----------------------------------------------
   // Present on every build, stubbed without the lane, exactly like the TTS

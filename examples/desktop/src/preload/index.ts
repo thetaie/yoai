@@ -14,9 +14,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import {
   API_KEY,
+  AsrStatus,
   YoaiApi,
   CHANNELS,
   ChatSettings,
+  DuplexEvent,
   LocalOffer,
   ModelDownload,
   ModelLoadState,
@@ -25,9 +27,11 @@ import {
   PickedModel,
   ReaderEvent,
   ReaderStatus,
+  Transcript,
   TtsEvent,
   TtsSlot,
-  TtsStatus
+  TtsStatus,
+  MicMode
 } from '../shared/api'
 import type { ChatEvent, ChatMessage, WireMessage } from '../shared/chat'
 import type { ModelConfig } from '../shared/provider'
@@ -81,8 +85,14 @@ const api: YoaiApi = {
     settings: () => ipcRenderer.invoke(CHANNELS.chatSettingsGet) as Promise<ChatSettings>,
     setSettings: (patch) =>
       ipcRenderer.invoke(CHANNELS.chatSettingsSet, patch) as Promise<ChatSettings>,
-    start: (providerId: string, messages: WireMessage[], reading: boolean) =>
-      ipcRenderer.invoke(CHANNELS.chatStart, providerId, messages, reading) as Promise<number>,
+    start: (providerId: string, messages: WireMessage[], reading: boolean, live?: boolean) =>
+      ipcRenderer.invoke(
+        CHANNELS.chatStart,
+        providerId,
+        messages,
+        reading,
+        live === true
+      ) as Promise<number>,
     cancel: (turnId) => ipcRenderer.invoke(CHANNELS.chatCancel, turnId) as Promise<void>,
     forget: () => ipcRenderer.invoke(CHANNELS.chatForget) as Promise<number>,
 
@@ -167,6 +177,30 @@ const api: YoaiApi = {
       ipcRenderer.on(CHANNELS.readerEvent, wrapped)
       return () => {
         ipcRenderer.removeListener(CHANNELS.readerEvent, wrapped)
+      }
+    }
+  },
+
+  asr: {
+    status: () => ipcRenderer.invoke(CHANNELS.asrStatus) as Promise<AsrStatus>,
+    pickModel: () => ipcRenderer.invoke(CHANNELS.asrPickModel) as Promise<AsrStatus | null>,
+    setMode: (mode: MicMode) =>
+      ipcRenderer.invoke(CHANNELS.asrSetMode, mode) as Promise<AsrStatus>,
+    transcribe: (pcm: Int16Array) =>
+      ipcRenderer.invoke(CHANNELS.asrTranscribe, pcm) as Promise<Transcript>
+  },
+
+  duplex: {
+    start: () => ipcRenderer.invoke(CHANNELS.duplexStart) as Promise<string>,
+    stop: () => ipcRenderer.invoke(CHANNELS.duplexStop) as Promise<void>,
+    // send, not invoke: a block every 64ms, and nothing to wait for.
+    audio: (mic: Int16Array, ref: Float32Array) =>
+      ipcRenderer.send(CHANNELS.duplexAudio, mic, ref),
+    onEvent: (listener: (ev: DuplexEvent) => void) => {
+      const wrapped = (_event: unknown, ev: DuplexEvent): void => listener(ev)
+      ipcRenderer.on(CHANNELS.duplexEvent, wrapped)
+      return () => {
+        ipcRenderer.removeListener(CHANNELS.duplexEvent, wrapped)
       }
     }
   },

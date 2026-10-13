@@ -83,7 +83,13 @@ interface IconDef {
  * arcs -- and dropping it loses part of the glyph silently.
  */
 const ICONS: IconDef[] = [
-  { name: 'menu', commands: ['M4 5h16', 'M4 12h16', 'M4 19h16'], stroke: STROKE },
+  // The history drawer's button. It was `menu`, three bars, which reads as
+  // "options" and sat opposite the settings gear as a second way to settings.
+  {
+    name: 'history',
+    commands: ['M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8', 'M3 3v5h5', 'M12 7v5l4 2'],
+    stroke: STROKE
+  },
   { name: 'chevron-left', commands: ['m15 18-6-6 6-6'], stroke: STROKE },
   { name: 'chevron-right', commands: ['m9 18 6-6-6-6'], stroke: STROKE },
   { name: 'chevron-down', commands: ['m6 9 6 6 6-6'], stroke: STROKE },

@@ -16,7 +16,9 @@ import { app, BrowserWindow, nativeTheme, session, shell } from 'electron'
 import { existsSync, mkdirSync, readdirSync, renameSync, rmdirSync } from 'node:fs'
 import { join } from 'node:path'
 import palettes from '../../../../design/palettes.json'
+import * as asr from './asr'
 import { core, describeCore } from './core'
+import * as duplex from './duplex'
 import { cancelAllTurns, registerHandlers, watchWindow } from './ipc'
 import * as omni from './omni'
 import * as reader from './reader'
@@ -198,6 +200,13 @@ app.whenReady().then(() => {
   // unawaited because nothing here depends on the outcome.
   if (described.ok) {
     models.autoPreload()
+    // Recognition too, for the microphone button: a quarter of a second for
+    // SenseVoice at q8, on its own worker.
+    void asr.autoLoad().then((reason) => {
+      if (reason.length > 0) {
+        console.error(`[yoai] recognition would not load: ${reason}`)
+      }
+    })
     // Into whichever lane should speak; see reader.autoLoadVoice().
     void reader.autoLoadVoice().then((reason) => {
       if (reason.length > 0) {
@@ -289,7 +298,9 @@ async function releaseEngines(): Promise<void> {
   const started = Date.now()
 
   // Turns were cancelled by before-quit. A reading is cancelled and, if the
-  // window closed before finishing it, finished, since nothing else will.
+  // window closed before finishing it, finished, since nothing else will. A
+  // voice session stops taking audio, so it starts no recognition.
+  duplex.stop()
   reader.abandon()
   tts.cancel()
   omni.cancel()

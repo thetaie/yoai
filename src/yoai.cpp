@@ -30,6 +30,7 @@
 #include "voice/omni/qwen25_omni.hpp"
 #include "voice/prosody/prosody.hpp"
 #include "voice/text/speakable_stream.hpp"
+#include "voice/text/turn_cue.hpp"
 #include "voice/tts/qwen3_tts.hpp"
 #include "voice/tts/reader.hpp"
 #include "voice/asr/sensevoice.hpp"
@@ -1037,8 +1038,10 @@ extern "C" int yoai_prompt_set(const char* name, const char* text) {
 
 extern "C" const char* yoai_prompt_turn_system(const char* base, int reading) {
     static thread_local std::string out;
-    out = base == nullptr ? yoai::llm::default_turn_system_prompt(reading != 0)
-                          : yoai::llm::turn_system_prompt(std::string(base), reading != 0);
+    const bool read = (reading & YOAI_TURN_READ) != 0;
+    const bool live = (reading & YOAI_TURN_LIVE) != 0;
+    out = base == nullptr ? yoai::llm::default_turn_system_prompt(read, live)
+                          : yoai::llm::turn_system_prompt(std::string(base), read, live);
     return out.c_str();
 }
 
@@ -1371,6 +1374,18 @@ extern "C" const char* yoai_voice_analyze(const short* pcm,
 
     voice_buffer().assign(buf.GetString(), buf.GetSize());
     return voice_buffer().c_str();
+}
+
+extern "C" int yoai_turn_cue(const char* text) {
+    if (text == nullptr) {
+        return YOAI_CUE_ANSWER;
+    }
+    switch (yoai::voice::turn_cue(text)) {
+        case yoai::voice::TurnCue::Unfinished: return YOAI_CUE_UNFINISHED;
+        case yoai::voice::TurnCue::Correct:    return YOAI_CUE_CORRECT;
+        case yoai::voice::TurnCue::Stop:       return YOAI_CUE_STOP;
+        default:                               return YOAI_CUE_ANSWER;
+    }
 }
 
 //------------------------------------------------------------------------------

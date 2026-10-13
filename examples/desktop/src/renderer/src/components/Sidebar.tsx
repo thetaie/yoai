@@ -7,6 +7,8 @@ interface Props {
   currentId: string
   onSelect: (id: string) => void
   onNew: () => void
+  /** A turn is running; a new conversation would leave it streaming into nothing. */
+  streaming: boolean
   onDelete: (id: string) => void
   onOpenSettings: () => void
 }
@@ -16,6 +18,7 @@ export function Sidebar({
   currentId,
   onSelect,
   onNew,
+  streaming,
   onDelete,
   onOpenSettings
 }: Props): JSX.Element {
@@ -23,7 +26,7 @@ export function Sidebar({
     <aside className="sidebar">
       <div className="sidebar-head">
         <span className="wordmark">YoAI</span>
-        <button className="btn btn-quiet" onClick={onNew} title="新对话">
+        <button className="btn btn-quiet" onClick={onNew} disabled={streaming} title="新对话">
           ＋
         </button>
       </div>

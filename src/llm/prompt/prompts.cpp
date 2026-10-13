@@ -8,6 +8,9 @@ const char* const kPromptSpokenStyle    = "spoken_style";
 const char* const kPromptTextAxes       = "text_axes";
 const char* const kPromptContextTime    = "context_time";
 const char* const kPromptContextArousal = "context_arousal";
+const char* const kPromptLiveTurn       = "live_turn";
+
+const char* const kWaitMarker = "<wait>";
 
 // Last in every turn's system prompt, whoever wrote what comes before it -- see
 // turn_system_prompt(). Kept out of the table, so a user who writes their own
@@ -126,6 +129,20 @@ score ::= "-1" | "-0.5" | "0" | "0.5" | "1"
 const char* const kContextTimeText    = "Time: {{time}}";
 const char* const kContextArousalText = "Tone: {{level}} (measured from the voice)";
 
+// The first of the two judgments a voice conversation makes on the user's
+// words -- docs/slides.md, "Barge-in: a second sentence mid-reply": can this,
+// cut at a pause, be answered on its own? Asked of the chat model in the turn
+// itself rather than in a turn of its own, so a message that can be answered
+// costs nothing extra. Not "has the user finished": that is in nobody's words,
+// and a message that can be answered is answered even if more follows.
+//
+// The marker must match kWaitMarker, which a host looks for.
+const char* const kLiveTurnText =
+    "This is a live voice conversation, and the user's last message is speech cut at a pause. "
+    "If it is clearly unfinished, with nothing in it to answer yet, such as \"I'd like to ask\", "
+    "\"um, so\" or 「我想问一下」, reply with exactly <wait> and nothing else: the rest is coming. "
+    "If there is anything to answer, answer it as usual, even if more may follow.";
+
 std::vector<Prompt> builtin_defaults() {
     std::vector<Prompt> t;
 
@@ -172,6 +189,13 @@ std::vector<Prompt> builtin_defaults() {
     level.required    = true;
     arousal.arguments.push_back(level);
     t.push_back(arousal);
+
+    Prompt live;
+    live.name        = kPromptLiveTurn;
+    live.description = "Appended to the system prompt in a live voice conversation: answer, or "
+                       "reply <wait> alone when the message has nothing to answer yet.";
+    live.text        = kLiveTurnText;
+    t.push_back(live);
 
     return t;
 }
@@ -319,12 +343,17 @@ bool Prompts::render(const std::string&                        name,
     return true;
 }
 
-std::string turn_system_prompt(const std::string& base, bool reading) {
+std::string turn_system_prompt(const std::string& base, bool reading, bool live) {
     std::vector<std::string> parts;
     if (!blank(base)) parts.push_back(base);
     Prompt spoken;
-    if (reading && Prompts::instance().get(kPromptSpokenStyle, &spoken) && !blank(spoken.text)) {
+    if ((reading || live) && Prompts::instance().get(kPromptSpokenStyle, &spoken) &&
+        !blank(spoken.text)) {
         parts.push_back(spoken.text);
+    }
+    Prompt waiting;
+    if (live && Prompts::instance().get(kPromptLiveTurn, &waiting) && !blank(waiting.text)) {
+        parts.push_back(waiting.text);
     }
     // Nothing to keep internal: no system message at all, which is what a user
     // who cleared the prompt asked for.
@@ -339,10 +368,10 @@ std::string turn_system_prompt(const std::string& base, bool reading) {
     return out;
 }
 
-std::string default_turn_system_prompt(bool reading) {
+std::string default_turn_system_prompt(bool reading, bool live) {
     Prompt system;
     Prompts::instance().get(kPromptSystem, &system);
-    return turn_system_prompt(system.text, reading);
+    return turn_system_prompt(system.text, reading, live);
 }
 
 }  // namespace llm

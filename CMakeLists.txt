@@ -284,6 +284,10 @@ add_library(yoai_core STATIC
     # A reply as written -- markdown, emoji -- turned into what is spoken, ahead
     # of the cutter. In the core so no host has to write it again.
     src/voice/text/speakable_stream.cpp
+    # What an utterance, cut where the user paused, does to a voice
+    # conversation: answer it, wait for the rest, or take back the reply under
+    # way. Rules over the words, no model.
+    src/voice/text/turn_cue.cpp
 )
 
 target_include_directories(yoai_core PUBLIC src)
@@ -919,6 +923,11 @@ if(YOAI_BUILD_CLI)
     # aloud and simply did not say everything.
     add_executable(yoai-reader-test tests/voice/tts/reader_test.cpp)
     target_link_libraries(yoai-reader-test PRIVATE yoai_core)
+
+    # The turn cues, through the class and the C ABI, on the utterances the
+    # chat model was measured on and the ones that made the rules what they are.
+    add_executable(yoai-turn-cue-test tests/voice/text/turn_cue_test.cpp)
+    target_link_libraries(yoai-turn-cue-test PRIVATE yoai_core)
 
     # The prompt table, through the class and through the C ABI a host reads.
     # With --dump it prints yoai_prompts() instead, to see what a host gets.

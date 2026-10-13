@@ -13,6 +13,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, WebContents } from 'electron'
 import { basename, dirname } from 'node:path'
 import {
+  AsrStatus,
   CHANNELS,
   ChatSettings,
   ChatSettingsPatch,
@@ -21,14 +22,18 @@ import {
   OmniStatus,
   PickedModel,
   ReaderStatus,
+  Transcript,
   TtsSlot,
-  TtsStatus
+  TtsStatus,
+  MicMode
 } from '../shared/api'
 import { ChatMessage, WireMessage } from '../shared/chat'
 import { KIND_LOCAL, LOCAL_VENDOR_ID, ModelConfig, modelId } from '../shared/provider'
 import { CoreStatus, InterfacePrefs } from '../shared/store'
+import * as asr from './asr'
 import { core, describeCore } from './core'
 import * as chat from './chat'
+import * as duplex from './duplex'
 import * as keystore from './keystore'
 import * as llmfiles from './llmfiles'
 import * as models from './models'
@@ -271,7 +276,7 @@ export function registerHandlers(): void {
 
   ipcMain.handle(
     CHANNELS.chatStart,
-    (event, providerId: string, messages: WireMessage[], reading: boolean) => {
+    (event, providerId: string, messages: WireMessage[], reading: boolean, live: boolean) => {
       const sender = event.sender
       const wire = (Array.isArray(messages) ? messages : []).map((m) => ({
         role: String(m.role),
@@ -297,7 +302,7 @@ export function registerHandlers(): void {
       turnId = core().nativeChat(
         String(providerId),
         JSON.stringify(wire),
-        chat.turnPrompt(reading === true),
+        chat.turnPrompt(reading === true, live === true),
         '',
         (type, content) => {
           if (sender.isDestroyed()) {
@@ -630,6 +635,46 @@ export function registerHandlers(): void {
   handle<[string], boolean>(CHANNELS.readerFeed, (delta) => reader.feed(String(delta ?? '')))
   handle<[], void>(CHANNELS.readerFinish, () => reader.finish())
   handle<[], void>(CHANNELS.readerCancel, () => reader.cancel())
+
+  //----------------------------------------------------------------------------
+  // Recognition, and the full-duplex session
+  //----------------------------------------------------------------------------
+
+  handle<[], AsrStatus>(CHANNELS.asrStatus, () => asr.status())
+
+  handle<[], AsrStatus | null>(CHANNELS.asrPickModel, async () => {
+    const win = BrowserWindow.getFocusedWindow()
+    const opts = {
+      title: 'Pick the SenseVoice model',
+      filters: [{ name: 'GGUF', extensions: ['gguf'] }],
+      properties: ['openFile' as const]
+    }
+    const result =
+      win === null ? await dialog.showOpenDialog(opts) : await dialog.showOpenDialog(win, opts)
+    if (result.canceled || result.filePaths.length === 0) {
+      return null
+    }
+    await asr.setModelPath(result.filePaths[0])
+    return asr.status()
+  })
+
+  handle<[MicMode], AsrStatus>(CHANNELS.asrSetMode, (mode) => {
+    asr.setMode(mode)
+    return asr.status()
+  })
+
+  handle<[Int16Array], Transcript>(CHANNELS.asrTranscribe, (pcm) =>
+    asr.transcribe(pcm instanceof Int16Array ? pcm : new Int16Array(0))
+  )
+
+  ipcMain.handle(CHANNELS.duplexStart, (event) => duplex.start(event.sender))
+  handle<[], void>(CHANNELS.duplexStop, () => duplex.stop())
+  // `on`, not `handle`: the page sends a block every 32ms and waits for nothing.
+  ipcMain.on(CHANNELS.duplexAudio, (_event, mic: unknown, ref: unknown) => {
+    if (mic instanceof Int16Array && ref instanceof Float32Array) {
+      duplex.audio(mic, ref)
+    }
+  })
 
   //----------------------------------------------------------------------------
   // Shell

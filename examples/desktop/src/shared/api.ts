@@ -100,6 +100,18 @@ export const CHANNELS = {
   /** Main -> renderer: PCM chunks in reading order, then the timings. */
   readerEvent: 'reader:event',
 
+  asrStatus: 'asr:status',
+  asrPickModel: 'asr:pickModel',
+  asrSetMode: 'asr:setMode',
+  asrTranscribe: 'asr:transcribe',
+
+  duplexStart: 'duplex:start',
+  duplexStop: 'duplex:stop',
+  /** Renderer -> main, fire and forget: one block of microphone and reference. */
+  duplexAudio: 'duplex:audio',
+  /** Main -> renderer: speech heard, then what was said. */
+  duplexEvent: 'duplex:event',
+
   openExternal: 'shell:openExternal'
 } as const
 
@@ -356,6 +368,56 @@ export interface ReaderEvent {
   error?: string
 }
 
+/**
+ * How the microphone button talks. 'talk', a walkie-talkie: a click starts
+ * recording and the next one sends it. 'duplex': a click opens a conversation
+ * that listens all the time, the reply included, until the next click.
+ */
+export type MicMode = 'talk' | 'duplex'
+
+export interface AsrStatus {
+  /** Whether this build has recognition compiled in. */
+  available: boolean
+  loaded: boolean
+  loading: boolean
+  /** The SenseVoice GGUF, '' when none is picked. */
+  modelPath: string
+  mode: MicMode
+  /** Why the last load failed, '' when it did not. */
+  note: string
+}
+
+/**
+ * What an utterance does to a voice conversation, from its words by rule
+ * (yoai_turn_cue in src/yoai.h): something to answer; nothing to answer yet;
+ * taking back the reply under way and saying what instead; or just taking it
+ * back. 'unfinished' matters only with nothing being answered, 'correct' and
+ * 'stop' only with a reply under way.
+ */
+export type TurnCue = 'answer' | 'unfinished' | 'correct' | 'stop'
+
+/** What one utterance said. Empty text means nothing worth answering was heard. */
+export interface Transcript {
+  text: string
+  cue: TurnCue
+  /** SenseVoice's event label: 'Speech', or a cough, laughter, music... */
+  event: string
+  seconds: number
+  /** Why recognition failed, '' when it did not. */
+  error: string
+}
+
+/**
+ * One event from a full-duplex session. 'speech': a voice started, after the
+ * echo was taken out. 'silence': it stopped, and what it said is being
+ * recognized. 'utterance': what it said. 'error': the session stopped.
+ */
+export interface DuplexEvent {
+  type: 'speech' | 'silence' | 'utterance' | 'error'
+  transcript?: Transcript
+  error?: string
+}
+
 export interface YoaiApi {
   /** Whether the addon loaded, and what it can do. Read once at startup. */
   coreStatus(): Promise<CoreStatus>
@@ -420,8 +482,15 @@ export interface YoaiApi {
      * including the user message just sent -- the core keeps no session state.
      * The main process adds the system prompt as the settings stand now, with
      * the spoken-style paragraph when `reading` says the reply will be heard.
+     * `live` is a turn in a voice conversation, which may answer <wait> alone;
+     * see turnPrompt() in main/chat.ts.
      */
-    start(providerId: string, messages: WireMessage[], reading: boolean): Promise<number>
+    start(
+      providerId: string,
+      messages: WireMessage[],
+      reading: boolean,
+      live?: boolean
+    ): Promise<number>
     cancel(turnId: number): Promise<void>
     /**
      * Start a new conversation, as far as the engines are concerned: drop what
@@ -552,6 +621,30 @@ export interface YoaiApi {
     /** Abandon the open stream. It must still be finished to be closed. */
     cancel(): Promise<void>
     onEvent(listener: (ev: ReaderEvent) => void): () => void
+  }
+
+  /** Speech recognition, and the microphone button's mode. */
+  asr: {
+    status(): Promise<AsrStatus>
+    /** Pick the SenseVoice GGUF and load it; null when the dialog was dismissed. */
+    pickModel(): Promise<AsrStatus | null>
+    setMode(mode: MicMode): Promise<AsrStatus>
+    /** One utterance, 16-bit mono at 16 kHz. */
+    transcribe(pcm: Int16Array): Promise<Transcript>
+  }
+
+  /**
+   * A full-duplex session: the page streams the microphone and what the
+   * speaker plays; the main process takes the echo out, finds where speech
+   * starts and stops, and recognizes it.
+   */
+  duplex: {
+    /** '' when the session is open, else the reason. */
+    start(): Promise<string>
+    stop(): Promise<void>
+    /** mic: 16-bit at 16 kHz; ref: float at 24 kHz, over the same span. */
+    audio(mic: Int16Array, ref: Float32Array): void
+    onEvent(listener: (ev: DuplexEvent) => void): () => void
   }
 
   /** Open a vendor's sign-up page in the user's browser, never in a window here. */

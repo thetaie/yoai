@@ -29,6 +29,7 @@ SenseVoice in, a chat model, Qwen3-TTS out; left to right along the slide.
 | | Voice quality: jitter ~6.5%, HNR ~4 dB in the prototype | To fix | Glottal pulse marking; not ported until then | [voice](voice.md#what-else-the-voice-carries) |
 | | Cross-day baseline | Parked | If built, condition on time of day | [voice](voice.md#the-cross-day-version-is-much-harder-and-is-not-being-built-yet) |
 | **Chat model** | The 4B decodes at about half its bench speed in the app, 5.7–6.7 against 11.4 tokens a second | Open | Unexplained; the 2B shows no gap | [voice](voice.md#cpu) |
+| | Domain knowledge as LoRA on the 3–5 experts per layer a domain routes to; desktop and server only | To measure | Routing concentration on a domain corpus first; needs a checkpoint and a corpus | [moe-lora](moe-lora.md#steps) |
 | **Emotion out** | The chat model states V, A, D ahead of the reply; the reader takes them off | To build | — | [voice](voice.md#speaking-on-the-same-three-axes) |
 | | Fit d_V, d_A, d_D over eight labeled CustomVoice instructions | To build | — | [voice](voice.md#speaking-on-the-same-three-axes) |
 | | A style on the user's own voice | To measure | Directions from the nearest built-in speakers, or mode B | [voice](voice.md#the-first-two-measured-a-style-rides-on-the-voice-file) |

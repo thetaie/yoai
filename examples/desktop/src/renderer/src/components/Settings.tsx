@@ -21,8 +21,10 @@ import {
   modelLabel
 } from '@shared/provider'
 import type {
+  AsrStatus,
   ChatSettings,
   LocalOffer,
+  MicMode,
   ModelDownload,
   ModelLoadState,
   ReaderStatus,
@@ -211,8 +213,43 @@ export function Settings({
     null
   )
 
+  const [asrStatus, setAsrStatus] = useState<AsrStatus | null>(null)
+  const [asrBusy, setAsrBusy] = useState(false)
+
   const vendor = findVendor(vendorId)
   const hasKey = keyed.includes(vendorId)
+
+  // Polled while the model is loading, which the page may well be opened during.
+  useEffect(() => {
+    let stopped = false
+    const poll = async (): Promise<void> => {
+      const st = await window.yoai.asr.status()
+      if (stopped) {
+        return
+      }
+      setAsrStatus(st)
+      if (st.loading) {
+        setTimeout(() => void poll(), 500)
+      }
+    }
+    void poll()
+    return () => {
+      stopped = true
+    }
+  }, [])
+
+  const pickAsr = async (): Promise<void> => {
+    setAsrBusy(true)
+    const st = await window.yoai.asr.pickModel()
+    setAsrBusy(false)
+    if (st !== null) {
+      setAsrStatus(st)
+    }
+  }
+
+  const setMicMode = async (mode: MicMode): Promise<void> => {
+    setAsrStatus(await window.yoai.asr.setMode(mode))
+  }
 
   const refreshKeys = async (): Promise<void> => {
     setKeyed(await window.yoai.models.vendorsWithKeys(VENDORS.map((v) => v.id)))
@@ -857,13 +894,19 @@ export function Settings({
                           {slot.path.length > 0 ? slot.path : S.settingsTtsNotPicked}
                         </div>
                       </span>
-                      <button
-                        className="btn"
-                        disabled={download?.running === true}
-                        onClick={() => void pickTts(slot.which)}
-                      >
-                        {S.settingsTtsPick}
-                      </button>
+                      {/* A missing file is picked or downloaded from the card
+                          above; a button here too would offer the same thing
+                          twice. Once the file is in place, this replaces it. */}
+                      {ttsStatus !== null &&
+                        !ttsStatus.missing.some((m) => m.slot === slot.which) && (
+                          <button
+                            className="btn"
+                            disabled={download?.running === true}
+                            onClick={() => void pickTts(slot.which)}
+                          >
+                            {S.settingsTtsReplace}
+                          </button>
+                        )}
                     </div>
                   ))}
                   {ttsStatus?.voiceMode !== 'custom' && (
@@ -1085,6 +1128,69 @@ export function Settings({
                     </span>
                   </div>
                 )}
+              </>
+            )}
+          </section>
+
+          {/*------------------------------------------------------------------*/}
+          <section className="section">
+            <h3>{S.settingsAsr}</h3>
+            <p>{S.settingsAsrIntro}</p>
+            {asrStatus !== null && !asrStatus.available ? (
+              <p className="field-note" data-tone="danger">
+                {S.settingsAsrUnavailable}
+              </p>
+            ) : (
+              <>
+                <div className="card">
+                  <div className="row">
+                    <span className="row-label">
+                      {S.settingsAsrModel}
+                      <div className="path">
+                        {asrStatus !== null && asrStatus.modelPath.length > 0
+                          ? asrStatus.modelPath
+                          : S.settingsTtsNotPicked}
+                      </div>
+                      {asrStatus?.loading === true && (
+                        <span className="field-note">{S.settingsTtsLoading}</span>
+                      )}
+                      {asrStatus?.loaded === true && (
+                        <span className="field-note" data-tone="success">
+                          {S.settingsAsrLoaded}
+                        </span>
+                      )}
+                      {asrStatus !== null && asrStatus.note.length > 0 && (
+                        <span className="field-note" data-tone="danger">
+                          {asrStatus.note}
+                        </span>
+                      )}
+                    </span>
+                    <button className="btn" disabled={asrBusy} onClick={() => void pickAsr()}>
+                      {S.settingsTtsPick}
+                    </button>
+                  </div>
+                </div>
+                <div className="field" style={{ marginTop: 12 }}>
+                  <label>{S.settingsMicMode}</label>
+                  <div className="row" style={{ gap: 16 }}>
+                    {(['talk', 'duplex'] as const).map((mode) => (
+                      <label key={mode} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input
+                          type="radio"
+                          name="micMode"
+                          checked={(asrStatus?.mode ?? 'talk') === mode}
+                          onChange={() => void setMicMode(mode)}
+                        />
+                        {mode === 'talk' ? S.settingsMicTalk : S.settingsMicDuplex}
+                      </label>
+                    ))}
+                  </div>
+                  <span className="field-note">
+                    {(asrStatus?.mode ?? 'talk') === 'talk'
+                      ? S.settingsMicTalkNote
+                      : S.settingsMicDuplexNote}
+                  </span>
+                </div>
               </>
             )}
           </section>

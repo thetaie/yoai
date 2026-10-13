@@ -17,10 +17,10 @@
 // transfer inside the core. A turn producing no further events cannot be
 // interrupted earlier -- there is nothing to observe the flag.
 //
-// This bridge exposes the chat, prompt, on-device, speech-output and omni
-// lanes. The voice (recognition) and bundle entry points are in the header and
-// deliberately not wired up here: nothing in the desktop client calls them yet,
-// and an export nobody uses is a second place to keep correct.
+// This bridge exposes the chat, prompt, on-device, speech-output, recognition,
+// echo-cancellation and omni lanes. The bundle entry points are in the header
+// and deliberately not wired up here: nothing in the desktop client calls them
+// yet, and an export nobody uses is a second place to keep correct.
 
 #include <node_api.h>
 
@@ -503,10 +503,11 @@ napi_value NativePromptGet(napi_env env, napi_callback_info info) {
     return Utf8(env, text);
 }
 
-// nativePromptTurnSystem(base: string | null, reading: boolean): string
+// nativePromptTurnSystem(base: string | null, flags: number): string
 //
 // Anything but a string is a user who never wrote a prompt, and gets the core's
-// default; '' is one who cleared it, and gets none.
+// default; '' is one who cleared it, and gets none. flags are yoai.h's
+// YOAI_TURN_READ and YOAI_TURN_LIVE; a boolean is read as READ or nothing.
 napi_value NativePromptTurnSystem(napi_env env, napi_callback_info info) {
     size_t argc = 2;
     napi_value argv[2] = {nullptr, nullptr};
@@ -517,10 +518,20 @@ napi_value NativePromptTurnSystem(napi_env env, napi_callback_info info) {
     const bool        given = type == napi_string;
     const std::string base  = given ? ToUtf8(env, argv[0]) : std::string();
 
-    bool reading = false;
-    if (argc >= 2) napi_get_value_bool(env, argv[1], &reading);
+    std::int32_t flags = 0;
+    if (argc >= 2) {
+        napi_valuetype ftype = napi_undefined;
+        napi_typeof(env, argv[1], &ftype);
+        if (ftype == napi_number) {
+            napi_get_value_int32(env, argv[1], &flags);
+        } else if (ftype == napi_boolean) {
+            bool reading = false;
+            napi_get_value_bool(env, argv[1], &reading);
+            flags = reading ? YOAI_TURN_READ : 0;
+        }
+    }
 
-    return Utf8(env, yoai_prompt_turn_system(given ? base.c_str() : nullptr, reading ? 1 : 0));
+    return Utf8(env, yoai_prompt_turn_system(given ? base.c_str() : nullptr, flags));
 }
 
 //------------------------------------------------------------------------------
@@ -1173,6 +1184,195 @@ napi_value NativeTtsLastError(napi_env env, napi_callback_info /*info*/) {
 }
 
 //------------------------------------------------------------------------------
+// Speech recognition (SenseVoice) and echo cancellation
+//------------------------------------------------------------------------------
+//
+// The way in for a voice conversation. Recognition takes one finished
+// utterance, 16-bit mono at 16 kHz, and answers with yoai_voice_analyze's
+// JSON: on a worker, since a pass takes a tenth of a second and more. The
+// canceller runs on every block of a live microphone at about 1% of real
+// time, so it is called in place, from the main process's thread only --
+// yoai.h asks for one thread, since it pairs the two streams in arrival order.
+
+// The samples of a typed array of `want`, or null with a JS error thrown.
+const void* TypedArrayData(napi_env env, napi_value value, napi_typedarray_type want,
+                           const char* what, size_t* length) {
+    napi_typedarray_type type;
+    void* data = nullptr;
+    if (napi_get_typedarray_info(env, value, &type, length, &data, nullptr, nullptr) != napi_ok ||
+        type != want) {
+        napi_throw_error(env, nullptr, what);
+        return nullptr;
+    }
+    return data;
+}
+
+napi_value NativeVoiceAvailable(napi_env env, napi_callback_info /*info*/) {
+    return Int32(env, yoai_voice_available());
+}
+
+void VoiceLoadWorker(std::string path, napi_threadsafe_function tsfn) {
+    const int rc = yoai_voice_load(path.c_str());
+    StreamEvent* ev = new StreamEvent{rc == 0 ? "end" : "error",
+                                      rc == 0 ? "" : "could not load the recognition model"};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+}
+
+// nativeVoiceLoad(path, onDone: (type, content) => void): void
+napi_value NativeVoiceLoad(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 2) {
+        napi_throw_error(env, nullptr, "nativeVoiceLoad(path, onDone) needs two arguments");
+        return nullptr;
+    }
+    std::string path = ToUtf8(env, argv[0]);
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "yoai_voice_load", NAPI_AUTO_LENGTH, &work_name);
+    napi_threadsafe_function tsfn = nullptr;
+    if (napi_create_threadsafe_function(env, argv[1], nullptr, work_name, 0, 1,
+                                        nullptr, nullptr, nullptr, CallJs, &tsfn) != napi_ok) {
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+    Launch(VoiceLoadWorker, std::move(path), tsfn);
+    return nullptr;
+}
+
+napi_value NativeVoiceLoaded(napi_env env, napi_callback_info /*info*/) {
+    return Int32(env, yoai_voice_loaded());
+}
+
+napi_value NativeVoiceUnload(napi_env /*env*/, napi_callback_info /*info*/) {
+    yoai_voice_unload();
+    return nullptr;
+}
+
+// The JSON is copied into the event on this thread: the core's buffer is
+// thread_local and lives only until the next analysis on it.
+void VoiceAnalyzeWorker(std::vector<std::int16_t> pcm, napi_threadsafe_function tsfn) {
+    const char* json = yoai_voice_analyze(pcm.data(), static_cast<int>(pcm.size()), 16000);
+    StreamEvent* ev = json != nullptr ? new StreamEvent{"end", json}
+                                      : new StreamEvent{"error", "the recording could not be analysed"};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+}
+
+// nativeVoiceAnalyze(pcm: Int16Array, onDone: (type, content) => void): void
+//
+// pcm is 16-bit mono at 16 kHz, COPIED before the worker starts, as for omni.
+// onDone gets 'end' with the JSON, or 'error'.
+napi_value NativeVoiceAnalyze(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 2) {
+        napi_throw_error(env, nullptr, "nativeVoiceAnalyze(pcm, onDone) needs two arguments");
+        return nullptr;
+    }
+    size_t length = 0;
+    const void* data = TypedArrayData(env, argv[0], napi_int16_array,
+                                      "nativeVoiceAnalyze: pcm must be an Int16Array", &length);
+    if (data == nullptr) {
+        return nullptr;
+    }
+    const std::int16_t* samples = static_cast<const std::int16_t*>(data);
+    std::vector<std::int16_t> pcm(samples, samples + length);
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "yoai_voice_analyze", NAPI_AUTO_LENGTH, &work_name);
+    napi_threadsafe_function tsfn = nullptr;
+    if (napi_create_threadsafe_function(env, argv[1], nullptr, work_name, 0, 1,
+                                        nullptr, nullptr, nullptr, CallJs, &tsfn) != napi_ok) {
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+    Launch(VoiceAnalyzeWorker, std::move(pcm), tsfn);
+    return nullptr;
+}
+
+// nativeTurnCue(text): number -- yoai.h's YOAI_CUE_*. Rules over the words,
+// no model, so called in place.
+napi_value NativeTurnCue(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    const std::string text = argc >= 1 ? ToUtf8(env, argv[0]) : std::string();
+    return Int32(env, yoai_turn_cue(text.c_str()));
+}
+
+// nativeAecReset(highLatency: boolean): string
+//
+// A fresh canceller for a reference at 24 kHz, what the player plays: '' on
+// success, else the reason. highLatency models 512ms of echo path instead of
+// 256ms, for Bluetooth.
+napi_value NativeAecReset(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    bool high = false;
+    if (argc >= 1) {
+        napi_get_value_bool(env, argv[0], &high);
+    }
+    yoai_aec_set_high_latency(high ? 1 : 0);
+    if (yoai_aec_set_reference_rate(24000) != 0) {
+        return Utf8(env, yoai_aec_last_error());
+    }
+    yoai_aec_reset();
+    return Utf8(env, "");
+}
+
+// nativeAecProcess(mic: Int16Array, ref: Float32Array): Int16Array
+//
+// mic at 16 kHz, ref at 24 kHz over the same span; returns the microphone with
+// the echo taken out, 16 kHz, a block behind. Throws with the core's reason.
+napi_value NativeAecProcess(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 2) {
+        napi_throw_error(env, nullptr, "nativeAecProcess(mic, ref) needs two arguments");
+        return nullptr;
+    }
+    size_t n_mic = 0;
+    size_t n_ref = 0;
+    const void* mic = TypedArrayData(env, argv[0], napi_int16_array,
+                                     "nativeAecProcess: mic must be an Int16Array", &n_mic);
+    if (mic == nullptr) {
+        return nullptr;
+    }
+    const void* ref = TypedArrayData(env, argv[1], napi_float32_array,
+                                     "nativeAecProcess: ref must be a Float32Array", &n_ref);
+    if (ref == nullptr) {
+        return nullptr;
+    }
+
+    // n_mic + 512 takes everything while the streams arrive together (yoai.h);
+    // what does not fit stays in the core for the next call.
+    std::vector<std::int16_t> out(n_mic + 512);
+    const int n = yoai_aec_process(static_cast<const short*>(mic), static_cast<int>(n_mic),
+                                   static_cast<const float*>(ref), static_cast<int>(n_ref),
+                                   out.data(), static_cast<int>(out.size()));
+    if (n < 0) {
+        napi_throw_error(env, nullptr, yoai_aec_last_error());
+        return nullptr;
+    }
+
+    void* bytes = nullptr;
+    napi_value buffer = nullptr;
+    napi_value result = nullptr;
+    napi_create_arraybuffer(env, static_cast<size_t>(n) * sizeof(std::int16_t), &bytes, &buffer);
+    if (n > 0) {
+        std::memcpy(bytes, out.data(), static_cast<size_t>(n) * sizeof(std::int16_t));
+    }
+    napi_create_typedarray(env, napi_int16_array, static_cast<size_t>(n), buffer, 0, &result);
+    return result;
+}
+
+//------------------------------------------------------------------------------
 // Omni (MNN + Qwen2.5-Omni)
 //------------------------------------------------------------------------------
 //
@@ -1440,6 +1640,14 @@ NAPI_MODULE_INIT() {
         {"nativeTtsCancel",       nullptr, NativeTtsCancel,       nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsLastError",    nullptr, NativeTtsLastError,    nullptr, nullptr, nullptr, napi_default, nullptr},
 
+        {"nativeVoiceAvailable",  nullptr, NativeVoiceAvailable,  nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeVoiceLoad",       nullptr, NativeVoiceLoad,       nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeVoiceLoaded",     nullptr, NativeVoiceLoaded,     nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeVoiceUnload",     nullptr, NativeVoiceUnload,     nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeVoiceAnalyze",    nullptr, NativeVoiceAnalyze,    nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTurnCue",         nullptr, NativeTurnCue,         nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeAecReset",        nullptr, NativeAecReset,        nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeAecProcess",      nullptr, NativeAecProcess,      nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeOmniAvailable",   nullptr, NativeOmniAvailable,   nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeOmniLoad",        nullptr, NativeOmniLoad,        nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeOmniLoaded",      nullptr, NativeOmniLoaded,      nullptr, nullptr, nullptr, napi_default, nullptr},

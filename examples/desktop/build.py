@@ -206,7 +206,9 @@ def native(want):
 
     args = vcpkg_args()
     if "llama" in want:
-        args += ["--CDYOAI_ONDEVICE_LLM=ON", "--CDLLAMA_CPP_DIR=" + llama_sdk()]
+        # Recognition with it, as the help says: SenseVoice links the ggml this
+        # SDK already carries, and needs nothing from libllama.
+        args += ["--CDYOAI_ONDEVICE_LLM=ON", "--CDYOAI_ASR=ON", "--CDLLAMA_CPP_DIR=" + llama_sdk()]
     if "qtts" in want:
         sdk = qtts_sdk(gen)
         args += ["--CDYOAI_QTTS=ON", "--CDQTTS_DIR=" + sdk]

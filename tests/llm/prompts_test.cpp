@@ -122,12 +122,12 @@ void class_checks() {
 void builtin_checks() {
     std::printf("-- the built-in table\n");
     const std::vector<Prompt> all = Prompts::instance().list();
-    check(all.size() == 5, "five built-in prompts");
-    check(all.size() == 5 && all[0].name == "system" && all[1].name == "spoken_style" &&
+    check(all.size() == 6, "six built-in prompts");
+    check(all.size() == 6 && all[0].name == "system" && all[1].name == "spoken_style" &&
               all[2].name == "text_axes" && all[3].name == "context_time" &&
-              all[4].name == "context_arousal",
-          "named system, spoken_style, text_axes, context_time, context_arousal, in that order");
-    check(all.size() == 5 && all[3].arguments.size() == 1 && all[3].arguments[0].required &&
+              all[4].name == "context_arousal" && all[5].name == "live_turn",
+          "named system, spoken_style, text_axes, context_time, context_arousal, live_turn, in that order");
+    check(all.size() == 6 && all[3].arguments.size() == 1 && all[3].arguments[0].required &&
               all[4].arguments.size() == 1 && all[4].arguments[0].required,
           "the two context prompts each take one required argument");
 
@@ -156,6 +156,16 @@ void builtin_checks() {
     check(turn_system_prompt(" \n\xE3\x80\x80", true) == spoken.text + internal,
           "reading, a base of whitespace and U+3000: the spoken style and the internal line");
 
+    Prompt live;
+    Prompts::instance().get(yoai::llm::kPromptLiveTurn, &live);
+    const std::string read_front = base + "\n\n" + spoken.text;
+    check(turn_system_prompt(base, false, true) == read_front + "\n\n" + live.text + internal,
+          "live: the base, the spoken style, the live turn, the internal line");
+    check(turn_system_prompt(base, true, true) == turn_system_prompt(base, false, true),
+          "live is read aloud whatever reading says");
+    check(turn_system_prompt(base, false, true).compare(0, read_front.size(), read_front) == 0,
+          "and shares a read turn's front, so one warm-up serves both");
+
     Prompt system;
     Prompts::instance().get(yoai::llm::kPromptSystem, &system);
     check(system.text.find(yoai::llm::kInternalText) == std::string::npos,
@@ -170,8 +180,8 @@ void abi_checks() {
     std::printf("-- the C ABI\n");
     rapidjson::Document doc;
     doc.Parse(yoai_prompts());
-    check(!doc.HasParseError() && doc.IsArray() && doc.Size() == 5, "yoai_prompts is a JSON array of five");
-    if (!doc.HasParseError() && doc.IsArray() && doc.Size() == 5) {
+    check(!doc.HasParseError() && doc.IsArray() && doc.Size() == 6, "yoai_prompts is a JSON array of six");
+    if (!doc.HasParseError() && doc.IsArray() && doc.Size() == 6) {
         const rapidjson::Value& p = doc[2];
         check(p.HasMember("name") && p["name"].IsString() && std::strcmp(p["name"].GetString(), "text_axes") == 0,
               "each entry has its name");
@@ -199,7 +209,7 @@ void abi_checks() {
     check(std::string(yoai_prompt_turn_system("base", 1)) == "base\n\nSPEAK" + internal,
           "and yoai_prompt_turn_system uses the replacement");
     doc.Parse(yoai_prompts());
-    check(!doc.HasParseError() && doc.IsArray() && doc.Size() == 5 && doc[1]["overridden"].GetBool(),
+    check(!doc.HasParseError() && doc.IsArray() && doc.Size() == 6 && doc[1]["overridden"].GetBool(),
           "the listing shows it as overridden");
     check(yoai_prompt_set("spoken_style", nullptr) == 0, "NULL resets it");
     check(std::string(yoai_prompt_turn_system("base", 1)) != "base\n\nSPEAK" + internal,

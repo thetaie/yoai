@@ -36,6 +36,12 @@ extern const char* const kPromptSpokenStyle;     // how to write a reply that is
 extern const char* const kPromptTextAxes;        // score a transcript's valence and dominance
 extern const char* const kPromptContextTime;     // a message's time, in its annotation line
 extern const char* const kPromptContextArousal;  // a message's arousal, in its annotation line
+extern const char* const kPromptLiveTurn;        // a live voice turn: answer, or wait for the rest
+
+// The whole reply a live voice turn gives when the user's message, cut at a
+// pause, has nothing in it to answer yet. A host matches it, so it is not in
+// the table: a reworded prompt must not move it.
+extern const char* const kWaitMarker;
 
 // The line turn_system_prompt() ends every system prompt with: all of it is
 // internal. Not in the table, so a prompt the user writes cannot leave it out.
@@ -110,14 +116,20 @@ private:
 // A local model prefills the front of this ahead of the turn, and that work is
 // wasted unless the turn sends the same text to the token. So the turn and the
 // warm-up must both build it here, from the same `base` and `reading`.
-std::string turn_system_prompt(const std::string& base, bool reading);
+//
+// `live` is a turn in a voice conversation: the user's message is speech cut
+// at a pause. It is read aloud whatever `reading` says, and the live-turn
+// prompt follows the spoken-style one, asking for kWaitMarker alone when the
+// message is unfinished. After it rather than before, so a live turn and a
+// read one share everything up to there.
+std::string turn_system_prompt(const std::string& base, bool reading, bool live = false);
 
 // The same, with the table's system prompt as `base`: what a host sends until
 // the user writes a prompt of their own. An empty `base` above is different --
 // that is a user who cleared it, and gets no system prompt. A separate name, not
 // an overload: a string literal converts to bool before std::string, so an
 // overload on bool would take a mistyped call without a word.
-std::string default_turn_system_prompt(bool reading);
+std::string default_turn_system_prompt(bool reading, bool live = false);
 
 }  // namespace llm
 }  // namespace yoai

@@ -21,7 +21,6 @@ export const S = {
   chatPickModel: '选择模型',
   chatEmptyTitle: '你的 AI，运行在你自己的设备上',
   chatEmptyBody: '对话记录只保存在本机',
-  drawerNewChat: '新对话',
 
   // Settings
   settingsTitle: '设置',
@@ -103,6 +102,7 @@ export const S = {
   settingsTtsStyleNote: '随每次回复一起交给模型的一句简短描述，从下一次回复开始生效。',
   settingsTtsTokenizer: 'Tokenizer 模型',
   settingsTtsPick: '选择 GGUF 文件',
+  settingsTtsReplace: '更换',
   settingsTtsNotPicked: '未选择',
   settingsTtsPickBoth: '两个模型文件就位后自动载入。',
   settingsTtsLoading: '正在载入…',
@@ -120,6 +120,21 @@ export const S = {
   ttsStop: '停止',
   ttsNotReady: '语音还没就绪。先到设置里选好两个模型。',
   ttsBusy: '正在朗读上一句，先等它说完。',
+
+  // Voice input
+  settingsAsr: '语音输入',
+  settingsAsrIntro:
+    '点输入框旁的麦克风说话：本机识别（SenseVoice），说的话作为消息发送，回复自动朗读。',
+  settingsAsrUnavailable:
+    '这个版本没有编译语音识别。用 `python examples/desktop/build.py native llama` 重新构建。',
+  settingsAsrModel: '识别模型（SenseVoice GGUF）',
+  settingsAsrLoaded: '已载入',
+  settingsMicMode: '麦克风',
+  settingsMicTalk: '对讲机',
+  settingsMicDuplex: '全双工',
+  settingsMicTalkNote: '点一下开始说，再点一下发送。说话时正在朗读的回复会停下。',
+  settingsMicDuplexNote:
+    '点一下开始对话，再点一下结束。一直在听，回复朗读时也能插话：补充会接在回复后面，纠正或「停」会打断它。需要外放时也能用，回声由本机消除。',
 
   // Omni
   settingsOmni: '端到端语音（omni）',

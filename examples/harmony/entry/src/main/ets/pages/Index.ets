@@ -540,7 +540,7 @@ struct Index {
   header() {
     Row({ space: 8 }) {
       Button() {
-        icon('menu', ICON_TOOLBAR, this.theme.text_secondary)
+        icon('history', ICON_TOOLBAR, this.theme.text_secondary)
       }
       .type(ButtonType.Circle)
       .backgroundColor(Color.Transparent)
@@ -854,9 +854,13 @@ struct Index {
     .width('100%')
     .height('100%')
     .backgroundColor(this.theme.bg_page)
+    // No close button: the system draws it over the top right corner, where
+    // the drawer's 新对话 sits. The sheet closes by a swipe down, a tap
+    // outside it, or picking a conversation.
     .bindSheet($$this.showDrawer, this.drawer(), {
       detents: [SheetSize.MEDIUM, SheetSize.LARGE],
-      backgroundColor: this.theme.bg_surface
+      backgroundColor: this.theme.bg_surface,
+      showClose: false
     })
   }
 }

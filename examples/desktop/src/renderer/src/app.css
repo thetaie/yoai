@@ -497,6 +497,30 @@ select {
   border-color: var(--bc-brand);
 }
 
+/* The microphone: quiet when idle; the danger color while a walkie-talkie
+   take records; the brand color while a full-duplex conversation is open, on
+   a tint while a voice is being heard. */
+.btn.mic {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 8px;
+  color: var(--bc-text-secondary);
+}
+
+.btn.mic[data-state='recording'] {
+  color: var(--bc-danger);
+}
+
+.btn.mic[data-state='listening'],
+.btn.mic[data-state='thinking'] {
+  color: var(--bc-brand);
+}
+
+.btn.mic[data-state='hearing'] {
+  color: var(--bc-brand);
+  background: var(--bc-accent-soft);
+}
+
 .composer textarea {
   flex: 1;
   border: 0;
