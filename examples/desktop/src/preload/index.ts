@@ -135,6 +135,7 @@ const api: YoaiApi = {
     unload: () => ipcRenderer.invoke(CHANNELS.omniUnload) as Promise<void>,
     set: (patch) => ipcRenderer.invoke(CHANNELS.omniSet, patch) as Promise<OmniStatus>,
     ask: (prompt: string) => ipcRenderer.invoke(CHANNELS.omniAsk, prompt) as Promise<boolean>,
+    cancel: () => ipcRenderer.invoke(CHANNELS.omniCancel) as Promise<void>,
 
     onEvent: (listener: (ev: OmniEvent) => void) => {
       const wrapped = (_event: unknown, ev: OmniEvent): void => listener(ev)

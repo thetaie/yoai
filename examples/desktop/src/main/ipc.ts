@@ -547,6 +547,8 @@ export function registerHandlers(): void {
     })
   })
 
+  handle<[], void>(CHANNELS.omniCancel, () => omni.cancel())
+
   //----------------------------------------------------------------------------
   // Reading a reply while it is still being written
   //----------------------------------------------------------------------------

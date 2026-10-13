@@ -38,6 +38,10 @@ let blocks = 0
 let audioSeconds = 0
 /** The reply, from the 'text' event; kept in case 'end' brings no stats. */
 let replyText = ''
+/** From the ask going out until its 'end' or 'error'. */
+let running = false
+/** Set by cancel(): audio still in flight for this exchange is not played. */
+let dropping = false
 
 /** Seconds since the ask, to two places. */
 function at(): string {
@@ -69,7 +73,9 @@ function onEvent(ev: OmniEvent): void {
           `${seconds.toFixed(2)} s of audio, ${audioSeconds.toFixed(2)} s in hand`
       )
       prevChunkAt = now
-      player.push(ev.pcm)
+      if (!dropping) {
+        player.push(ev.pcm)
+      }
     }
     return
   }
@@ -84,6 +90,7 @@ function onEvent(ev: OmniEvent): void {
   }
 
   player.flush()
+  running = false
   const p = pending
   pending = null
 
@@ -138,12 +145,34 @@ export async function ask(prompt: string, onText?: (text: string) => void): Prom
   blocks = 0
   audioSeconds = 0
   replyText = ''
+  dropping = false
+  // Before the ask goes out, so a stop is offered for the whole exchange: the
+  // first audio is the thinker's few seconds away. The terminal event flushes
+  // the player, which lets this go again.
+  player.expect()
 
+  running = true
   const started = await window.yoai.omni.ask(prompt)
   if (!started) {
+    running = false
+    player.stop()
     throw new Error('omni is not loaded, or is already answering')
   }
   return new Promise<OmniResult>((resolve, reject) => {
     pending = { resolve, reject, onText }
   })
+}
+
+/**
+ * Stop the exchange: what it has sent is not played, and the engine stops at
+ * the Talker's next block of speech. The exchange still ends the usual way,
+ * with the reply text if the thinker got that far. Safe with nothing running.
+ */
+export function cancel(): void {
+  if (!running) {
+    return
+  }
+  dropping = true
+  player.stop()
+  void window.yoai.omni.cancel()
 }

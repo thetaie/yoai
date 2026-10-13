@@ -717,6 +717,8 @@ export function begin(
 }
 
 let endCallback: ((stats: string, error: string) => void) | null = null
+/** Set by finish() until the stream's end, so it is asked for once. */
+let finishing = false
 
 /** Add text. Returns at once; false when no stream is open. */
 export function feed(delta: string): boolean {
@@ -731,13 +733,31 @@ export function finish(): void {
   if (!available()) {
     return
   }
+  finishing = true
   core().nativeReaderFinish((type, content) => {
     busy = false
     lastStatus = null
+    finishing = false
     const done = endCallback
     endCallback = null
     if (done !== null) {
       done(type === 'end' ? content : '', type === 'end' ? '' : content)
     }
   })
+}
+
+/**
+ * End the open stream, if there is one, without waiting for the rest of it:
+ * cancelled, so it stops at its next block, and finished if nobody has --
+ * only finish() closes a stream, and a window closed mid-reply never calls
+ * it. For quitting, where the engines have to be idle before they are freed.
+ */
+export function abandon(): void {
+  if (endCallback === null) {
+    return
+  }
+  cancel()
+  if (!finishing) {
+    finish()
+  }
 }

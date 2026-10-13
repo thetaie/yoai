@@ -185,3 +185,14 @@ export function ask(
   }
   return started
 }
+
+/**
+ * Stop the running exchange. The engine checks at the Talker's next block of
+ * speech, so a cancel during the thinker takes effect when the Talker starts;
+ * the exchange then ends with 'end' as usual. Nothing happens when none runs.
+ */
+export function cancel(): void {
+  if (available()) {
+    core().nativeOmniCancel()
+  }
+}

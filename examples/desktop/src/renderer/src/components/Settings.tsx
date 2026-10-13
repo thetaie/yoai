@@ -43,6 +43,13 @@ interface Props {
   onModelsChanged: () => void | Promise<void>
   onPrefs: (patch: Partial<InterfacePrefs>) => void
   onClearSessions: () => void
+  /**
+   * Whether there is speech to stop: this page's test or a recorded take, or a
+   * reply from the chat still being read. The composer, which offers 停止
+   * there, is not on this page.
+   */
+  speaking: boolean
+  onStopSpeech: () => void
   onClose: () => void
 }
 
@@ -160,6 +167,8 @@ export function Settings({
   onModelsChanged,
   onPrefs,
   onClearSessions,
+  speaking,
+  onStopSpeech,
   onClose
 }: Props): JSX.Element {
   const [vendorId, setVendorId] = useState('zhipu')
@@ -502,6 +511,11 @@ export function Settings({
       <div className="topbar">
         <h2 style={{ margin: 0, fontSize: '1.0625rem' }}>{S.settingsTitle}</h2>
         <div className="topbar-spacer" />
+        {speaking && (
+          <button className="btn" onClick={onStopSpeech}>
+            停止播放
+          </button>
+        )}
         <button className="btn" onClick={onClose}>
           返回对话
         </button>

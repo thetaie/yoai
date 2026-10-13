@@ -35,6 +35,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -69,6 +70,33 @@ napi_value Utf8(napi_env env, const char* s) {
     napi_value out = nullptr;
     napi_create_string_utf8(env, s ? s : "", NAPI_AUTO_LENGTH, &out);
     return out;
+}
+
+//------------------------------------------------------------------------------
+// Worker threads
+//------------------------------------------------------------------------------
+
+// Every call into the core that blocks runs on a detached worker, and this
+// counts them: up when one is launched, down when its call has returned. The
+// main process reads it through nativeWorkers() on quit, and unloads the
+// engines only once it is 0 -- unloading under a running worker frees what
+// that worker is using.
+std::atomic<int> g_workers{0};
+
+template <typename Fn, typename... Args>
+void RunCounted(Fn fn, Args... args) {
+    fn(std::move(args)...);
+    g_workers.fetch_sub(1, std::memory_order_relaxed);
+}
+
+// std::thread(fn, args...).detach(), counted in g_workers. Counted here, on
+// the JS thread, rather than by the worker, so a read right after a launch
+// already sees it.
+template <typename Fn, typename... Args>
+void Launch(Fn fn, Args&&... args) {
+    g_workers.fetch_add(1, std::memory_order_relaxed);
+    std::thread(&RunCounted<Fn, typename std::decay<Args>::type...>, fn,
+                std::forward<Args>(args)...).detach();
 }
 
 //------------------------------------------------------------------------------
@@ -290,7 +318,7 @@ napi_value NativeLocalLoad(napi_env env, napi_callback_info info) {
         return nullptr;
     }
 
-    std::thread(LoadWorker, std::move(id), tsfn).detach();
+    Launch(LoadWorker, std::move(id), tsfn);
     return nullptr;
 }
 
@@ -325,7 +353,7 @@ napi_value NativeLocalWarm(napi_env env, napi_callback_info info) {
         napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
         return nullptr;
     }
-    std::thread(WarmWorker, std::move(id), std::move(prompt), tsfn).detach();
+    Launch(WarmWorker, std::move(id), std::move(prompt), tsfn);
     return nullptr;
 }
 
@@ -402,8 +430,8 @@ napi_value NativeChat(napi_env env, napi_callback_info info) {
         g_turns[id] = turn;
     }
 
-    std::thread(ChatWorker, id, std::move(provider), std::move(messages),
-                std::move(system), std::move(grammar), tsfn, turn).detach();
+    Launch(ChatWorker, id, std::move(provider), std::move(messages),
+           std::move(system), std::move(grammar), tsfn, turn);
 
     return Int32(env, id);
 }
@@ -443,6 +471,12 @@ napi_value NativeChatCancelAll(napi_env env, napi_callback_info /*info*/) {
         entry.second->cancelled.store(true, std::memory_order_relaxed);
     }
     return Int32(env, static_cast<std::int32_t>(g_turns.size()));
+}
+
+// nativeWorkers(): number -- calls into the core still running on a worker
+// thread, of every kind: turns, loads, warm-ups, reading. See g_workers.
+napi_value NativeWorkers(napi_env env, napi_callback_info /*info*/) {
+    return Int32(env, g_workers.load(std::memory_order_relaxed));
 }
 
 //------------------------------------------------------------------------------
@@ -647,7 +681,7 @@ napi_value NativeTtsLoad(napi_env env, napi_callback_info info) {
         return nullptr;
     }
 
-    std::thread(TtsLoadWorker, std::move(talker), std::move(codec), tsfn).detach();
+    Launch(TtsLoadWorker, std::move(talker), std::move(codec), tsfn);
     return nullptr;
 }
 
@@ -750,7 +784,7 @@ napi_value NativeTtsSay(napi_env env, napi_callback_info info) {
         return nullptr;
     }
 
-    std::thread(TtsSayWorker, std::move(text), tsfn).detach();
+    Launch(TtsSayWorker, std::move(text), tsfn);
     return Int32(env, 1);
 }
 
@@ -843,8 +877,8 @@ napi_value NativeReaderLoad(napi_env env, napi_callback_info info) {
         napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
         return nullptr;
     }
-    std::thread(ReaderLoadWorker, std::move(talker), std::move(codec),
-                static_cast<int>(voices), tsfn).detach();
+    Launch(ReaderLoadWorker, std::move(talker), std::move(codec),
+           static_cast<int>(voices), tsfn);
     return nullptr;
 }
 
@@ -915,7 +949,7 @@ napi_value NativeReaderSetReferenceVoice(napi_env env, napi_callback_info info) 
         napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
         return nullptr;
     }
-    std::thread(ReaderReferenceWorker, path, tsfn).detach();
+    Launch(ReaderReferenceWorker, path, tsfn);
     return nullptr;
 }
 
@@ -1120,7 +1154,7 @@ napi_value NativeReaderFinish(napi_env env, napi_callback_info info) {
 
     napi_threadsafe_function audio = g_reader_audio;
     g_reader_audio = nullptr;
-    std::thread(ReaderFinishWorker, audio, done).detach();
+    Launch(ReaderFinishWorker, audio, done);
     return nullptr;
 }
 
@@ -1154,9 +1188,14 @@ napi_value NativeTtsLastError(napi_env env, napi_callback_info /*info*/) {
 // reply back to a speaker has to say so.
 
 std::atomic<bool> g_omni_busy{false};
+// Set by nativeOmniCancel, cleared when an exchange starts. Read once per block
+// of speech: returning 0 from the audio handler is how the core is told to
+// stop, so the thinker, which hands over no audio, runs to its end regardless.
+std::atomic<bool> g_omni_cancel{false};
 
 // Called by the engine on its worker thread, once per block of speech.
 int OnOmniAudio(const float* pcm, int n_samples, int /*last*/, void* user_data) {
+    if (g_omni_cancel.load(std::memory_order_relaxed)) return 0;
     if (pcm == nullptr || n_samples <= 0) return 1;
     napi_threadsafe_function tsfn = static_cast<napi_threadsafe_function>(user_data);
     AudioEvent* ev = new AudioEvent{"audio", "", std::vector<float>(pcm, pcm + n_samples)};
@@ -1236,7 +1275,7 @@ napi_value NativeOmniLoad(napi_env env, napi_callback_info info) {
         return nullptr;
     }
 
-    std::thread(OmniLoadWorker, std::move(dir), tsfn).detach();
+    Launch(OmniLoadWorker, std::move(dir), tsfn);
     return nullptr;
 }
 
@@ -1281,6 +1320,9 @@ napi_value NativeOmniAsk(napi_env env, napi_callback_info info) {
     if (!g_omni_busy.compare_exchange_strong(expected, true)) {
         return Int32(env, 0);
     }
+    // A cancel meant for the last exchange, or sent when none was running, is
+    // not this one's.
+    g_omni_cancel.store(false, std::memory_order_relaxed);
 
     napi_typedarray_type type;
     size_t              length = 0;
@@ -1310,8 +1352,19 @@ napi_value NativeOmniAsk(napi_env env, napi_callback_info info) {
         return nullptr;
     }
 
-    std::thread(OmniAskWorker, std::move(pcm), std::move(prompt), want_audio, tsfn).detach();
+    Launch(OmniAskWorker, std::move(pcm), std::move(prompt), want_audio, tsfn);
     return Int32(env, 1);
+}
+
+// nativeOmniCancel(): void
+//
+// Stop the running exchange at the Talker's next block of speech. Ignored when
+// none is running: the next ask clears it.
+napi_value NativeOmniCancel(napi_env /*env*/, napi_callback_info /*info*/) {
+    if (g_omni_busy.load(std::memory_order_relaxed)) {
+        g_omni_cancel.store(true, std::memory_order_relaxed);
+    }
+    return nullptr;
 }
 
 }   // namespace
@@ -1341,6 +1394,7 @@ NAPI_MODULE_INIT() {
         {"nativeChat",            nullptr, NativeChat,            nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChatCancel",      nullptr, NativeChatCancel,      nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChatCancelAll",   nullptr, NativeChatCancelAll,   nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeWorkers",         nullptr, NativeWorkers,         nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativePromptGet",       nullptr, NativePromptGet,       nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativePromptTurnSystem", nullptr, NativePromptTurnSystem, nullptr, nullptr, nullptr, napi_default, nullptr},
 
@@ -1392,6 +1446,7 @@ NAPI_MODULE_INIT() {
         {"nativeOmniUnload",      nullptr, NativeOmniUnload,      nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeOmniSetDitSteps", nullptr, NativeOmniSetDitSteps, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeOmniAsk",         nullptr, NativeOmniAsk,         nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeOmniCancel",      nullptr, NativeOmniCancel,      nullptr, nullptr, nullptr, napi_default, nullptr},
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;

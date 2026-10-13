@@ -82,6 +82,7 @@ export const CHANNELS = {
   omniUnload: 'omni:unload',
   omniSet: 'omni:set',
   omniAsk: 'omni:ask',
+  omniCancel: 'omni:cancel',
   /** Main -> renderer: PCM chunks, then the reply and its timings. */
   omniEvent: 'omni:event',
 
@@ -501,6 +502,11 @@ export interface YoaiApi {
     set(patch: { ditSteps?: number; enabled?: boolean }): Promise<OmniStatus>
     /** False when the engine is not loaded or is already answering. */
     ask(prompt: string): Promise<boolean>
+    /**
+     * Stop the running exchange at the Talker's next block of speech. It still
+     * ends with 'end', carrying the reply text if the thinker finished.
+     */
+    cancel(): Promise<void>
     onEvent(listener: (ev: OmniEvent) => void): () => void
   }
 

@@ -110,8 +110,21 @@ std::map<std::string, Entry>& registry() {
 // every time. Entries are erased whenever their registry entry is replaced or
 // removed, so a re-registered id never keeps answering from the model it used to
 // point at.
+//
+// **Never destroyed**, like every engine below that holds weights. A static's
+// destructor runs during the process exit, and freeing GPU memory then calls
+// into a driver or runtime that is being torn down: Intel's Vulkan driver
+// fails fast (on Windows the error report held a closing desktop app for 12s),
+// and CUDA's runtime has already shut down, which ggml turns into an abort.
+// The exit returns the memory anyway. Removing an entry, or unloading an
+// engine, still frees it at once.
+//
+// Not enough for Metal: ggml's own device asserts at exit that every buffer
+// was freed. A host frees the engines before it exits, as
+// examples/desktop/src/main/index.ts does on quit.
 std::map<std::string, std::shared_ptr<Chat> >& chats() {
-    static std::map<std::string, std::shared_ptr<Chat> > c;
+    static std::map<std::string, std::shared_ptr<Chat> >& c =
+        *new std::map<std::string, std::shared_ptr<Chat> >();
     return c;
 }
 
@@ -1052,8 +1065,9 @@ std::mutex& voice_mutex() {
     return m;
 }
 
+// Never destroyed; see chats().
 yoai::voice::SenseVoice& recognizer() {
-    static yoai::voice::SenseVoice sv;
+    static yoai::voice::SenseVoice& sv = *new yoai::voice::SenseVoice();
     return sv;
 }
 
@@ -1545,8 +1559,9 @@ std::mutex& omni_mutex() {
     return m;
 }
 
+// Never destroyed; see chats().
 yoai::voice::Omni& omni() {
-    static yoai::voice::Omni engine;
+    static yoai::voice::Omni& engine = *new yoai::voice::Omni();
     return engine;
 }
 
@@ -1692,8 +1707,9 @@ std::mutex& tts_mutex() {
     return m;
 }
 
+// Never destroyed; see chats().
 yoai::voice::Qtts& tts() {
-    static yoai::voice::Qtts engine;
+    static yoai::voice::Qtts& engine = *new yoai::voice::Qtts();
     return engine;
 }
 
@@ -2020,8 +2036,9 @@ std::mutex& reader_mutex() {
     return m;
 }
 
+// Never destroyed; see chats().
 yoai::voice::Reader& reader() {
-    static yoai::voice::Reader r;
+    static yoai::voice::Reader& r = *new yoai::voice::Reader();
     return r;
 }
 

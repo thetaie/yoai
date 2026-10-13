@@ -7,6 +7,11 @@ interface Props {
   onSend: () => void
   onStop: () => void
   streaming: boolean
+  /**
+   * Whether there is speech to stop. It outlasts the turn -- the engine writes
+   * faster than the speaker plays -- so 停止 stays beside 发送 until it ends.
+   */
+  speaking: boolean
   /** False when no model is configured; the box still takes text and says why. */
   ready: boolean
   hint: string
@@ -18,6 +23,7 @@ export function Composer({
   onSend,
   onStop,
   streaming,
+  speaking,
   ready,
   hint
 }: Props): JSX.Element {
@@ -54,11 +60,12 @@ export function Composer({
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
         />
-        {streaming ? (
+        {(streaming || speaking) && (
           <button className="btn" onClick={onStop}>
             停止
           </button>
-        ) : (
+        )}
+        {!streaming && (
           <button
             className="btn btn-primary"
             onClick={onSend}

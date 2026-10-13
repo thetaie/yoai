@@ -243,6 +243,15 @@ export function forgetAll(): number {
 }
 
 /**
+ * Let go of every model in the core, freeing the on-device weights. For
+ * quitting only: the core's registry is emptied, keys included, and nothing
+ * here puts it back.
+ */
+export function releaseAll(): void {
+  core().nativeProviderClear()
+}
+
+/**
  * How each automatic preload went, for the settings screen to show beside the
  * model. It used to have a 预加载 button instead; the preload below already
  * covers the one model worth loading, and what the button still added was a

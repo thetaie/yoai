@@ -3,7 +3,8 @@
  *
  * What EntryAbility.ets is on HarmonyOS, with one extra job that platform does
  * not hand back -- a desktop app is asked to quit rather than killed, so the
- * turns still running have to be let go of here.
+ * turns still running have to be let go of here, and the engines freed before
+ * the process exits.
  *
  * Everything privileged lives on this side. The window is created with
  * contextIsolation on, node integration off and the sandbox in force, which is
@@ -15,12 +16,14 @@ import { app, BrowserWindow, nativeTheme, session, shell } from 'electron'
 import { existsSync, mkdirSync, readdirSync, renameSync, rmdirSync } from 'node:fs'
 import { join } from 'node:path'
 import palettes from '../../../../design/palettes.json'
-import { describeCore } from './core'
+import { core, describeCore } from './core'
 import { cancelAllTurns, registerHandlers, watchWindow } from './ipc'
+import * as omni from './omni'
 import * as reader from './reader'
 import * as models from './models'
 import * as prefs from './prefs'
 import * as sessions from './sessions'
+import * as tts from './tts'
 
 /**
  * The data directory of the name this app had before, carried over once.
@@ -228,6 +231,99 @@ app.on('before-quit', () => {
     console.log(`[yoai] asked ${stopped} in-flight turn(s) to stop`)
   }
 })
+
+/**
+ * How long quitting waits for native work to end before it stops trying to
+ * free the engines. What was cancelled ends within a token or a block of
+ * speech; what cannot be cancelled is a model load or a warm-up, which here
+ * took 1.4s and 0.6s.
+ */
+const QUIT_WAIT_MS = 10000
+
+/** Set once the engines have been dealt with, so the next will-quit goes on. */
+let released = false
+/** The release under way, so a second quit while it runs does not start another. */
+let releasing: Promise<void> | null = null
+
+/**
+ * Free the engines while the process is still running, not as it exits.
+ *
+ * Left loaded, they are freed by static destructors during the exit itself,
+ * and every GPU backend objects to that. On Windows the driver's threads are
+ * already gone: Intel's Vulkan driver failed fast, and the error report held
+ * the closing app for 12s. ggml's Metal backend asserts that each buffer was
+ * freed before its device. CUDA's runtime has shut itself down by then, which
+ * ggml turns into an abort. The core no longer frees them at exit at all (see
+ * chats() in src/yoai.cpp), which covers Windows; Metal still needs them freed
+ * here, and so does CUDA on Linux, where a worker still running at exit keeps
+ * calling into a runtime that is gone.
+ *
+ * Only once no worker is running: unloading under a reading or a load frees
+ * what it is using. So the work is cancelled where it can be and waited for,
+ * up to QUIT_WAIT_MS; past that the engines are left to the core.
+ */
+app.on('will-quit', (event) => {
+  if (released) {
+    return
+  }
+  event.preventDefault()
+  if (releasing !== null) {
+    return
+  }
+  releasing = releaseEngines()
+    .catch((err: unknown) => {
+      console.error('[yoai] freeing the engines failed:', err)
+    })
+    .finally(() => {
+      released = true
+      app.quit()
+    })
+})
+
+async function releaseEngines(): Promise<void> {
+  try {
+    core()
+  } catch {
+    return // the addon never loaded; nothing is held
+  }
+  const started = Date.now()
+
+  // Turns were cancelled by before-quit. A reading is cancelled and, if the
+  // window closed before finishing it, finished, since nothing else will.
+  reader.abandon()
+  tts.cancel()
+  omni.cancel()
+
+  if (!(await workersDone(started + QUIT_WAIT_MS))) {
+    console.warn(
+      `[yoai] native work still running after ${QUIT_WAIT_MS} ms; quitting without freeing the engines`
+    )
+    return
+  }
+  reader.unload()
+  tts.unload()
+  omni.unload()
+  models.releaseAll()
+  console.log(`[yoai] engines released in ${Date.now() - started} ms`)
+}
+
+/**
+ * True once no worker has been running for two polls in a row, false at the
+ * deadline. Two, because a worker's end reaches this thread as a queued event
+ * whose handler may start the next one -- a voice load is followed by a
+ * warm-up -- and a single poll can fall between them.
+ */
+async function workersDone(deadline: number): Promise<boolean> {
+  let idle = 0
+  while (Date.now() < deadline) {
+    idle = core().nativeWorkers() === 0 ? idle + 1 : 0
+    if (idle >= 2) {
+      return true
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  return false
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

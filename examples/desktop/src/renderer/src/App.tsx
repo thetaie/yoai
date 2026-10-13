@@ -6,7 +6,7 @@
  * the streamed pieces become one saved message and where "the model said
  * nothing" is told apart from "the user stopped it".
  */
-import { useCallback, useEffect, useRef, useState, type JSX } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type JSX } from 'react'
 import type { ChatMessage, MessagePart, Usage } from '@shared/chat'
 import { ModelConfig, modelLabel } from '@shared/provider'
 import {
@@ -15,6 +15,7 @@ import {
   type InterfacePrefs,
   type SessionMeta
 } from '@shared/store'
+import { player } from './audio'
 import { newSessionId, runTurn } from './chatEngine'
 import * as omni from './omni'
 import * as reader from './reader'
@@ -47,6 +48,9 @@ export function App(): JSX.Element {
   const [streamThinking, setStreamThinking] = useState('')
   const [usage, setUsage] = useState<Usage | null>(null)
   const [view, setView] = useState<View>('chat')
+  // Whether there is speech to stop, from any lane, for as long as the speaker
+  // has any of it -- which outlasts the turn that produced it.
+  const speaking = useSyncExternalStore(player.watch, player.active)
 
   // The turn's accumulators and the transcript live in refs as well as state:
   // the callbacks below are created once per turn and would otherwise close
@@ -381,7 +385,22 @@ export function App(): JSX.Element {
     })()
   }
 
-  const stop = (): void => cancelerRef.current?.cancel()
+  /**
+   * Silence, from whichever lane is speaking and whatever state its engine is
+   * in: the reading lane (a reply, a message's 🔊, the settings test), omni,
+   * and anything else on the player, such as a recorded take.
+   */
+  const stopSpeech = (): void => {
+    void tts.stop()
+    omni.cancel()
+    player.stop()
+  }
+
+  /** The composer's 停止: the turn if one is running, and the speech. */
+  const stop = (): void => {
+    cancelerRef.current?.cancel()
+    stopSpeech()
+  }
 
   //----------------------------------------------------------------------------
   // Render
@@ -410,6 +429,8 @@ export function App(): JSX.Element {
             onModelsChanged={reloadModels}
             onPrefs={changePrefs}
             onClearSessions={() => void clearSessions()}
+            speaking={speaking}
+            onStopSpeech={stopSpeech}
             onClose={() => setView('chat')}
           />
         ) : (
@@ -465,6 +486,7 @@ export function App(): JSX.Element {
               onSend={send}
               onStop={stop}
               streaming={streaming}
+              speaking={speaking}
               ready={ready}
               hint={S.chatDisclaimer}
             />

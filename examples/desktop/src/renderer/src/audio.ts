@@ -113,8 +113,21 @@ export interface Player {
   flush(): void
   /** Drop everything queued and stop immediately. */
   stop(): void
-  /** Whether anything is scheduled and has not finished. */
-  playing(): boolean
+  /**
+   * A stream is starting: count it as active from now, before its first chunk
+   * arrives, until flush() or stop(). For a lane whose first audio takes a
+   * while, so there is something to stop from the moment it is asked.
+   */
+  expect(): void
+  /**
+   * Whether there is speech to stop: a stream expected and not yet flushed,
+   * audio gathered or queued, or audio scheduled that has not finished playing.
+   * Stays true after a lane's engine is done for as long as the speaker still
+   * has what it made.
+   */
+  active(): boolean
+  /** Call `listener` whenever active() changes. Returns the unsubscribe function. */
+  watch(listener: () => void): () => void
   /**
    * Seconds of audio this stream should have in hand before it starts.
    *
@@ -169,6 +182,27 @@ export function createPlayer(): Player {
   let totalSeconds = 0
   /** null until the stream has been judged; then 'stream' or 'hold'. */
   let verdict: 'stream' | 'hold' | null = null
+
+  /** Set by expect(), cleared when the stream ends. */
+  let expected = false
+  const watchers = new Set<() => void>()
+  /** What watchers were last told, so they hear about changes only. */
+  let wasActive = false
+
+  const isActive = (): boolean =>
+    expected || pending.length > 0 || queue.length > 0 || live.length > 0
+
+  /** Tell the watchers if active() has changed. Called after every mutation. */
+  const notify = (): void => {
+    const now = isActive()
+    if (now === wasActive) {
+      return
+    }
+    wasActive = now
+    for (const w of watchers) {
+      w()
+    }
+  }
 
   const ensure = (): AudioContext => {
     if (ctx === null) {
@@ -262,6 +296,7 @@ export function createPlayer(): Player {
     live.push(src)
     src.onended = (): void => {
       live = live.filter((s) => s !== src)
+      notify()
     }
   }
 
@@ -353,6 +388,7 @@ export function createPlayer(): Player {
    */
   const endStream = (): void => {
     started = false
+    expected = false
     pending = []
     pendingSeconds = 0
     queue = []
@@ -398,11 +434,15 @@ export function createPlayer(): Player {
       if (started) {
         queue.push(pcm)
         release(false)
+        notify()
         return
       }
 
       pending.push(pcm)
       pendingSeconds += seconds
+      // Active from here on whatever the verdict below: begin() only moves
+      // what is gathered into the queue.
+      notify()
 
       if (pendingSeconds < primeSeconds) {
         return
@@ -466,6 +506,7 @@ export function createPlayer(): Player {
         )
       }
       endStream()
+      notify()
     },
 
     stop(): void {
@@ -484,10 +525,23 @@ export function createPlayer(): Player {
       // counter report the pause between two replies -- seconds of it -- as if
       // the speech had a hole in it.
       nextAt = 0
+      notify()
     },
 
-    playing(): boolean {
-      return live.length > 0 || queue.length > 0
+    expect(): void {
+      expected = true
+      notify()
+    },
+
+    active(): boolean {
+      return isActive()
+    },
+
+    watch(listener: () => void): () => void {
+      watchers.add(listener)
+      return () => {
+        watchers.delete(listener)
+      }
     },
 
     prime(seconds: number): void {

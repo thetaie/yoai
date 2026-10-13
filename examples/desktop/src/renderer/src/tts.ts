@@ -13,6 +13,7 @@
  * core reads one stream at a time, so a message's button and a reply being read
  * cannot both speak -- starting one stops the other.
  */
+import { player } from './audio'
 import * as reader from './reader'
 
 /** Which message is being spoken, '' when nothing is. Drives the buttons. */
@@ -76,12 +77,37 @@ export async function speak(id: string, text: string): Promise<string> {
     return lastError
   }
   reader.feed(text)
-  // Finished GENERATING, not playing: the player keeps what it was given.
-  void reader.finish().then(
-    () => settle(id, ''),
-    (e: Error) => settle(id, e.message.length > 0 ? e.message : '朗读失败')
-  )
+  // Settled when the speaker is done, not when the engine is. finish()
+  // resolves once the last sample is GENERATED, which runs ahead of playback,
+  // and the button has to offer 停止 for as long as there is anything to stop.
+  void reader
+    .finish()
+    .then(quiet)
+    .then(
+      () => settle(id, ''),
+      (e: Error) => settle(id, e.message.length > 0 ? e.message : '朗读失败')
+    )
   return ''
+}
+
+/**
+ * Resolve once the player has nothing left to play. Also when it is stopped,
+ * by this module or by another lane taking the speaker: either way this
+ * utterance is no longer being heard.
+ */
+function quiet(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (!player.active()) {
+      resolve()
+      return
+    }
+    const off = player.watch(() => {
+      if (!player.active()) {
+        off()
+        resolve()
+      }
+    })
+  })
 }
 
 function settle(id: string, error: string): void {

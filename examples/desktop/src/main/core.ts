@@ -52,6 +52,11 @@ export interface YoaiNative {
   ): number
   nativeChatCancel(turnId: number): void
   nativeChatCancelAll(): number
+  /**
+   * Calls into the core still running on a worker thread: turns, loads,
+   * warm-ups, reading. The engines are safe to unload when it is 0.
+   */
+  nativeWorkers(): number
 
   /** A prompt's current text from the core's table; null for an unknown name. */
   nativePromptGet(name: string): string | null
@@ -153,6 +158,8 @@ export interface YoaiNative {
   nativeOmniUnload(): void
   /** MNN runs `steps - 1` diffusion forwards per chunk. 0 on success. */
   nativeOmniSetDitSteps(steps: number): number
+  /** Stop the running exchange at the Talker's next block. */
+  nativeOmniCancel(): void
   /** pcm is 16-bit mono at 16 kHz. 1 when the exchange started. */
   nativeOmniAsk(
     pcm: Int16Array,

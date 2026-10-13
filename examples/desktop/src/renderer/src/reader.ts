@@ -154,6 +154,10 @@ export async function begin(): Promise<boolean> {
   const ok = await window.yoai.reader.begin()
   if (!ok) {
     console.warn('[reader] could not begin')
+  } else {
+    // Something to stop from now, not from the first chunk: the stream's 'end'
+    // flushes the player, which lets this go again.
+    player.expect()
   }
   open = ok
   return ok
@@ -199,13 +203,18 @@ export function finish(): Promise<Record<string, unknown>> {
  * Stop reading: the engine abandons the stream and what it already sent is not
  * played. Resolves once the stream is closed, so a begin() can follow. Safe
  * with nothing open.
+ *
+ * The player is stopped whether or not a stream is open. The engine runs ahead
+ * of playback, so it is often done -- the stream closed -- while the speaker
+ * still has most of a reply to play, and that is when a stop is most often
+ * asked for.
  */
 export async function cancel(): Promise<void> {
+  player.stop()
   if (!open) {
     return
   }
   dropping = true
-  player.stop()
   await window.yoai.reader.cancel()
   await finish().catch(() => undefined)
 }
