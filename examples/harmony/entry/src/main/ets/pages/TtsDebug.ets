@@ -40,6 +40,7 @@ import hilog from '@ohos.hilog';
 import yoai from 'libyoai.so';
 import { ICON_TOOLBAR, icon } from '../core/Icons';
 import { LocalModelStore, PickedFile } from '../core/LocalModelStore';
+import { Reader } from '../core/Reader';
 import { DEFAULT_FAMILY, Palette, resolvePalette } from '../core/Palettes';
 import { TtsModelPair, TtsModelRef, TtsModelStore } from '../core/TtsModelStore';
 
@@ -267,7 +268,7 @@ struct TtsDebug {
     await TtsModelStore.setCodec(this.ctx(), ref);
   }
 
-  private load(): void {
+  private async load(): Promise<void> {
     const talker: TtsModelRef | undefined = this.talker;
     const codec: TtsModelRef | undefined = this.codec;
     if (talker === undefined || codec === undefined) {
@@ -277,6 +278,12 @@ struct TtsDebug {
 
     this.busy = 'loading 2.2 GB…';
     this.note = '';
+    // The app's voice is a second engine over the same kind of weights; one at
+    // a time. The chat page loads it again when it is shown.
+    await Reader.unload();
+    // Read once first, as every load in the app is; see nativePrefetch.
+    await LocalModelStore.prefetch(talker.path);
+    await LocalModelStore.prefetch(codec.path);
     yoai.nativeTtsLoad(talker.path, codec.path, (type: string, content: string) => {
       this.busy = '';
       if (type === 'ok') {

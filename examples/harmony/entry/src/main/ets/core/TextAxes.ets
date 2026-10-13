@@ -41,39 +41,39 @@ export interface TextAxesResult {
   raw: string;         // every 'reply' byte, before parsing
 }
 
-/**
- * A five-point scale, enumerated as literals.
- *
- * GBNF cannot state a numeric range, and it does not need to here: five points
- * is already finer than a model can reliably distinguish on this judgment, and
- * enumerating them makes every reply both in range and parseable by
- * construction. Whitespace is not permitted either -- there is exactly one
- * string the model is allowed to emit for any given pair.
- */
-const GRAMMAR: string =
-  'root ::= "{\\"valence\\":" score ",\\"dominance\\":" score "}"\n' +
-  'score ::= "-1" | "-0.5" | "0" | "0.5" | "1"\n';
+/** One entry of nativePrompts(), the fields read here. */
+interface PromptJson {
+  name: string;
+  text: string;
+  grammar: string;
+}
 
 /**
- * Definitions lifted from docs/voice.md rather than reinvented, because the
- * dominance one is easy to get wrong: it is about agency, not sentiment, and the
- * same words can be identical in sentiment while the agency is reversed.
+ * The scoring prompt and its grammar, from the core (src/llm/prompt/prompts.cpp,
+ * `text_axes`), where the reasons for both are written down: the definitions
+ * follow docs/voice.md because the dominance one is easy to get wrong, and the
+ * grammar enumerates a five-point scale so every reply is in range and
+ * parseable by construction. This app kept its own copy until the core did.
  */
-const SYSTEM: string =
-  'You judge two things about a short spoken note, from its words alone.\n\n' +
-  'valence: pleasant to unpleasant. Is what they describe good or bad?\n' +
-  '  -1 very unpleasant, 0 neutral, +1 very pleasant.\n\n' +
-  'dominance: who is the subject of the verbs. Not sentiment — agency.\n' +
-  '  "it got away from me", "I had to", "I could not", 「只能」,「没办法」\n' +
-  '  put the speaker on the receiving end: negative.\n' +
-  '  "I stopped at four", "I decided to" put them at the wheel: positive.\n' +
-  '  -1 acted upon, 0 neither, +1 in control.\n\n' +
-  'Answer with the JSON object and nothing else.';
+function textAxesPrompt(): PromptJson | undefined {
+  try {
+    const all: PromptJson[] = JSON.parse(yoai.nativePrompts()) as PromptJson[];
+    for (const p of all) {
+      if (p.name === 'text_axes') {
+        return p;
+      }
+    }
+  } catch (err) {
+    // A core without the table: the caller reports no answer.
+  }
+  return undefined;
+}
 
 export class TextAxesReader {
   /** Exposed so a debug screen can show what the reply was constrained to. */
   static grammar(): string {
-    return GRAMMAR;
+    const p: PromptJson | undefined = textAxesPrompt();
+    return p === undefined ? '' : p.grammar;
   }
 
   /**
@@ -87,14 +87,15 @@ export class TextAxesReader {
    */
   static read(providerId: string, transcript: string): Promise<TextAxesResult> {
     return new Promise<TextAxesResult>((resolve: (v: TextAxesResult) => void) => {
-      if (providerId.length === 0 || transcript.trim().length === 0) {
+      const prompt: PromptJson | undefined = textAxesPrompt();
+      if (providerId.length === 0 || transcript.trim().length === 0 || prompt === undefined) {
         resolve({ axes: undefined, provider: providerId, sent: transcript, raw: '' });
         return;
       }
       const wire: string = JSON.stringify([{ role: 'user', content: transcript }]);
       let acc: string = '';
 
-      yoai.nativeChat(providerId, wire, SYSTEM, GRAMMAR,
+      yoai.nativeChat(providerId, wire, prompt.text, prompt.grammar,
         (type: string, content: string) => {
           if (type === 'reply') {
             acc += content;

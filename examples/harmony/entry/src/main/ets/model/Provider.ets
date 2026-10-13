@@ -15,6 +15,10 @@
  * that speaks /chat/completions can be added by typing a URL. That is the whole
  * point of a bring-your-own-key client, and treating the built-ins as anything
  * more than a shortcut would undercut it.
+ *
+ * examples/desktop/src/shared/provider.ts carries the same list on purpose:
+ * two clients offering different shortcuts for the same service would be a bug
+ * report nobody could reproduce. Change both.
  */
 
 export interface Vendor {
@@ -34,7 +38,7 @@ export const VENDORS: Vendor[] = [
     id: 'zhipu',
     label: 'GLM',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-    models: ['glm-4.7-flash', 'glm-4.7'],
+    models: ['glm-4.7-flash', 'GLM-5.3-Flash'],
     registerUrl: 'https://open.bigmodel.cn'
   },
   {
@@ -48,7 +52,7 @@ export const VENDORS: Vendor[] = [
     id: 'dashscope',
     label: '阿里云 (DashScope)',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    models: ['qwen-plus', 'qwen-turbo'],
+    models: ['qwen3.8-flash', 'qwen3.8-omni-flash-realtime'],
     registerUrl: 'https://bailian.console.aliyun.com'
   },
   {
@@ -69,7 +73,7 @@ export const VENDORS: Vendor[] = [
     id: 'gemini',
     label: 'Google',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    models: ['gemini-3.6-flash'],
+    models: ['gemini-3.8-flash', 'gemini-3.8-live'],
     registerUrl: 'https://aistudio.google.com/apikey'
   },
   {

@@ -315,6 +315,362 @@
     {
       "name": "settings_language_partial",
       "value": "目前只有中文和英文是完整的，其余语种会回退显示。"
+    },
+    {
+      "name": "settings_stop_playback",
+      "value": "停止播放"
+    },
+    {
+      "name": "settings_page_prompt",
+      "value": "系统提示词"
+    },
+    {
+      "name": "settings_prompt_default_short",
+      "value": "内置默认"
+    },
+    {
+      "name": "settings_prompt_custom_short",
+      "value": "自定义"
+    },
+    {
+      "name": "settings_prompt_intro",
+      "value": "每一轮对话都会带上这段话，用来交代助手的身份、语气和边界。全局生效，对本机模型和远程模型一样。留空则不发送。"
+    },
+    {
+      "name": "settings_prompt_hint",
+      "value": "例：你是一个简洁、直接的助手，回答用中文。"
+    },
+    {
+      "name": "settings_prompt_default",
+      "value": "当前为内置默认提示词，随版本更新。"
+    },
+    {
+      "name": "settings_prompt_custom",
+      "value": "当前为自定义提示词。"
+    },
+    {
+      "name": "settings_prompt_reset",
+      "value": "恢复默认"
+    },
+    {
+      "name": "settings_page_speech",
+      "value": "语音输出"
+    },
+    {
+      "name": "settings_tts_intro",
+      "value": "Qwen3-TTS 在本机朗读回答，合成时不联网。要两个 GGUF：talker 写出音频码，12 Hz tokenizer 解成采样。两个都就位后自动载入。"
+    },
+    {
+      "name": "settings_tts_unavailable",
+      "value": "这个版本没有编译语音输出。用 python examples/harmony/build.py qtts 重新构建。"
+    },
+    {
+      "name": "settings_tts_unavailable_short",
+      "value": "未编译"
+    },
+    {
+      "name": "settings_tts_not_set",
+      "value": "未设置"
+    },
+    {
+      "name": "settings_tts_mode",
+      "value": "音色来源"
+    },
+    {
+      "name": "settings_tts_mode_base",
+      "value": "克隆音色（Base）"
+    },
+    {
+      "name": "settings_tts_mode_custom",
+      "value": "内置说话人（CustomVoice）"
+    },
+    {
+      "name": "settings_tts_mode_note",
+      "value": "克隆音色用一段参考录音，可以换成自己的声音；内置说话人用模型自带的音色，目前听感更好，还能选朗读风格。两种模式各用各的 talker 模型，切换后自动重新载入。"
+    },
+    {
+      "name": "settings_tts_setup",
+      "value": "还缺以下模型文件："
+    },
+    {
+      "name": "settings_tts_pick_existing",
+      "value": "选择已有文件"
+    },
+    {
+      "name": "settings_tts_setup_note_app",
+      "value": "已有这些文件：一次选中全部，按文件名自动归位。没有：下载到应用自己的存储里，已有的不重复下载，下完自动载入；卸载应用时一并删除。"
+    },
+    {
+      "name": "settings_tts_setup_note_folder",
+      "value": "已有这些文件：一次选中全部，按文件名自动归位。没有：选一个文件夹下载，文件夹里已有的不重复下载，下完自动载入。文件留在所选位置，应用不会移动或删除。"
+    },
+    {
+      "name": "settings_tts_talker",
+      "value": "Talker 模型（Base）"
+    },
+    {
+      "name": "settings_tts_talker_custom",
+      "value": "Talker 模型（CustomVoice）"
+    },
+    {
+      "name": "settings_tts_tokenizer",
+      "value": "Tokenizer 模型"
+    },
+    {
+      "name": "settings_tts_replace",
+      "value": "更换"
+    },
+    {
+      "name": "settings_tts_not_picked",
+      "value": "未选择"
+    },
+    {
+      "name": "settings_tts_loading",
+      "value": "正在载入…"
+    },
+    {
+      "name": "settings_tts_extracting",
+      "value": "正在提取参考音色…"
+    },
+    {
+      "name": "settings_tts_loaded",
+      "value": "已载入 · %s"
+    },
+    {
+      "name": "settings_tts_pick_both",
+      "value": "两个模型文件就位后自动载入。"
+    },
+    {
+      "name": "settings_tts_test",
+      "value": "试听"
+    },
+    {
+      "name": "settings_tts_test_text",
+      "value": "你好，我是 YoAI。这是本机合成的语音。"
+    },
+    {
+      "name": "settings_tts_phone_note",
+      "value": "合成比播放慢时（手机上 1.7B 模型约需语音时长的 3 倍），回复会先合成完，再整段播放。"
+    },
+    {
+      "name": "settings_tts_speaker",
+      "value": "说话人"
+    },
+    {
+      "name": "settings_tts_speaker_note",
+      "value": "模型自带的说话人，载入后可选。"
+    },
+    {
+      "name": "settings_tts_style",
+      "value": "朗读风格"
+    },
+    {
+      "name": "settings_tts_style_note",
+      "value": "随每次朗读一起交给模型的一句简短描述，从下一次朗读开始生效。"
+    },
+    {
+      "name": "tts_style_none",
+      "value": "不指定"
+    },
+    {
+      "name": "tts_style_calm",
+      "value": "平静"
+    },
+    {
+      "name": "tts_style_caring",
+      "value": "关切"
+    },
+    {
+      "name": "tts_style_cheerful",
+      "value": "轻快开心"
+    },
+    {
+      "name": "tts_style_sorry",
+      "value": "歉意"
+    },
+    {
+      "name": "settings_tts_seed",
+      "value": "采样种子"
+    },
+    {
+      "name": "settings_tts_seed_note",
+      "value": "默认 101，节奏感较强。固定种子，同样的文字每次合成结果完全一致；换一个种子，整体读法随之改变。填 -1 则每次重新抽。"
+    },
+    {
+      "name": "settings_tts_temperature",
+      "value": "语调变化（采样温度）"
+    },
+    {
+      "name": "settings_tts_temperature_note",
+      "value": "默认 %s（模型自身默认 0.9）。调高后语速和语调更多变，读起来不那么像念稿；调得太高会漏字、念错或跑调。从下一次朗读开始生效。"
+    },
+    {
+      "name": "settings_tts_temperature_custom_note",
+      "value": "内置说话人固定用模型自身的 0.9，调高后听感不如克隆音色自然。这里的设置只对克隆音色生效。"
+    },
+    {
+      "name": "settings_reader_ref",
+      "value": "参考音色"
+    },
+    {
+      "name": "settings_reader_ref_own",
+      "value": "自选文件"
+    },
+    {
+      "name": "settings_reader_ref_pick",
+      "value": "选择文件"
+    },
+    {
+      "name": "settings_reader_ref_busy",
+      "value": "处理中…"
+    },
+    {
+      "name": "settings_reader_ref_record",
+      "value": "录制"
+    },
+    {
+      "name": "settings_reader_ref_note",
+      "value": "列表里是应用自带的音色，默认 01_female，载入时按模型尺寸自动选用对应的 .spk。也可以录制自己的声音，或选择 .wav 录音（单声道、16 位、24 kHz）或 .spk 向量。录音首次使用时提取一次，约需数秒，之后直接读缓存；.spk 须与模型尺寸一致（1.7B 为 2048 维，0.6B 为 1024 维）。"
+    },
+    {
+      "name": "settings_reader_enabled",
+      "value": "自动朗读回复"
+    },
+    {
+      "name": "settings_reader_enabled_note",
+      "value": "默认开启。回复边写边读。关闭后仍可点消息旁的「朗读」。"
+    },
+    {
+      "name": "settings_reader_min",
+      "value": "攒够多少字再开口"
+    },
+    {
+      "name": "settings_reader_min_note",
+      "value": "0 表示用默认的 12。这个数决定的不是引擎快慢，而是大模型要先写多少字。调大更自然（实测 30 比 12 好听），调小出声更早。"
+    },
+    {
+      "name": "download_button",
+      "value": "下载（%s）"
+    },
+    {
+      "name": "download_connecting",
+      "value": "正在连接下载服务器…"
+    },
+    {
+      "name": "download_downloading",
+      "value": "正在下载 %s"
+    },
+    {
+      "name": "download_verifying",
+      "value": "正在校验 %s"
+    },
+    {
+      "name": "download_retrying",
+      "value": "连接中断，%ds 后自动重试（第 %d 次，共 %d 次）"
+    },
+    {
+      "name": "download_err_space",
+      "value": "存储空间不足。"
+    },
+    {
+      "name": "download_err_network",
+      "value": "下载失败：多次重试后仍连不上下载服务器。再点一次下载会从中断处继续。"
+    },
+    {
+      "name": "download_err_checksum",
+      "value": "下载的文件校验不符，已删除。请重新下载。"
+    },
+    {
+      "name": "download_err_disk",
+      "value": "无法写入下载位置。"
+    },
+    {
+      "name": "download_err_canceled",
+      "value": "已取消下载。"
+    },
+    {
+      "name": "settings_local_offer",
+      "value": "还没有本机模型，可以下载这一个："
+    },
+    {
+      "name": "settings_local_offer_note_app",
+      "value": "Qwen3.5 2B，4 位量化，在手机上比 4B 快一倍。下载到应用自己的存储里，卸载应用时一并删除。下完自动加入模型列表；还没有选用的模型时直接选用并载入。已有其他 GGUF：点下面的「选择 GGUF 文件」。"
+    },
+    {
+      "name": "settings_local_offer_note_folder",
+      "value": "Qwen3.5 2B，4 位量化，比 4B 快一倍。选一个文件夹下载，文件夹里已有就不重复下载。下完自动加入模型列表；还没有选用的模型时直接选用并载入。已有其他 GGUF：点下面的「选择 GGUF 文件」。"
+    },
+    {
+      "name": "action_speak",
+      "value": "朗读"
+    },
+    {
+      "name": "action_stop_speaking",
+      "value": "停止"
+    },
+    {
+      "name": "chat_speak_failed",
+      "value": "朗读失败：%s"
+    },
+    {
+      "name": "chat_usage",
+      "value": "输入 %s · 输出 %s tokens"
+    },
+    {
+      "name": "chat_usage_thinking",
+      "value": "思考 %s"
+    },
+    {
+      "name": "record_title",
+      "value": "录一段自己的声音"
+    },
+    {
+      "name": "record_script",
+      "value": "今天天气不错，我打算下午去湖边走一走。那里的风景很好，春天有花，秋天有鸟。如果你也有空，我们可以一起去，顺便找家小店喝杯茶，聊聊最近的事情。回来的时候，记得提醒我买点水果。"
+    },
+    {
+      "name": "record_note",
+      "value": "用平常说话的语气，把上面这段读完，约 20 秒。找个安静的地方，手机离嘴一拳左右。录好后先回放听一下，再点「用这段录音」。"
+    },
+    {
+      "name": "record_denied",
+      "value": "没有麦克风权限。"
+    },
+    {
+      "name": "record_no_mic",
+      "value": "打不开麦克风。"
+    },
+    {
+      "name": "record_start",
+      "value": "开始录音"
+    },
+    {
+      "name": "record_stop",
+      "value": "停止"
+    },
+    {
+      "name": "record_again",
+      "value": "重录"
+    },
+    {
+      "name": "record_play",
+      "value": "回放"
+    },
+    {
+      "name": "record_use",
+      "value": "用这段录音"
+    },
+    {
+      "name": "record_saving",
+      "value": "正在提取…"
+    },
+    {
+      "name": "record_too_short",
+      "value": "太短了，至少录 10 秒。"
+    },
+    {
+      "name": "record_clipped",
+      "value": "声音过载（削波），离麦克风远一点再录一遍。"
     }
   ]
 }

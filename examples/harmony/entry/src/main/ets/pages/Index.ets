@@ -1,11 +1,11 @@
 /**
  * The chat screen.
  *
- * Deliberately plain: bubbles, a composer, a model picker, a history drawer.
- * Markdown, charts and math rendering are not here yet -- a reply is shown as
- * the text it is. That keeps the one thing this page must get right visible:
- * the streaming loop, from a keystroke through the native core and back a token
- * at a time.
+ * Bubbles, a composer, a model picker, a history drawer -- and, when a voice is
+ * loaded, each reply read aloud as it is written. examples/desktop's App.tsx is
+ * a port of this page, including the turn lifecycle, which is the part worth
+ * keeping identical: it is where the streamed pieces become one saved message
+ * and where "the model said nothing" is told apart from "the user stopped it".
  *
  * The in-flight reply is NOT a member of `messages`. It lives in its own two
  * @State strings and is appended as a message only once the turn ends. Mutating
@@ -17,14 +17,31 @@
 import { common } from '@kit.AbilityKit';
 import { promptAction, router } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
+import hilog from '@ohos.hilog';
 import yoai from 'libyoai.so';
+import { RichMessage } from '../components/RichMessage';
 import { Canceler, ChatMessage, MessagePart, StreamCallbacks } from '../model/Chat';
 import { ModelConfig, modelLabel } from '../model/Provider';
 import { ChatEngine } from '../core/ChatEngine';
+import { ChatSettings } from '../core/ChatSettings';
 import { ICON_INLINE, ICON_TOOLBAR, icon } from '../core/Icons';
 import { ModelStore } from '../core/ModelStore';
 import { DEFAULT_FAMILY, Palette, resolvePalette } from '../core/Palettes';
+import { READER_REV, Reader } from '../core/Reader';
 import { SessionMeta, SessionStore } from '../core/SessionStore';
+import { Speak, SPEAKING_ID } from '../core/Speak';
+import { player, SPEECH_ACTIVE } from '../core/SpeechPlayer';
+import { SpeechStore } from '../core/SpeechStore';
+
+/** The `usage` event's payload, once parsed. Every field may be absent. */
+interface Usage {
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  thoughtTokens?: number;
+  totalTokens?: number;
+  totalCost?: number;
+}
 
 @Entry
 @Component
@@ -36,11 +53,24 @@ struct Index {
   @State private streaming: boolean = false;
   @State private streamText: string = '';
   @State private streamThinking: string = '';
+  /** The last finished turn's token summary, shown on the message it belongs to. */
+  @State private usage: Usage | null = null;
 
   @State private models: ModelConfig[] = [];
   @State private activeId: string = '';
   @State private sessions: SessionMeta[] = [];
   @State private showDrawer: boolean = false;
+
+  /**
+   * Whether there is speech to stop, from a reply or a message's 朗读. It
+   * outlasts the turn -- the engine writes faster than the speaker plays -- so
+   * the composer offers 停止 until it ends.
+   */
+  @StorageProp(SPEECH_ACTIVE) speaking: boolean = false;
+  /** Which message's 朗读 is speaking, '' for none. */
+  @StorageProp(SPEAKING_ID) speakingId: string = '';
+  /** Bumped when the voice loads or goes, so 朗读 appears and disappears with it. */
+  @StorageProp(READER_REV) readerRev: number = 0;
 
   @StorageLink('fontScale') fontScale: number = 1;
 
@@ -64,7 +94,14 @@ struct Index {
 
   private sessionId: string = SessionStore.newId();
   private canceler: Canceler | null = null;
+  /**
+   * Stop was pressed while the turn was still being set up -- the voice opening,
+   * the prompt being built -- before it had anything to cancel.
+   */
+  private stopAsked: boolean = false;
   private scroller: Scroller = new Scroller();
+  /** Set once startup has re-armed the stored grants; loads wait for it. */
+  private started: boolean = false;
 
   private ctx(): common.UIAbilityContext {
     return getContext(this) as common.UIAbilityContext;
@@ -77,16 +114,40 @@ struct Index {
     // default palette until something happens to move one of them.
     this.resolveTheme();
 
+    const ctx: common.UIAbilityContext = this.ctx();
+    Reader.init(ctx);
+    // Whether replies are read changes the prompt they are sent with; whichever
+    // of the model's load and the voice's finishes last warms it.
+    Reader.onVoiceChanged = () => {
+      ModelStore.warmActive(ctx);
+    };
+
+    // The speech settings first: they re-arm the download folder's grant, and
+    // a model downloaded there has no grant of its own to re-arm.
+    await SpeechStore.init(ctx);
     // The native registry is process memory, so a cold start finds it empty.
     // This is the one call that makes stored models usable again.
-    await ModelStore.syncToCore(this.ctx());
+    await ModelStore.syncToCore(ctx);
+    this.started = true;
     await this.reloadModels();
-    this.sessions = await SessionStore.index(this.ctx());
+    this.sessions = await SessionStore.index(ctx);
+
+    // Configured IS enabled: the selected on-device model and the voice are
+    // read now, while the screen is up, rather than when the first reply needs
+    // them -- which is the one moment somebody is already waiting.
+    ModelStore.autoPreload(ctx);
+    Reader.autoLoadVoice();
   }
 
   onPageShow(): void {
-    // Coming back from Settings, the model list may have changed under us.
-    this.reloadModels();
+    // Coming back from Settings, the model list may have changed under us. And
+    // coming back from /tts, whose engine shares the voice's weights, the
+    // voice may have been unloaded; this loads it again, and does nothing
+    // when it is up.
+    if (this.started) {
+      this.reloadModels();
+      Reader.autoLoadVoice();
+    }
   }
 
   private async reloadModels(): Promise<void> {
@@ -120,6 +181,14 @@ struct Index {
       }
     }
     return '';
+  }
+
+  private async selectModel(id: string): Promise<void> {
+    this.activeId = id;
+    await ModelStore.setActiveId(this.ctx(), id);
+    // Switching to an on-device model starts reading its weights now rather
+    // than on the first message.
+    ModelStore.autoPreload(this.ctx());
   }
 
   //----------------------------------------------------------------------------
@@ -178,26 +247,82 @@ struct Index {
     this.streaming = true;
     this.streamText = '';
     this.streamThinking = '';
+    this.usage = null;
+    this.stopAsked = false;
     this.scrollToEnd();
 
     const label: string = this.activeLabel();
+    const providerId: string = this.activeId;
+
+    // A new reply supersedes the old one out loud as well as on screen.
+    await Speak.stop();
+
+    // An on-device model still loading is waited for here rather than left to
+    // the turn: the turn would load it straight, and mapped straight from user
+    // storage a large model froze this thread until the system killed the app
+    // (see nativePrefetch). Immediate for a remote model or one already loaded.
+    await ModelStore.autoPreload(this.ctx());
+
+    // The reading lane is decided BEFORE the turn starts, because it has to be
+    // open before the first token arrives -- and asked fresh, because the voice
+    // loads in the background.
+    const stream: number = Reader.ready() ? await Reader.begin() : 0;
+    const reading: boolean = stream !== 0;
+
+    // A reply that will be heard is asked to be written for the ear. Built the
+    // way the on-device model's warm-up builds it, so the prompt computed ahead
+    // of this turn is the one it sends.
+    const systemPrompt: string = await ChatSettings.turnPrompt(this.ctx(), reading);
+
     const cb: StreamCallbacks = {
       onDelta: (t: string) => {
         this.streamText = this.streamText + t;
+        // The same delta the transcript gets, markdown and all: the core turns
+        // the reply into what should be spoken. Dropped once a message's 朗读
+        // has taken the voice.
+        if (reading) {
+          Reader.feed(stream, t);
+        }
         this.scrollToEnd();
       },
       onThinking: (t: string) => {
         this.streamThinking = this.streamThinking + t;
         this.scrollToEnd();
       },
+      onUsage: (json: string) => {
+        try {
+          this.usage = JSON.parse(json) as Usage;
+        } catch (err) {
+          // A summary that will not parse is worth nothing and costs nothing to
+          // drop; the reply itself already arrived.
+        }
+      },
       onError: (message: string) => {
         this.messages.push({ role: 'assistant', content: message, transient: true, ts: Date.now() });
       },
       onDone: (aborted: boolean) => {
+        if (reading) {
+          // The stream has to be closed either way -- there are engines and
+          // threads behind it. When the user stopped the turn they asked for
+          // silence, so it is cancelled rather than read to the end. Either is
+          // a no-op when the stream is no longer this reply's.
+          if (aborted) {
+            Reader.cancel(stream);
+          } else {
+            Reader.finish(stream).catch((e: Error) => {
+              hilog.error(0x0000, 'yoai', 'reading the reply failed: %{public}s', e.message);
+            });
+          }
+        }
         this.finishTurn(label, aborted);
       }
     };
-    this.canceler = ChatEngine.run(this.activeId, this.messages, '', cb);
+    this.canceler = ChatEngine.run(providerId, this.messages, systemPrompt, cb);
+    // The request is out by now, so cancelling is the only way to stop it; the
+    // turn still ends through onDone like any other.
+    if (this.stopAsked && this.canceler !== null) {
+      this.canceler.cancel();
+    }
   }
 
   /**
@@ -241,10 +366,23 @@ struct Index {
     this.scrollToEnd();
   }
 
+  /**
+   * Silence, whichever lane is speaking and whatever state its engine is in: a
+   * reply, a message's 朗读, a recorded take.
+   */
+  private stopSpeech(): void {
+    Speak.stop();
+    player.stop();
+  }
+
+  /** The composer's stop: the turn if one is running, and the speech. */
   private stop(): void {
     if (this.canceler !== null) {
       this.canceler.cancel();
+    } else if (this.streaming) {
+      this.stopAsked = true;
     }
+    this.stopSpeech();
   }
 
   private async persist(): Promise<void> {
@@ -278,11 +416,19 @@ struct Index {
   // Sessions
   //----------------------------------------------------------------------------
 
+  /**
+   * A new conversation, for the engines as well as the screen. Clearing the
+   * transcript is enough for a remote provider, which is handed the whole
+   * conversation every turn and keeps nothing; an on-device one keeps a KV
+   * cache, and the next prompt having one message in it does not empty it.
+   */
   private async newChat(): Promise<void> {
     this.stop();
     await this.persist();
+    ModelStore.forgetAll(this.ctx());
     this.sessionId = SessionStore.newId();
     this.messages = [];
+    this.usage = null;
     this.showDrawer = false;
   }
 
@@ -291,6 +437,7 @@ struct Index {
     await this.persist();
     this.sessionId = id;
     this.messages = await SessionStore.messages(this.ctx(), id);
+    this.usage = null;
     this.showDrawer = false;
     this.scrollToEnd();
   }
@@ -299,8 +446,10 @@ struct Index {
     await SessionStore.remove(this.ctx(), id);
     this.sessions = await SessionStore.index(this.ctx());
     if (id === this.sessionId) {
+      ModelStore.forgetAll(this.ctx());
       this.sessionId = SessionStore.newId();
       this.messages = [];
+      this.usage = null;
     }
   }
 
@@ -309,6 +458,62 @@ struct Index {
     pasteboard.getSystemPasteboard().setData(data).then(() => {
       promptAction.showToast({ message: $r('app.string.toast_copied') });
     });
+  }
+
+  //----------------------------------------------------------------------------
+  // Speaking a message
+  //----------------------------------------------------------------------------
+
+  /**
+   * What 朗读 reads: the answer, not the thinking. A model's chain-of-thought
+   * is not part of the answer, and reading it aloud is minutes of text nobody
+   * asked for -- the same rule that keeps it folded on screen.
+   */
+  private spokenOf(m: ChatMessage): string {
+    if (m.parts === undefined) {
+      return m.content;
+    }
+    const out: string[] = [];
+    for (const p of m.parts) {
+      if (p.kind !== 'thinking') {
+        out.push(p.content);
+      }
+    }
+    return out.join('\n');
+  }
+
+  private async speakMessage(id: string, m: ChatMessage): Promise<void> {
+    if (this.speakingId === id) {
+      Speak.stop();
+      return;
+    }
+    const why: string = await Speak.speak(id, this.spokenOf(m));
+    if (why.length > 0) {
+      promptAction.showToast({ message: $r('app.string.chat_speak_failed', why) });
+    }
+  }
+
+  /** "输入 1,024 · 输出 512 tokens" -- absent fields are left out. */
+  private usageLine(): string {
+    const u: Usage | null = this.usage;
+    if (u === null) {
+      return '';
+    }
+    const rm = this.ctx().resourceManager;
+    const bits: string[] = [];
+    if (u.inputTokens !== undefined && u.outputTokens !== undefined) {
+      bits.push(rm.getStringSync($r('app.string.chat_usage').id,
+        u.inputTokens.toLocaleString(), u.outputTokens.toLocaleString()));
+    }
+    if (u.thoughtTokens !== undefined && u.thoughtTokens > 0) {
+      bits.push(rm.getStringSync($r('app.string.chat_usage_thinking').id, u.thoughtTokens.toLocaleString()));
+    }
+    // Only a real cost. An on-device turn reports 0, and saying so on every
+    // reply is a line of text to tell the reader nothing happened.
+    if (u.totalCost !== undefined && u.totalCost > 0) {
+      bits.push('$' + u.totalCost.toFixed(4));
+    }
+    return bits.join(' · ');
   }
 
   //----------------------------------------------------------------------------
@@ -321,8 +526,7 @@ struct Index {
       ForEach(this.models, (m: ModelConfig) => {
         MenuItem({ content: modelLabel(m) })
           .onClick(() => {
-            this.activeId = m.id;
-            ModelStore.setActiveId(this.ctx(), m.id);
+            this.selectModel(m.id);
           })
       }, (m: ModelConfig) => m.id)
       // Straight to the models page, not the settings index: this item is
@@ -405,53 +609,63 @@ struct Index {
     .padding({ left: 48, right: 12, top: 6, bottom: 6 })
   }
 
-  @Builder
-  thinkingBlock(text: string) {
-    Column({ space: 4 }) {
-      Text($r('app.string.chat_thinking_label'))
-        .fontSize(12)
-        .fontColor(this.theme.text_tertiary)
-      Text(text)
-        .fontSize(14 * this.fontScale)
-        .fontColor(this.theme.text_tertiary)
-    }
-    .alignItems(HorizontalAlign.Start)
-    .width('100%')
-    .padding(10)
-    .borderRadius(10)
-    .backgroundColor(this.theme.bg_overlay)
+  /**
+   * Whether 朗读 can be offered. Reads readerRev so the buttons follow the
+   * voice as it loads; the value itself is not the answer.
+   */
+  private voiceUp(): boolean {
+    return this.readerRev >= 0 && Reader.canSpeak();
   }
 
+  /**
+   * `index` rather than a "last" flag: an item's builder is not run again when
+   * a message is appended after it, so a flag passed in would stay true on the
+   * message that used to be last, while the length read here does not.
+   */
   @Builder
-  assistantBubble(m: ChatMessage) {
+  assistantBubble(m: ChatMessage, id: string, index: number) {
     Column({ space: 6 }) {
-      if (m.parts !== undefined) {
-        ForEach(m.parts, (p: MessagePart) => {
-          if (p.kind === 'thinking') {
-            this.thinkingBlock(p.content)
-          } else {
-            Text(p.content)
-              .fontSize(16 * this.fontScale)
-              .fontColor(this.theme.text_primary)
-              .width('100%')
-              .copyOption(CopyOptions.LocalDevice)
-          }
-        }, (p: MessagePart, i: number) => i.toString())
-      } else {
+      if (m.transient === true) {
+        // The app's own words -- an error, a notice -- shown as written.
         Text(m.content)
           .fontSize(16 * this.fontScale)
-          .fontColor(m.transient === true ? this.theme.danger : this.theme.text_primary)
+          .fontColor(this.theme.danger)
           .width('100%')
           .copyOption(CopyOptions.LocalDevice)
+      } else {
+        RichMessage({
+          text: this.spokenOf(m),
+          thinking: this.thinkingOf(m),
+          streaming: false,
+          fontScale: this.fontScale
+        })
       }
 
       if (m.model !== undefined) {
         Row({ space: 12 }) {
           Text(m.model).fontSize(11).fontColor(this.theme.text_tertiary)
+          if (index === this.messages.length - 1 && !this.streaming && this.usage !== null) {
+            Text(this.usageLine())
+              .fontSize(11)
+              .fontColor(this.theme.text_tertiary)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+          }
           Text($r('app.string.action_copy'))
             .fontSize(11)
             .fontColor(this.theme.text_tertiary)
             .onClick(() => this.copy(m.content))
+          // Offered once a voice is up; a button that can only refuse is worse
+          // than none.
+          if (this.speakingId === id || this.voiceUp()) {
+            Text(this.speakingId === id
+              ? $r('app.string.action_stop_speaking')
+              : $r('app.string.action_speak'))
+              .fontSize(11)
+              .fontColor(this.speakingId === id ? this.theme.brand : this.theme.text_tertiary)
+              .onClick(() => { this.speakMessage(id, m); })
+          }
         }
         .width('100%')
       }
@@ -461,21 +675,33 @@ struct Index {
     .padding({ left: 12, right: 12, top: 6, bottom: 6 })
   }
 
+  private thinkingOf(m: ChatMessage): string {
+    if (m.parts === undefined) {
+      return '';
+    }
+    const out: string[] = [];
+    for (const p of m.parts) {
+      if (p.kind === 'thinking') {
+        out.push(p.content);
+      }
+    }
+    return out.join('\n');
+  }
+
   @Builder
   streamingBubble() {
     Column({ space: 6 }) {
-      if (this.streamThinking.length > 0) {
-        this.thinkingBlock(this.streamThinking)
-      }
-      if (this.streamText.length > 0) {
-        Text(this.streamText)
-          .fontSize(16 * this.fontScale)
-          .fontColor(this.theme.text_primary)
-          .width('100%')
-      } else if (this.streamThinking.length === 0) {
+      if (this.streamText.length === 0 && this.streamThinking.length === 0) {
         Row() {
           LoadingProgress().width(20).height(20).color(this.theme.text_tertiary)
         }
+      } else {
+        RichMessage({
+          text: this.streamText,
+          thinking: this.streamThinking,
+          streaming: true,
+          fontScale: this.fontScale
+        })
       }
     }
     .alignItems(HorizontalAlign.Start)
@@ -496,15 +722,16 @@ struct Index {
           .onChange((v: string) => { this.input = v; })
           .onSubmit(() => this.send())
 
+        // Stop while a turn runs, and for as long as speech is playing after it.
         Button() {
-          Text(this.streaming ? '■' : '↑').fontSize(18).fontColor(this.theme.on_brand)
+          Text(this.streaming || this.speaking ? '■' : '↑').fontSize(18).fontColor(this.theme.on_brand)
         }
         .type(ButtonType.Circle)
         .width(44)
         .height(44)
         .backgroundColor(this.theme.brand)
         .onClick(() => {
-          if (this.streaming) {
+          if (this.streaming || this.speaking) {
             this.stop();
           } else {
             this.send();
@@ -603,12 +830,12 @@ struct Index {
             this.emptyState()
           }
         }
-        ForEach(this.messages, (m: ChatMessage) => {
+        ForEach(this.messages, (m: ChatMessage, i: number) => {
           ListItem() {
             if (m.role === 'user') {
               this.userBubble(m)
             } else {
-              this.assistantBubble(m)
+              this.assistantBubble(m, 'm' + i, i)
             }
           }
         }, (m: ChatMessage, i: number) => i.toString() + '-' + (m.ts === undefined ? '' : m.ts.toString()))

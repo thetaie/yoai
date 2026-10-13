@@ -3,6 +3,8 @@
     "pages/Index",
     "pages/Settings",
     "pages/SettingsModels",
+    "pages/SettingsPrompt",
+    "pages/SettingsSpeech",
     "pages/SettingsInterface",
     "pages/VoiceDebug",
     "pages/TtsDebug"

@@ -17,11 +17,11 @@ that, or name `hap`. It builds what the app links against.
           app links it yet.
   qtts    speech output (qwentts.cpp) -> prebuilt/qtts-sdk/<abi>/
           Needs a llama.cpp checkout too, whether or not `llama` is being
-          built: it compiles llama.cpp's ggml.
+          built: it compiles llama.cpp's ggml. It is what reads replies aloud.
   vulkan  modifies qtts: also build ggml's Vulkan backend. Implies qtts, and
           is not a target of its own.
   hap     compile and sign the app itself, via hvigor. No IDE needed.
-  all     deps, llama, hap -- and what a bare `python build.py` does
+  all     deps, llama, qtts, hap, each named, so a missing checkout stops it
   clean   discard the cached build trees and SDKs of the targets named
           first. `deps` always replaces its own output, so there is nothing
           for it to clean.
@@ -29,14 +29,18 @@ that, or name `hap`. It builds what the app links against.
           armv8-a.
 
 The abi defaults to arm64-v8a, which is the only one a HarmonyOS NEXT device
-has -- so it is normally left off entirely. Naming no target means `all`, so
-the first run is just `python build.py`, and after that `python build.py hap`.
+has -- so it is normally left off entirely. Naming no target builds deps and
+the app with llama and qtts, so the first run is just `python build.py`, and
+after that `python build.py hap`.
 
-On-device chat is part of the app rather than an opt-in lane, so the bare
-command produces an app that has it. That is not free: it needs a llama.cpp
-checkout (~200 MB, which this script will not clone for you) plus a few
-minutes of cross-compile. To build the app WITHOUT the engine, name the two
-targets you do want: python build.py deps hap
+On-device chat and speech output are part of the app rather than opt-in
+lanes, so the bare command produces an app that has both, as the desktop
+build does. That is not free: the llama.cpp and qwentts.cpp checkouts are
+fetched into ../../third/ when they are not there (git and the network, once),
+and each lane is a few minutes of cross-compile. A lane whose checkout is
+missing, or differs from what third/manifest.json pins, is left out with a
+line saying so. To build the app WITHOUT the engines, name the two targets you
+do want: python build.py deps hap
 
 DevEco Studio, or the command-line tools, is found without a setting: from the
 DEVECO_SDK_HOME their setup puts in the environment (the install is the
@@ -54,8 +58,9 @@ or the environment, .env winning:
   VULKAN_SDK      a host Vulkan SDK, required by `vulkan`
 
 `python ../../third/sync.py clone` fetches the source checkouts above at their
-pinned commits, with the patches this script expects already applied. `deps`
-clones vcpkg itself, at vcpkg.json's builtin-baseline.
+pinned commits, with the patches this script expects already applied; a bare
+build runs it for llama.cpp and qwentts.cpp by itself. `deps` clones vcpkg
+itself, at vcpkg.json's builtin-baseline.
 """
 
 # Python 3.8 or newer, standard library only.
@@ -85,6 +90,9 @@ DEFAULT_ARCH = "armv8.6-a+i8mm+bf16+dotprod+fp16"
 # argument rather than at -DOHOS_ARCH, where an unknown ABI fails deep inside
 # the toolchain file with nothing pointing back at the argument.
 TRIPLETS = {"arm64-v8a": "arm64-ohos", "x86_64": "x64-ohos", "armeabi-v7a": "arm-ohos"}
+# What a build with no target named adds by itself, and the checkouts each
+# needs -- the desktop's table. mnn wants asking for: nothing in the app links it.
+DEFAULT = (("llama", ("llama.cpp",)), ("qtts", ("qwentts.cpp", "llama.cpp")))
 
 
 class Opts:
@@ -120,7 +128,7 @@ def parse(argv):
         elif t == "hap":
             o.hap = True
         elif t == "all":
-            o.deps = o.llama = o.hap = True
+            o.deps = o.llama = o.qtts = o.hap = True
         elif t == "clean":
             o.clean = True
         elif t == "baseline":
@@ -142,30 +150,34 @@ def main(argv):
         return 1
 
     o.abi = o.abi or "arm64-v8a"
-    # Nothing named: everything, in the order `all` would. The bare command is
-    # what a fresh clone runs, and it should end with an installable app that
-    # has on-device chat -- not with a half-built tree needing two more
-    # invocations nobody mentioned.
-    #
-    # NOTHING named means none of the five, not none of the three. The guard
-    # used to test deps/llama/hap only, so `qtts` -- a target it does not list
-    # -- read as an empty command line and quietly built deps, llama and the
-    # HAP as well. Same for `mnn`, the lane this file calls opt-in.
-    implied_all = not (o.deps or o.llama or o.mnn or o.qtts or o.hap)
-    if implied_all:
-        o.deps = o.llama = o.hap = True
-
     if o.abi not in TRIPLETS:
         fail('[build] abi must be arm64-v8a|x86_64|armeabi-v7a (got "%s")' % o.abi, code=2)
-    # Refusing outright is right when llama was ASKED for, and wrong when it
+
+    # Nothing named: deps, the HAP, and the lanes whose checkouts are ready --
+    # fetched first when they are not there. The bare command is what a fresh
+    # clone runs, and it should end with an installable app that has on-device
+    # chat and speech output, not with a half-built tree needing two more
+    # invocations nobody mentioned.
+    #
+    # NOTHING named means none of the five. The guard once tested deps, llama
+    # and hap only, so `qtts` read as an empty command line and quietly built
+    # everything else as well.
+    implied_all = not (o.deps or o.llama or o.mnn or o.qtts or o.hap)
+    if implied_all:
+        o.deps = o.hap = True
+        lanes = b.pick_lanes(DEFAULT, __file__, "the app", "mnn")
+        o.llama = "llama" in lanes
+        o.qtts = "qtts" in lanes
+
+    # Refusing outright is right when a lane was ASKED for, and wrong when it
     # was merely implied by a bare command line -- on an ABI that cannot have
-    # the engine, `build.py armeabi-v7a` should still build everything else.
-    if o.llama and o.abi == "armeabi-v7a":
-        if not implied_all:
-            fail('[build] the on-device engine is built for arm64-v8a|x86_64 only (got "%s")' % o.abi,
-                 code=2)
-        say("[build] llama skipped: the on-device engine is built for arm64-v8a|x86_64 only")
-        o.llama = False
+    # the engines, `build.py armeabi-v7a` should still build everything else.
+    for lane in ("llama", "qtts"):
+        if getattr(o, lane) and o.abi == "armeabi-v7a":
+            if not implied_all:
+                fail('[build] %s is built for arm64-v8a|x86_64 only (got "%s")' % (lane, o.abi), code=2)
+            say("[build] %s skipped: it is built for arm64-v8a|x86_64 only" % lane)
+            setattr(o, lane, False)
 
     deveco = deveco_home()
     sdk = ohos_sdk(deveco)
@@ -404,8 +416,9 @@ def ggml_flags():
 def build_llama(o, sdk):
     arch = DEFAULT_ARCH if o.arch is None else o.arch
 
-    # Not cloned for you, unlike vcpkg: this build wants a checkout you can pin
-    # and re-measure against, not one silently refreshed underneath it.
+    # Named, it is not cloned here: a bare build fetches the pinned checkout
+    # before it gets this far (b.pick_lanes), and a named lane builds on
+    # whatever tree is there, which is what pinning and re-measuring want.
     src = b.env("LLAMA_SRC", b.third_dir("llama.cpp"))
     if not os.path.isfile(os.path.join(src, "include", "llama.h")):
         fail('[llama] no llama.cpp at "%s".' % src,
@@ -807,6 +820,25 @@ def build_hap(deveco):
     b.prepend_path(node)
     if not b.WINDOWS:
         b.prepend_path(os.path.join(node, "bin"))
+
+    # The one ohpm dependency is the native module's .d.ts, a link under
+    # entry/oh_modules that DevEco makes when it syncs and hvigor does not. A
+    # fresh clone has no link, and one made before the app moved to examples/
+    # points at a directory that is gone; either way the compile cannot resolve
+    # 'libyoai.so'. So the link is made here when it does not resolve, as the
+    # desktop build runs npm install when node_modules is stale.
+    if not os.path.isfile(os.path.join(HERE, "entry", "oh_modules", "libyoai.so", "index.d.ts")):
+        ohpm = os.path.join(deveco, "tools", "ohpm", "bin", "ohpm.bat" if b.WINDOWS else "ohpm")
+        say("[hap] ohpm install: entry/oh_modules/libyoai.so does not resolve")
+        link = os.path.join(HERE, "entry", "oh_modules", "libyoai.so")
+        if os.path.lexists(link):
+            # Removed as a link, never as a tree: the target is the source
+            # directory of the .d.ts.
+            if b.WINDOWS:
+                os.rmdir(link)
+            else:
+                os.remove(link)
+        run([ohpm, "install", "--all"], cwd=HERE)
 
     say("[hap] hvigor from %s" % deveco)
     try:

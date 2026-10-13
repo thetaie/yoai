@@ -11,13 +11,27 @@
 // reads it on the next event and returns 0, which tears down the in-flight HTTP
 // transfer inside the core. A turn producing no further events cannot be
 // interrupted earlier -- there is nothing to observe the flag.
+//
+// The same bridge examples/desktop/native/src/binding.cpp is, against the same
+// header: Node-API and OHOS's NAPI are one API with different registration.
+// Where the two agree they are meant to be read side by side. Two differences
+// are this host's. The desktop's nativeChatCancelAll is absent, because a phone
+// app is killed rather than asked to quit. And the reading lane hands its audio
+// over as 16-bit samples rather than float, because that is what an
+// AudioRenderer plays, and its stream ends on the same callback that carried
+// the audio -- see NativeReaderBegin.
 
 #include <napi/native_api.h>
 #include <hilog/log.h>
 
 #include "yoai.h"
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <atomic>
+#include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <map>
@@ -252,11 +266,6 @@ void LoadWorker(std::string id, napi_threadsafe_function tsfn) {
     napi_release_threadsafe_function(tsfn, napi_tsfn_release);
 }
 
-// nativeLocalLoad(id, onDone: (type, content) => void): void
-//
-// Not a turn, so it takes no turn id and cannot be cancelled: a load either
-// finishes or fails, and abandoning one halfway leaves the file partly read for
-// no benefit. The callback fires exactly once.
 // nativeLocalSetThreads(id: string, threads: number): number
 //
 // Synchronous and cheap -- it sets a field the next turn reads, and does not
@@ -320,6 +329,86 @@ napi_value NativeMemoryBandwidth(napi_env env, napi_callback_info info) {
     return nullptr;
 }
 
+// The worker for nativePrefetch: read the whole file once, discarding what it
+// reads, so its pages are in the page cache before an engine maps it.
+//
+// Why a model is not simply loaded. Seen on a Mate 70 Pro+: a 2.74 GB model
+// from /storage/Users/currentUser took 15.4s to load at startup, and for 9.5s of
+// it the ArkTS thread sat in one IPC to the window manager, whose own log shows
+// the request handled at once. The system then killed the app for not answering
+// input (APP_INPUT_BLOCK).
+//
+// The likely reason, not yet confirmed by a stack: llama.cpp maps a GGUF with
+// MAP_POPULATE, so the mmap() call reads every page from storage under this
+// process's memory-map lock, and an IPC reply written into this process waits
+// for that lock. read() holds no such lock while it waits on storage, so the
+// slow part happens here, and the mmap() after it maps pages already in memory.
+void PrefetchWorker(std::string path, napi_threadsafe_function tsfn) {
+    const auto t0 = std::chrono::steady_clock::now();
+    std::string err;
+    long long total = 0;
+    const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        err = std::string("could not open ") + path + ": " + std::strerror(errno);
+    } else {
+        posix_fadvise(fd, 0, 0, POSIX_FADV_SEQUENTIAL);
+        std::vector<char> buf(4 << 20);
+        for (;;) {
+            const ssize_t n = read(fd, &buf[0], buf.size());
+            if (n > 0) {
+                total += n;
+                continue;
+            }
+            if (n < 0 && errno == EINTR) {
+                continue;
+            }
+            if (n < 0) {
+                err = std::string("could not read ") + path + ": " + std::strerror(errno);
+            }
+            break;
+        }
+        close(fd);
+    }
+    const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0).count();
+    OH_LOG_INFO(LOG_APP, "prefetch %{public}s: %{public}lld bytes in %{public}lld ms",
+                path.c_str(), total, ms);
+
+    StreamEvent* ev = new StreamEvent{err.empty() ? "end" : "error", err};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+}
+
+// nativePrefetch(path, onDone: (type, content) => void): void
+//
+// On a worker: it reads gigabytes. Fires once, 'end' or ('error', reason).
+napi_value NativePrefetch(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 2) {
+        napi_throw_error(env, nullptr, "nativePrefetch(path, onDone) needs two arguments");
+        return nullptr;
+    }
+    std::string path = ToUtf8(env, argv[0]);
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "yoai_prefetch", NAPI_AUTO_LENGTH, &work_name);
+    napi_threadsafe_function tsfn = nullptr;
+    if (napi_create_threadsafe_function(env, argv[1], nullptr, work_name, 0, 1,
+                                        nullptr, nullptr, nullptr, CallJs, &tsfn) != napi_ok) {
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+    std::thread(PrefetchWorker, std::move(path), tsfn).detach();
+    return nullptr;
+}
+
+// nativeLocalLoad(id, onDone: (type, content) => void): void
+//
+// Not a turn, so it takes no turn id and cannot be cancelled: a load either
+// finishes or fails, and abandoning one halfway leaves the file partly read for
+// no benefit. The callback fires exactly once.
 napi_value NativeLocalLoad(napi_env env, napi_callback_info info) {
     size_t argc = 2;
     napi_value argv[2] = {nullptr, nullptr};
@@ -346,7 +435,55 @@ napi_value NativeLocalLoad(napi_env env, napi_callback_info info) {
     return nullptr;
 }
 
-// nativeChat(provider, messagesJson, systemPrompt,
+void WarmWorker(std::string id, std::string prompt, napi_threadsafe_function tsfn) {
+    const int rc = yoai_local_warm(id.c_str(), prompt.c_str());
+    StreamEvent* ev = new StreamEvent{rc == 0 ? "end" : "error",
+                                      rc == 0 ? "" : "could not warm the prompt"};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+}
+
+// nativeLocalWarm(id, systemPrompt, onDone: (type, content) => void): void
+//
+// On a worker like a load: it prefills the system prompt, seconds on a long
+// one, and loads the model first if it is not resident. Fires once.
+napi_value NativeLocalWarm(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value argv[3] = {nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 3) {
+        napi_throw_error(env, nullptr, "nativeLocalWarm(id, systemPrompt, onDone) needs three arguments");
+        return nullptr;
+    }
+    std::string id     = ToUtf8(env, argv[0]);
+    std::string prompt = ToUtf8(env, argv[1]);
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "yoai_local_warm", NAPI_AUTO_LENGTH, &work_name);
+    napi_threadsafe_function tsfn = nullptr;
+    if (napi_create_threadsafe_function(env, argv[2], nullptr, work_name, 0, 1,
+                                        nullptr, nullptr, nullptr, CallJs, &tsfn) != napi_ok) {
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+    std::thread(WarmWorker, std::move(id), std::move(prompt), tsfn).detach();
+    return nullptr;
+}
+
+// nativeLocalForget(id: string): number  (0 = ok)
+//
+// Synchronous and cheap: it drops a cache and leaves the weights alone. What it
+// is for is in yoai.h -- a new conversation is an instruction, not something
+// to be inferred from a shorter prompt.
+napi_value NativeLocalForget(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    const std::string id = ArgUtf8(env, argc, argv, 0);
+    return Int32(env, yoai_local_forget(id.c_str()));
+}
+
+// nativeChat(provider, messagesJson, systemPrompt, grammar,
 //            onEvent: (type, content) => void): number   (turn id)
 napi_value NativeChat(napi_env env, napi_callback_info info) {
     size_t argc = 5;
@@ -405,6 +542,55 @@ napi_value NativeChatCancel(napi_env env, napi_callback_info info) {
         OH_LOG_INFO(LOG_APP, "chat turn %{public}d cancel requested", id);
     }
     return nullptr;
+}
+
+//------------------------------------------------------------------------------
+// Prompts
+//------------------------------------------------------------------------------
+//
+// The defaults live in the core, so this side keeps no copy: nativePromptGet
+// shows the default on the settings screen, nativePromptTurnSystem builds what a
+// turn and its warm-up send, and nativePrompts carries the text-axes grammar.
+
+// nativePrompts(): string  (the JSON array yoai_prompts returns)
+napi_value NativePrompts(napi_env env, napi_callback_info /*info*/) {
+    return Utf8(env, yoai_prompts());
+}
+
+// nativePromptGet(name: string): string | null  (null for an unknown name)
+napi_value NativePromptGet(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    const std::string name = ArgUtf8(env, argc, argv, 0);
+
+    const char* text = yoai_prompt_get(name.c_str(), nullptr);
+    if (text == nullptr) {
+        napi_value null_value = nullptr;
+        napi_get_null(env, &null_value);
+        return null_value;
+    }
+    return Utf8(env, text);
+}
+
+// nativePromptTurnSystem(base: string | null, reading: boolean): string
+//
+// Anything but a string is a user who never wrote a prompt, and gets the core's
+// default; '' is one who cleared it, and gets none.
+napi_value NativePromptTurnSystem(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+
+    napi_valuetype type = napi_undefined;
+    if (argc >= 1) napi_typeof(env, argv[0], &type);
+    const bool        given = type == napi_string;
+    const std::string base  = given ? ToUtf8(env, argv[0]) : std::string();
+
+    bool reading = false;
+    if (argc >= 2) napi_get_value_bool(env, argv[1], &reading);
+
+    return Utf8(env, yoai_prompt_turn_system(given ? base.c_str() : nullptr, reading ? 1 : 0));
 }
 
 //------------------------------------------------------------------------------
@@ -803,6 +989,15 @@ napi_value NativeTtsLoaded(napi_env env, napi_callback_info) {
     return out;
 }
 
+// nativeTtsUnload(): void
+//
+// The reading lane is a second engine over the same weights, so whichever is
+// loaded second unloads the other.
+napi_value NativeTtsUnload(napi_env /*env*/, napi_callback_info) {
+    yoai_tts_unload();
+    return nullptr;
+}
+
 // nativeTtsModelType(): string
 napi_value NativeTtsModelType(napi_env env, napi_callback_info) {
     return Utf8(env, yoai_tts_model_type());
@@ -1032,6 +1227,422 @@ napi_value NativeTtsLastSpeech(napi_env env, napi_callback_info) {
 }
 
 //------------------------------------------------------------------------------
+// Reading a reply aloud while it is still being written
+//------------------------------------------------------------------------------
+//
+// A second engine over the same weights as the speech lane above, so the app
+// loads one or the other -- see yoai.h. The calls that block run on a worker
+// and report through CallJs, like every other load here.
+//
+// The stream is the part that differs from desktop's binding.cpp, in two ways.
+// The samples cross as 16-bit, converted on the engine's thread, because an
+// AudioRenderer plays 16-bit and the conversion is cheaper here than per sample
+// in ArkTS. And the stream's terminal event arrives on the SAME callback as its
+// audio, not on one of its own: events posted through two threadsafe functions
+// are not ordered against each other, and a terminal event that overtook the
+// last audio would end the player's stream before that audio was pushed.
+
+// One reading-lane event crossing to the ArkTS thread; CallJsReader takes
+// ownership.
+struct ReaderEvent {
+    std::string               type;      // "audio" | "end" | "error"
+    std::string               content;   // stats JSON or the error; empty for audio
+    std::vector<std::int16_t> pcm;       // 24 kHz mono, only for "audio"
+    int                       sentence;  // which piece the samples belong to
+};
+
+// Runs ON THE ArkTS THREAD: (type, ArrayBuffer | string, sentence).
+void CallJsReader(napi_env env, napi_value js_callback, void* /*context*/, void* data) {
+    std::unique_ptr<ReaderEvent> ev(static_cast<ReaderEvent*>(data));
+    if (env == nullptr || js_callback == nullptr) return;   // env tearing down
+
+    napi_value undefined = nullptr;
+    napi_get_undefined(env, &undefined);
+
+    napi_value argv[3] = {nullptr, nullptr, nullptr};
+    napi_create_string_utf8(env, ev->type.c_str(), NAPI_AUTO_LENGTH, &argv[0]);
+    if (ev->type == "audio") {
+        const size_t bytes = ev->pcm.size() * sizeof(std::int16_t);
+        void* raw = nullptr;
+        if (napi_create_arraybuffer(env, bytes, &raw, &argv[1]) == napi_ok && bytes > 0) {
+            std::memcpy(raw, ev->pcm.data(), bytes);
+        }
+    } else {
+        napi_create_string_utf8(env, ev->content.c_str(), NAPI_AUTO_LENGTH, &argv[1]);
+    }
+    napi_create_int32(env, ev->sentence, &argv[2]);
+    napi_call_function(env, undefined, js_callback, 3, argv, nullptr);
+}
+
+// Called by the engines on their own threads, once per block, in reading order.
+// Blocking, so a slow ArkTS side applies backpressure rather than dropping a
+// block -- a dropped block is a gap in the middle of a word.
+int OnReaderAudio(const float* pcm, int n_samples, int sentence, int /*last*/,
+                  void* user_data) {
+    if (pcm == nullptr || n_samples <= 0) return 1;
+    napi_threadsafe_function tsfn = static_cast<napi_threadsafe_function>(user_data);
+    ReaderEvent* ev = new ReaderEvent{"audio", "", std::vector<std::int16_t>(n_samples), sentence};
+    for (int i = 0; i < n_samples; ++i) {
+        float v = pcm[i] * 32768.0f;
+        if (v > 32767.0f)  v = 32767.0f;
+        if (v < -32768.0f) v = -32768.0f;
+        ev->pcm[i] = static_cast<std::int16_t>(v);
+    }
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    return 1;
+}
+
+// Held between begin() and finish(): the stream's channel outlives the call
+// that created it.
+napi_threadsafe_function g_reader_events = nullptr;
+
+// **On a worker, because finish() blocks for the rest of the speech.** The
+// channel is released here rather than by the caller: this is the only place
+// that knows the stream is over.
+void ReaderFinishWorker(napi_threadsafe_function tsfn) {
+    const char* stats = yoai_reader_finish();
+    ReaderEvent* ev = stats != nullptr
+                          ? new ReaderEvent{"end", stats, {}, -1}
+                          : new ReaderEvent{"error", yoai_reader_last_error(), {}, -1};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+}
+
+void ReaderLoadWorker(std::string talker, std::string codec, int voices,
+                      napi_threadsafe_function tsfn) {
+    const int rc = yoai_reader_load(talker.c_str(), codec.c_str(), voices);
+    StreamEvent* ev = new StreamEvent{rc == 0 ? "end" : "error",
+                                      rc == 0 ? std::string() : std::string(yoai_reader_last_error())};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+}
+
+void ReaderReferenceWorker(std::string wav, napi_threadsafe_function tsfn) {
+    const int rc = yoai_reader_set_reference_voice(wav.c_str());
+    StreamEvent* ev = new StreamEvent{rc == 0 ? "end" : "error",
+                                      rc == 0 ? std::string() : std::string(yoai_reader_last_error())};
+    napi_call_threadsafe_function(tsfn, ev, napi_tsfn_blocking);
+    napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+}
+
+// nativeReaderAvailable(): boolean
+napi_value NativeReaderAvailable(napi_env env, napi_callback_info) {
+    napi_value out = nullptr;
+    napi_get_boolean(env, yoai_reader_available() != 0, &out);
+    return out;
+}
+
+// nativeReaderLoad(talker, codec, voices, onDone: (type, content) => void): void
+napi_value NativeReaderLoad(napi_env env, napi_callback_info info) {
+    size_t argc = 4;
+    napi_value argv[4] = {nullptr, nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 4) {
+        napi_throw_error(env, nullptr,
+                         "nativeReaderLoad(talker, codec, voices, onDone) needs four arguments");
+        return nullptr;
+    }
+
+    std::string talker = ToUtf8(env, argv[0]);
+    std::string codec  = ToUtf8(env, argv[1]);
+    std::int32_t voices = 1;
+    napi_get_value_int32(env, argv[2], &voices);
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "yoai_reader_load", NAPI_AUTO_LENGTH, &work_name);
+    napi_threadsafe_function tsfn = nullptr;
+    if (napi_create_threadsafe_function(env, argv[3], nullptr, work_name, 0, 1,
+                                        nullptr, nullptr, nullptr, CallJs, &tsfn) != napi_ok) {
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+    std::thread(ReaderLoadWorker, std::move(talker), std::move(codec),
+                static_cast<int>(voices), tsfn).detach();
+    return nullptr;
+}
+
+// nativeReaderLoaded(): boolean
+napi_value NativeReaderLoaded(napi_env env, napi_callback_info) {
+    napi_value out = nullptr;
+    napi_get_boolean(env, yoai_reader_loaded() != 0, &out);
+    return out;
+}
+
+// nativeReaderUnload(): void
+napi_value NativeReaderUnload(napi_env /*env*/, napi_callback_info) {
+    yoai_reader_unload();
+    return nullptr;
+}
+
+// nativeReaderModelType(): string
+napi_value NativeReaderModelType(napi_env env, napi_callback_info) {
+    return Utf8(env, yoai_reader_model_type());
+}
+
+// nativeReaderSpeakers(): string  (a JSON array)
+napi_value NativeReaderSpeakers(napi_env env, napi_callback_info) {
+    return Utf8(env, yoai_reader_speakers());
+}
+
+// nativeReaderTalkerHiddenSize(): number  (0 before a load)
+napi_value NativeReaderTalkerHiddenSize(napi_env env, napi_callback_info) {
+    return Int32(env, yoai_reader_talker_hidden_size());
+}
+
+// nativeReaderSetVoice(instruct: string): void
+napi_value NativeReaderSetVoice(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    yoai_reader_set_voice(ArgUtf8(env, argc, argv, 0).c_str());
+    return nullptr;
+}
+
+// nativeReaderSetSpeaker(name: string): void
+napi_value NativeReaderSetSpeaker(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    yoai_reader_set_speaker(ArgUtf8(env, argc, argv, 0).c_str());
+    return nullptr;
+}
+
+// nativeReaderSetReferenceVoice(wavPath, onDone: (type, content) => void): void
+//
+// On a worker, because extracting the embedding runs the model's speaker
+// encoder -- about 4.5 s for a 22-second reference on the desktop, longer on a
+// phone -- and on the ArkTS thread that would freeze the screen for as long.
+napi_value NativeReaderSetReferenceVoice(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 2) {
+        napi_throw_error(env, nullptr,
+                         "nativeReaderSetReferenceVoice(wavPath, onDone) needs two arguments");
+        return nullptr;
+    }
+    std::string path = ToUtf8(env, argv[0]);
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "yoai_reader_reference", NAPI_AUTO_LENGTH, &work_name);
+    napi_threadsafe_function tsfn = nullptr;
+    if (napi_create_threadsafe_function(env, argv[1], nullptr, work_name, 0, 1,
+                                        nullptr, nullptr, nullptr, CallJs, &tsfn) != napi_ok) {
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+    std::thread(ReaderReferenceWorker, std::move(path), tsfn).detach();
+    return nullptr;
+}
+
+// nativeReaderLoadReferenceEmbedding(spkPath: string): string  ('' or the reason)
+//
+// A .spk holds the embedding already extracted, so nothing runs and this
+// returns at once.
+napi_value NativeReaderLoadReferenceEmbedding(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    const std::string path = ArgUtf8(env, argc, argv, 0);
+    const int rc = yoai_reader_load_reference_embedding(path.c_str());
+    return Utf8(env, rc == 0 ? "" : yoai_reader_last_error());
+}
+
+// nativeReaderSaveReferenceEmbedding(spkPath: string): string  ('' or the reason)
+napi_value NativeReaderSaveReferenceEmbedding(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    const std::string path = ArgUtf8(env, argc, argv, 0);
+    const int rc = yoai_reader_save_reference_embedding(path.c_str());
+    return Utf8(env, rc == 0 ? "" : yoai_reader_last_error());
+}
+
+// nativeReaderSetSeed(seed: number): void
+napi_value NativeReaderSetSeed(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    std::int64_t seed = 23;
+    if (argc >= 1) napi_get_value_int64(env, argv[0], &seed);
+    yoai_reader_set_seed(static_cast<long long>(seed));
+    return nullptr;
+}
+
+// nativeReaderSetSplit(minChars, maxChars, tailChars): void. A field <= 0 is
+// left at the measured default.
+napi_value NativeReaderSetSplit(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value argv[3] = {nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    std::int32_t a = 0, b = 0, c = 0;
+    if (argc >= 1) napi_get_value_int32(env, argv[0], &a);
+    if (argc >= 2) napi_get_value_int32(env, argv[1], &b);
+    if (argc >= 3) napi_get_value_int32(env, argv[2], &c);
+    yoai_reader_set_split(a, b, c);
+    return nullptr;
+}
+
+// nativeReaderSetLaterSplit(minChars, maxChars): void. 0 and 0 turn it off.
+napi_value NativeReaderSetLaterSplit(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    std::int32_t a = 0, b = 0;
+    if (argc >= 1) napi_get_value_int32(env, argv[0], &a);
+    if (argc >= 2) napi_get_value_int32(env, argv[1], &b);
+    yoai_reader_set_later_split(a, b);
+    return nullptr;
+}
+
+// nativeReaderSetFirstStopChars(chars): void. 0 turns it off.
+napi_value NativeReaderSetFirstStopChars(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    std::int32_t n = 0;
+    if (argc >= 1) napi_get_value_int32(env, argv[0], &n);
+    yoai_reader_set_first_stop_chars(n);
+    return nullptr;
+}
+
+// nativeReaderSetClauseCuts(on: boolean): void
+napi_value NativeReaderSetClauseCuts(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    bool on = false;
+    if (argc >= 1) napi_get_value_bool(env, argv[0], &on);
+    yoai_reader_set_clause_cuts(on ? 1 : 0);
+    return nullptr;
+}
+
+// nativeReaderSetTemperature(temperature): void. Below 0 restores the default.
+napi_value NativeReaderSetTemperature(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    double t = -1.0;
+    if (argc >= 1) napi_get_value_double(env, argv[0], &t);
+    yoai_reader_set_temperature(static_cast<float>(t));
+    return nullptr;
+}
+
+// nativeReaderSetStreamingText(on: boolean): void
+napi_value NativeReaderSetStreamingText(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    bool on = false;
+    if (argc >= 1) napi_get_value_bool(env, argv[0], &on);
+    yoai_reader_set_streaming_text(on ? 1 : 0);
+    return nullptr;
+}
+
+// nativeReaderSetEosHold(frames): void. 0 stops at the first stop code.
+napi_value NativeReaderSetEosHold(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    std::int32_t n = 0;
+    if (argc >= 1) napi_get_value_int32(env, argv[0], &n);
+    yoai_reader_set_eos_hold(n);
+    return nullptr;
+}
+
+// nativeReaderSetWholeReply(on: boolean): void
+napi_value NativeReaderSetWholeReply(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    bool on = false;
+    if (argc >= 1) napi_get_value_bool(env, argv[0], &on);
+    yoai_reader_set_whole_reply(on ? 1 : 0);
+    return nullptr;
+}
+
+// nativeReaderSetThreads(n): void. For the NEXT load.
+napi_value NativeReaderSetThreads(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    std::int32_t n = 0;
+    if (argc >= 1) napi_get_value_int32(env, argv[0], &n);
+    yoai_reader_set_threads(n);
+    return nullptr;
+}
+
+// nativeReaderBegin(onEvent: (type, payload, sentence) => void): number
+//
+// 1 when the stream is open, 0 when the engine is not loaded or a stream is
+// already open. `onEvent` receives ("audio", ArrayBuffer of 16-bit samples,
+// piece) until nativeReaderFinish, and then exactly one ("end", stats JSON, -1)
+// or ("error", reason, -1).
+napi_value NativeReaderBegin(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 1) {
+        napi_throw_error(env, nullptr, "nativeReaderBegin(onEvent) needs one argument");
+        return nullptr;
+    }
+    if (g_reader_events != nullptr) {
+        return Int32(env, 0);   // a stream is already open
+    }
+
+    napi_value work_name = nullptr;
+    napi_create_string_utf8(env, "yoai_reader", NAPI_AUTO_LENGTH, &work_name);
+    if (napi_create_threadsafe_function(env, argv[0], nullptr, work_name, 0, 1,
+                                        nullptr, nullptr, nullptr, CallJsReader,
+                                        &g_reader_events) != napi_ok) {
+        g_reader_events = nullptr;
+        napi_throw_error(env, nullptr, "napi_create_threadsafe_function failed");
+        return nullptr;
+    }
+    if (yoai_reader_begin(OnReaderAudio, g_reader_events) != 1) {
+        napi_release_threadsafe_function(g_reader_events, napi_tsfn_release);
+        g_reader_events = nullptr;
+        return Int32(env, 0);
+    }
+    return Int32(env, 1);
+}
+
+// nativeReaderFeed(delta: string): number. Returns at once.
+napi_value NativeReaderFeed(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    const std::string delta = ArgUtf8(env, argc, argv, 0);
+    return Int32(env, yoai_reader_feed(delta.c_str()));
+}
+
+// nativeReaderFinish(): number
+//
+// No more text. 1 when a stream was open; its "end" or "error" follows on the
+// callback nativeReaderBegin was given, once the last sample is out. 0 when
+// none was open.
+napi_value NativeReaderFinish(napi_env env, napi_callback_info /*info*/) {
+    napi_threadsafe_function tsfn = g_reader_events;
+    if (tsfn == nullptr) {
+        return Int32(env, 0);
+    }
+    g_reader_events = nullptr;
+    std::thread(ReaderFinishWorker, tsfn).detach();
+    return Int32(env, 1);
+}
+
+// nativeReaderCancel(): void. The stream still has to be finished afterwards.
+napi_value NativeReaderCancel(napi_env /*env*/, napi_callback_info /*info*/) {
+    yoai_reader_cancel();
+    return nullptr;
+}
+
+// nativeReaderLastError(): string
+napi_value NativeReaderLastError(napi_env env, napi_callback_info) {
+    return Utf8(env, yoai_reader_last_error());
+}
+
+//------------------------------------------------------------------------------
 // Model bundles
 //------------------------------------------------------------------------------
 
@@ -1138,11 +1749,17 @@ napi_value Init(napi_env env, napi_value exports) {
         {"nativeProviders",      nullptr, NativeProviders,      nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeLocalAvailable", nullptr, NativeLocalAvailable, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeLocalSet",       nullptr, NativeLocalSet,       nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativePrefetch",       nullptr, NativePrefetch,       nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeLocalLoad",      nullptr, NativeLocalLoad,      nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeLocalSetThreads", nullptr, NativeLocalSetThreads, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeLocalForget",    nullptr, NativeLocalForget,    nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeLocalWarm",      nullptr, NativeLocalWarm,      nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeMemoryBandwidth", nullptr, NativeMemoryBandwidth, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChat",           nullptr, NativeChat,           nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeChatCancel",     nullptr, NativeChatCancel,     nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativePrompts",        nullptr, NativePrompts,        nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativePromptGet",      nullptr, NativePromptGet,      nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativePromptTurnSystem", nullptr, NativePromptTurnSystem, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeVoiceAvailable", nullptr, NativeVoiceAvailable, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeVoiceLoad",      nullptr, NativeVoiceLoad,      nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeVoiceLoaded",    nullptr, NativeVoiceLoaded,    nullptr, nullptr, nullptr, napi_default, nullptr},
@@ -1160,6 +1777,7 @@ napi_value Init(napi_env env, napi_value exports) {
         {"nativeTtsAvailable",   nullptr, NativeTtsAvailable,   nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsLoad",        nullptr, NativeTtsLoad,        nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsLoaded",      nullptr, NativeTtsLoaded,      nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeTtsUnload",      nullptr, NativeTtsUnload,      nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsModelType",   nullptr, NativeTtsModelType,   nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsSetVoice",    nullptr, NativeTtsSetVoice,    nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsSpeakers",    nullptr, NativeTtsSpeakers,    nullptr, nullptr, nullptr, napi_default, nullptr},
@@ -1177,6 +1795,33 @@ napi_value Init(napi_env env, napi_value exports) {
         {"nativeTtsSay",         nullptr, NativeTtsSay,         nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsLastSpeech",  nullptr, NativeTtsLastSpeech,  nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeTtsLastError",   nullptr, NativeTtsLastError,   nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderAvailable", nullptr, NativeReaderAvailable, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderLoad",     nullptr, NativeReaderLoad,     nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderLoaded",   nullptr, NativeReaderLoaded,   nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderUnload",   nullptr, NativeReaderUnload,   nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderModelType", nullptr, NativeReaderModelType, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSpeakers", nullptr, NativeReaderSpeakers, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderTalkerHiddenSize", nullptr, NativeReaderTalkerHiddenSize, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetVoice", nullptr, NativeReaderSetVoice, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetSpeaker", nullptr, NativeReaderSetSpeaker, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetReferenceVoice", nullptr, NativeReaderSetReferenceVoice, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderLoadReferenceEmbedding", nullptr, NativeReaderLoadReferenceEmbedding, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSaveReferenceEmbedding", nullptr, NativeReaderSaveReferenceEmbedding, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetSeed",  nullptr, NativeReaderSetSeed,  nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetSplit", nullptr, NativeReaderSetSplit, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetLaterSplit", nullptr, NativeReaderSetLaterSplit, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetFirstStopChars", nullptr, NativeReaderSetFirstStopChars, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetClauseCuts", nullptr, NativeReaderSetClauseCuts, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetTemperature", nullptr, NativeReaderSetTemperature, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetStreamingText", nullptr, NativeReaderSetStreamingText, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetEosHold", nullptr, NativeReaderSetEosHold, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetWholeReply", nullptr, NativeReaderSetWholeReply, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderSetThreads", nullptr, NativeReaderSetThreads, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderBegin",    nullptr, NativeReaderBegin,    nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderFeed",     nullptr, NativeReaderFeed,     nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderFinish",   nullptr, NativeReaderFinish,   nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderCancel",   nullptr, NativeReaderCancel,   nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"nativeReaderLastError", nullptr, NativeReaderLastError, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeBundleList",     nullptr, NativeBundleList,     nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nativeBundleExtract",  nullptr, NativeBundleExtract,  nullptr, nullptr, nullptr, napi_default, nullptr},
     };

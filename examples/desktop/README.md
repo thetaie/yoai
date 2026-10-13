@@ -327,4 +327,3 @@ npm run palettes
 - **Voice input and bundles.** They are in the C ABI and deliberately not bound
   in [native/src/binding.cpp](native/src/binding.cpp) — nothing here calls them
   yet, and an export nobody uses is a second place to keep correct.
-- **Markdown rendering.** Replies are shown as text, as they are on HarmonyOS.

@@ -20,8 +20,14 @@ oh_modules/
 # Hundreds of MB, and reproducible from vcpkg.json and a checkout of llama.cpp
 # or MNN respectively.
 /prebuilt
-# `llama`'s cached llama.cpp build tree, kept so a re-run is incremental.
+# `llama`'s, `qtts`'s and `mnn`'s cached build trees, kept so a re-run is
+# incremental.
 /.llama-build
+/.qtts-build
+/.mnn-build
+# The bundled voices, copied from the repository's speaker/ by
+# entry/hvigorfile.ts on every build. speaker/ is the copy kept in git.
+/entry/src/main/resources/rawfile/speaker
 /.clangd
 /.clang-format
 /.clang-tidy

@@ -315,6 +315,362 @@
     {
       "name": "settings_language_partial",
       "value": "Only Chinese and English are complete; the rest fall back for now."
+    },
+    {
+      "name": "settings_stop_playback",
+      "value": "Stop playback"
+    },
+    {
+      "name": "settings_page_prompt",
+      "value": "System prompt"
+    },
+    {
+      "name": "settings_prompt_default_short",
+      "value": "Built-in default"
+    },
+    {
+      "name": "settings_prompt_custom_short",
+      "value": "Your own"
+    },
+    {
+      "name": "settings_prompt_intro",
+      "value": "Sent with every turn, to say who the assistant is, how it speaks and what it avoids. Applies to every model, on this device or remote. Leave it empty to send none."
+    },
+    {
+      "name": "settings_prompt_hint",
+      "value": "For example: You are a concise, direct assistant."
+    },
+    {
+      "name": "settings_prompt_default",
+      "value": "This is the built-in default, and it changes with app updates."
+    },
+    {
+      "name": "settings_prompt_custom",
+      "value": "This is your own prompt."
+    },
+    {
+      "name": "settings_prompt_reset",
+      "value": "Restore default"
+    },
+    {
+      "name": "settings_page_speech",
+      "value": "Speech output"
+    },
+    {
+      "name": "settings_tts_intro",
+      "value": "Qwen3-TTS reads replies aloud on this device, without the network. It needs two GGUFs: a talker that writes audio codes, and the 12 Hz tokenizer that turns them into samples. It loads by itself once both are in place."
+    },
+    {
+      "name": "settings_tts_unavailable",
+      "value": "This build has no speech output. Rebuild with python examples/harmony/build.py qtts."
+    },
+    {
+      "name": "settings_tts_unavailable_short",
+      "value": "Not built in"
+    },
+    {
+      "name": "settings_tts_not_set",
+      "value": "Not set up"
+    },
+    {
+      "name": "settings_tts_mode",
+      "value": "Voice"
+    },
+    {
+      "name": "settings_tts_mode_base",
+      "value": "Cloned voice (Base)"
+    },
+    {
+      "name": "settings_tts_mode_custom",
+      "value": "Built-in speaker (CustomVoice)"
+    },
+    {
+      "name": "settings_tts_mode_note",
+      "value": "A cloned voice follows a reference recording, which can be your own. A built-in speaker is one of the model's own voices, which sound better today and can be given a reading style. Each uses its own talker model, and switching reloads the voice."
+    },
+    {
+      "name": "settings_tts_setup",
+      "value": "These model files are still missing:"
+    },
+    {
+      "name": "settings_tts_pick_existing",
+      "value": "Use files I have"
+    },
+    {
+      "name": "settings_tts_setup_note_app",
+      "value": "If you have them, select them all at once; each goes where its name says. If not, download them into the app's own storage: files already there are not fetched again, and the voice loads when they are done. They are deleted with the app."
+    },
+    {
+      "name": "settings_tts_setup_note_folder",
+      "value": "If you have them, select them all at once; each goes where its name says. If not, pick a folder to download them into: files already there are not fetched again, and the voice loads when they are done. The files stay where they are; the app never moves or deletes them."
+    },
+    {
+      "name": "settings_tts_talker",
+      "value": "Talker model (Base)"
+    },
+    {
+      "name": "settings_tts_talker_custom",
+      "value": "Talker model (CustomVoice)"
+    },
+    {
+      "name": "settings_tts_tokenizer",
+      "value": "Tokenizer model"
+    },
+    {
+      "name": "settings_tts_replace",
+      "value": "Replace"
+    },
+    {
+      "name": "settings_tts_not_picked",
+      "value": "Not chosen"
+    },
+    {
+      "name": "settings_tts_loading",
+      "value": "Loading…"
+    },
+    {
+      "name": "settings_tts_extracting",
+      "value": "Extracting the reference voice…"
+    },
+    {
+      "name": "settings_tts_loaded",
+      "value": "Loaded · %s"
+    },
+    {
+      "name": "settings_tts_pick_both",
+      "value": "Loads by itself once both model files are in place."
+    },
+    {
+      "name": "settings_tts_test",
+      "value": "Listen"
+    },
+    {
+      "name": "settings_tts_test_text",
+      "value": "Hello, I am YoAI. This voice is made on this device."
+    },
+    {
+      "name": "settings_tts_phone_note",
+      "value": "When synthesis is slower than playback (on a phone the 1.7B model takes about three times as long as the speech), a reply is synthesized first and then played in one piece."
+    },
+    {
+      "name": "settings_tts_speaker",
+      "value": "Speaker"
+    },
+    {
+      "name": "settings_tts_speaker_note",
+      "value": "The model's own speakers, listed once it is loaded."
+    },
+    {
+      "name": "settings_tts_style",
+      "value": "Reading style"
+    },
+    {
+      "name": "settings_tts_style_note",
+      "value": "A short instruction sent with each reading; it applies from the next one."
+    },
+    {
+      "name": "tts_style_none",
+      "value": "None"
+    },
+    {
+      "name": "tts_style_calm",
+      "value": "Calm"
+    },
+    {
+      "name": "tts_style_caring",
+      "value": "Caring"
+    },
+    {
+      "name": "tts_style_cheerful",
+      "value": "Cheerful"
+    },
+    {
+      "name": "tts_style_sorry",
+      "value": "Apologetic"
+    },
+    {
+      "name": "settings_tts_seed",
+      "value": "Sampling seed"
+    },
+    {
+      "name": "settings_tts_seed_note",
+      "value": "101 by default, chosen for its rhythm. A fixed seed reads the same text the same way every time; another seed changes the delivery. -1 draws a new one every time."
+    },
+    {
+      "name": "settings_tts_temperature",
+      "value": "Variation (sampling temperature)"
+    },
+    {
+      "name": "settings_tts_temperature_note",
+      "value": "%s by default (the model's own is 0.9). Higher varies pace and pitch more and sounds less read out; too high drops or misreads words. Applies from the next reading."
+    },
+    {
+      "name": "settings_tts_temperature_custom_note",
+      "value": "A built-in speaker always reads at the model's own 0.9; higher sounded less natural than a cloned voice. This setting applies to cloned voices only."
+    },
+    {
+      "name": "settings_reader_ref",
+      "value": "Reference voice"
+    },
+    {
+      "name": "settings_reader_ref_own",
+      "value": "Your own file"
+    },
+    {
+      "name": "settings_reader_ref_pick",
+      "value": "Choose a file"
+    },
+    {
+      "name": "settings_reader_ref_busy",
+      "value": "Working…"
+    },
+    {
+      "name": "settings_reader_ref_record",
+      "value": "Record"
+    },
+    {
+      "name": "settings_reader_ref_note",
+      "value": "The list holds the voices that come with the app, 01_female by default; the .spk for the model's size is chosen when it loads. You can also record your own voice, or choose a .wav recording (mono, 16-bit, 24 kHz) or a .spk vector. A recording is extracted once, in a few seconds, and read from a cache after that; a .spk must match the model's size (2048 values for 1.7B, 1024 for 0.6B)."
+    },
+    {
+      "name": "settings_reader_enabled",
+      "value": "Read replies aloud"
+    },
+    {
+      "name": "settings_reader_enabled_note",
+      "value": "On by default: a reply is read as it is written. When off, a message's Read aloud still works."
+    },
+    {
+      "name": "settings_reader_min",
+      "value": "Characters before speaking"
+    },
+    {
+      "name": "settings_reader_min_note",
+      "value": "0 means the default, 12. It decides how much the language model must write before the voice starts, not how fast the engine is. Higher sounds more natural (30 was preferred to 12); lower speaks sooner."
+    },
+    {
+      "name": "download_button",
+      "value": "Download (%s)"
+    },
+    {
+      "name": "download_connecting",
+      "value": "Connecting to the download server…"
+    },
+    {
+      "name": "download_downloading",
+      "value": "Downloading %s"
+    },
+    {
+      "name": "download_verifying",
+      "value": "Checking %s"
+    },
+    {
+      "name": "download_retrying",
+      "value": "Connection lost; retrying in %ds (attempt %d of %d)"
+    },
+    {
+      "name": "download_err_space",
+      "value": "Not enough storage space."
+    },
+    {
+      "name": "download_err_network",
+      "value": "The download failed: the server could not be reached after several retries. Downloading again resumes where it stopped."
+    },
+    {
+      "name": "download_err_checksum",
+      "value": "The downloaded file did not match its checksum and was deleted. Download it again."
+    },
+    {
+      "name": "download_err_disk",
+      "value": "The download location could not be written."
+    },
+    {
+      "name": "download_err_canceled",
+      "value": "Download canceled."
+    },
+    {
+      "name": "settings_local_offer",
+      "value": "No model on this device yet. You can download this one:"
+    },
+    {
+      "name": "settings_local_offer_note_app",
+      "value": "Qwen3.5 2B at 4 bits, twice as fast as the 4B. It goes into the app's own storage and is deleted with the app. When done it is added to the list, and selected and loaded if no other model is. To use a GGUF you already have, choose it below."
+    },
+    {
+      "name": "settings_local_offer_note_folder",
+      "value": "Qwen3.5 2B at 4 bits, twice as fast as the 4B. Pick a folder to download it into; it is not fetched again if it is already there. When done it is added to the list, and selected and loaded if no other model is. To use a GGUF you already have, choose it below."
+    },
+    {
+      "name": "action_speak",
+      "value": "Read aloud"
+    },
+    {
+      "name": "action_stop_speaking",
+      "value": "Stop"
+    },
+    {
+      "name": "chat_speak_failed",
+      "value": "Could not read aloud: %s"
+    },
+    {
+      "name": "chat_usage",
+      "value": "%s tokens in · %s out"
+    },
+    {
+      "name": "chat_usage_thinking",
+      "value": "%s thinking"
+    },
+    {
+      "name": "record_title",
+      "value": "Record your own voice"
+    },
+    {
+      "name": "record_script",
+      "value": "The weather is nice today, so I plan to take a walk by the lake this afternoon. The view there is lovely, with flowers in spring and birds in autumn. If you are free too, we could go together, stop at a small cafe for tea, and talk about how things have been. On the way back, remind me to buy some fruit."
+    },
+    {
+      "name": "record_note",
+      "value": "Read the passage above in your everyday voice, about 20 seconds. Somewhere quiet, with the phone a hand's width from your mouth. Play the take back before choosing Use this take."
+    },
+    {
+      "name": "record_denied",
+      "value": "No permission to use the microphone."
+    },
+    {
+      "name": "record_no_mic",
+      "value": "The microphone could not be opened."
+    },
+    {
+      "name": "record_start",
+      "value": "Start"
+    },
+    {
+      "name": "record_stop",
+      "value": "Stop"
+    },
+    {
+      "name": "record_again",
+      "value": "Again"
+    },
+    {
+      "name": "record_play",
+      "value": "Play back"
+    },
+    {
+      "name": "record_use",
+      "value": "Use this take"
+    },
+    {
+      "name": "record_saving",
+      "value": "Extracting…"
+    },
+    {
+      "name": "record_too_short",
+      "value": "Too short: record at least 10 seconds."
+    },
+    {
+      "name": "record_clipped",
+      "value": "The take is clipped. Move a little further from the microphone and record again."
     }
   ]
 }

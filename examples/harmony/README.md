@@ -17,14 +17,35 @@ entry/src/main/
     types/libyoai/          the .d.ts ArkTS imports
   ets/
     core/ChatEngine.ets       ChatMessage[] -> the native ABI and back
-    core/ModelStore.ets       configured models (preferences) + registry refill
+    core/ChatSettings.ets     the system prompt: the user's, or the core's default
+    core/ModelStore.ets       configured models (preferences) + registry refill,
+                              preload and prompt warm-up of the on-device model
     core/SecureKeyStore.ets   keys, in the platform's encrypted asset store
-    core/LocalModelStore.ets  picking a .gguf, and keeping it openable
+    core/LocalModelStore.ets  picking a .gguf or a folder, and keeping it openable
     core/SessionStore.ets     conversations, on this device only
+    core/Download.ets         model files from Hugging Face: resume, SHA-256, mirror
+    core/ModelDownloads.ets   the two downloads on offer, and where they go
+    core/ModelFiles.ets       which files those are, and a speech file's slot by name
+    core/SpeechStore.ets      speech output's settings and model files
+    core/Reader.ets           the voice: a reply read aloud as it is written
+    core/SpeechPlayer.ets     24 kHz PCM to an AudioRenderer, held when too slow
+    core/Speak.ets            a message's 朗读 and the settings test
+    core/Markdown.ets         a reply's markdown, parsed for streaming
     model/Provider.ets        built-in vendor records; ModelConfig
+    components/RichMessage.ets   a reply rendered from its markdown
+    components/ReferenceRecorder.ets   recording a reference voice
     pages/Index.ets           the chat screen
-    pages/Settings.ets        models, keys, on-device models, theme
+    pages/Settings*.ets       models, system prompt, speech output, interface
+    pages/VoiceDebug.ets      /asr: recognition, prosody, a voice loop, timed
+    pages/TtsDebug.ets        /tts: one speech engine, benchmarked
 ```
+
+Several files are ports of the desktop client's or the other way round, and
+are meant to stay so: where one gains a rule the other should.
+`examples/desktop/src/main/models.ts` is `ModelStore.ets`, `chatEngine.ts` is
+`ChatEngine.ets`, `App.tsx` is `Index.ets`, `chat.ts` is `ChatSettings.ets`,
+`download.ts` is `Download.ets`, `reader.ts` (main and renderer) is
+`Reader.ets`, and `audio.ts` is `SpeechPlayer.ets`.
 
 ### Where a key lives
 
@@ -58,17 +79,21 @@ One script builds everything, selected by token — `python build.py`
 | `python build.py` | everything, in the order below — the default |
 | `python build.py deps` | the C++ dependencies — the required part |
 | `python build.py llama` | the on-device engine (see below) |
+| `python build.py qtts` | speech output, which reads replies aloud |
 | `python build.py hap` | compile and sign the app |
-| `python build.py all` | the same three the bare command does, named explicitly |
+| `python build.py all` | deps, llama, qtts and hap, each named, so a missing checkout stops it |
 | `python build.py --help` | every token, including `clean` and `arch=` |
 
 Tokens compose, so `python build.py deps hap` is a full rebuild of what changed most
-days — and it is also how you build the app *without* the on-device engine.
+days — and it is also how you build the app *without* the engines.
 
-The bare command includes `llama` because on-device chat is part of the app, not
-an opt-in lane. It is the expensive part of a first run, though: it needs a
-llama.cpp checkout you clone yourself (~200 MB) and a few minutes of
-cross-compile, and it adds about 4.3 MiB to `libyoai.so`.
+The bare command includes `llama` and `qtts` because on-device chat and speech
+output are part of the app, not opt-in lanes, as on the desktop. They are the
+expensive part of a first run: the llama.cpp and qwentts.cpp checkouts are
+fetched into `../../third/` when they are not there (git and the network,
+once), and each is a few minutes of cross-compile. A lane whose checkout is
+missing, or differs from what `third/manifest.json` pins, is left out of a bare
+build with a line saying so; name it to build it anyway.
 
 No ABI is named above because there is only one that matters: HarmonyOS NEXT is
 64-bit ARM throughout, so `arm64-v8a` is both the script's default and the only
@@ -117,10 +142,8 @@ DevEco ships at `tools/node`.
 
 ## On-device models
 
-Built by default, but the one thing the script will not fetch for you is
-llama.cpp itself — clone it once with `python ../../third/sync.py clone
-llama.cpp` (into the repo's `third/`, or set `LLAMA_SRC`) and the
-bare `python build.py` covers the rest. To build only this part:
+Built by default; a bare `python build.py` fetches llama.cpp into the repo's
+`third/` when it is not there (or set `LLAMA_SRC`). To build only this part:
 
 ```
 python build.py llama
@@ -160,6 +183,100 @@ picked it and fails on every launch after, with the file still sitting there.
 That needs `ohos.permission.FILE_ACCESS_PERSIST` in `module.json5`, or
 `persistPermission` answers 201. Models whose file has moved are dropped from the
 list at that point, rather than being left to fail at load time.
+
+The selected on-device model is read at startup and when it is switched to,
+not on the first message; the models page shows how that went beside it. A new
+conversation drops the model's KV cache (`nativeLocalForget`), and the system
+prompt is prefilled ahead of the first turn (`nativeLocalWarm`).
+
+Every model file is read once with plain `read()` before an engine maps it
+(`nativePrefetch`). Without that, a 2.74 GB model loaded at startup from
+`/storage/Users/currentUser` froze the ArkTS thread for 9.5s on a Mate 70 Pro+,
+and the system killed the app for not answering input (`APP_INPUT_BLOCK`). The
+thread sat in one IPC that the window manager had already handled. The likely
+cause, not yet confirmed by a stack, is llama.cpp's `mmap(MAP_POPULATE)` reading
+the whole file under the process's memory-map lock, which the IPC reply needs.
+With the pages already in memory, the mapping is quick.
+
+## Speech output
+
+`python build.py qtts`, part of a bare build, assembles `prebuilt/qtts-sdk/<abi>/`,
+and its presence turns the lane on, like llama's. The app then speaks through
+one lane, the core's reader: a reply is read aloud as the model writes it, a
+message's 朗读 reads that message, and the settings page has a test. It is the
+desktop's reader with the desktop's settings — the reasons for each are beside
+the constants in `core/Reader.ets`.
+
+What differs on a phone is speed. The 1.7B talker measured 3.15–3.64 RTF on a
+Kirin 9020 (the root README's table): synthesis takes about three times as long
+as the speech. `core/SpeechPlayer.ets` streams a producer only when it keeps
+ahead of playback, so here a reply is synthesized first and then played in one
+piece. A faster device streams by itself.
+
+The settings page sets it up: Base (a cloned voice) or CustomVoice (a built-in
+speaker, with a reading style); the two files that mode needs; for Base, the
+voice every piece is anchored to — `01_female` from the repository's
+`speaker/`, a recording made on the page, or a `.wav` or `.spk` the user
+picks. `entry/hvigorfile.ts` copies the `.spk` files of `speaker/` into
+`rawfile/speaker/` on every build; the copy is not tracked.
+
+The voice loads by itself at startup once both files are there, and again after
+any change on that page. Only the ArkTS thread calls the engine, and a load or
+a voice extraction holds the engine's lock for seconds, so `Reader.ets` keeps a
+mirror of the engine's state and hands it settings only at load and before a
+stream. `/tts` loads the other speech engine over the same weights, and the
+chat screen loads the voice again when it is shown.
+
+## First run
+
+The app opens with nothing configured. Any one of these is enough to start,
+all under 设置:
+
+1. **A remote model.** 模型 → 添加模型, pick a vendor, paste its key.
+2. **A model on this device.** 模型 → 下载 fetches `Qwen3.5-2B-Q4_K_M.gguf`,
+   adds it, and selects it when nothing else is. 选择 GGUF 文件 uses one already
+   on the device.
+3. **Speech output.** 语音输出 → 下载 fetches the files the voice mode needs, and
+   选择已有文件 uses ones already on the device — all of them in one pick, each
+   placed by its name.
+
+The phone is offered the 2B where the desktop offers the 4B: the reply is read
+as it is written, so the writer's speed is heard, and the 2B decodes at about
+twice the 4B's rate.
+
+| File | Size | For |
+|---|---|---|
+| `Qwen3.5-2B-Q4_K_M.gguf` | 1.28 GB | on-device chat |
+| `qwen-talker-1.7b-base-Q4_K_M.gguf` | 1.22 GB | speech, 克隆音色（Base） |
+| `qwen-talker-1.7b-customvoice-Q4_K_M.gguf` | 1.18 GB | speech, 内置说话人（CustomVoice） |
+| `qwen-tokenizer-12hz-Q8_0.gguf` | 291 MB | speech, either mode |
+
+Each is pinned to a commit with its SHA-256 in `core/ModelFiles.ets`, and the
+desktop README has the download URLs for fetching them by hand.
+
+### Where a download goes
+
+A phone downloads into the app's own storage, `filesDir/models`: the picker's
+folder mode is for 2-in-1 devices only. Those files are out of the user's sight
+and are deleted with the app. A 2-in-1 device asks for a folder, as the
+desktop does, and keeps a read-write grant for it.
+
+The rest is the desktop's download (`examples/desktop/README.md`, "How the
+speech download works"): a file is written as `NAME.part` and renamed only once
+its SHA-256 matches; a break or 30s of silence is retried after 5, 15 and 30s,
+resuming the `.part`; 取消 deletes it; huggingface.co and hf-mirror.com are
+asked at once and the first to answer is used. It runs in the app's process, so
+keep the app in front: a phone that suspends it breaks the transfer off, and the
+next download resumes it.
+
+## Replies
+
+A reply is rendered from its markdown (`core/Markdown.ets`,
+`components/RichMessage.ets`, from the mirobody project's HarmonyOS client):
+headings, lists, tables, code, quotes and links. Images are shown as their alt
+text and never fetched, a link opens in the browser only for http, https or
+mailto, and math is shown as its TeX source. The last reply carries its token
+count.
 
 ## Signing
 

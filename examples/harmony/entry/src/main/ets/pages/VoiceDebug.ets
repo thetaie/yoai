@@ -35,6 +35,7 @@ import { TextAxes, TextAxesReader, TextAxesResult } from '../core/TextAxes';
 import { SpeakTiming, SystemTts, Voice } from '../core/SystemTts';
 import { ChainPrompt, DEFAULT_CHAIN_PROMPT } from '../core/ChainPrompt';
 import { TextReaderTts } from '../core/TextReaderTts';
+import { Speak } from '../core/Speak';
 
 //------------------------------------------------------------------------------
 // The shape the core returns (src/yoai.h, yoai_voice_analyze)
@@ -298,8 +299,10 @@ struct VoiceDebug {
     // models are sold on this; here it is the queue already being drainable.
     //
     // Before the permission check on purpose: silence should follow the tap,
-    // not the outcome of a dialog the person may take seconds over.
+    // not the outcome of a dialog the person may take seconds over. The app's
+    // own voice too, which may still be reading a reply from the chat.
     SystemTts.stop();
+    Speak.stop();
 
     if (!await VoiceRecorder.requestPermission(this.ctx())) {
       this.note = 'microphone permission denied';
@@ -715,46 +718,32 @@ struct VoiceDebug {
     await SystemTts.init();
 
     this.warming = 'reading the model…';
-    // 'end' on success, not 'ok' -- nativeLocalLoad reuses the chat callback's
-    // vocabulary. Guessing 'ok' here cost a round trip: the load itself worked,
-    // so the model was warm and the log showed `load 0ms`, but priming never
-    // ran and the first recording still paid 2.35 s of prefill.
-    yoai.nativeLocalLoad(provider, (type: string, content: string) => {
-      if (type === 'error') {
-        // A remote provider, or no on-device engine in this build. Neither is
-        // an error here: the chain still runs, it just pays the prefill.
-        this.warming = '';
-        return;
-      }
-      if (type === 'end') {
-        this.primeCache(provider);
-      }
-    });
+    // Through the app's own preload, which reads the file before mapping it --
+    // loaded straight, a large model froze this thread until the system killed
+    // the app -- and which the chat screen may already have started.
+    if (!await ModelStore.autoPreload(this.ctx())) {
+      // A remote provider, or no on-device engine in this build. Neither is an
+      // error here: the chain still runs, it just pays the prefill.
+      this.warming = '';
+      return;
+    }
+    this.primeCache(provider);
   }
 
   /**
-   * Fill the KV with the system prompt, by asking something and throwing the
-   * answer away.
+   * Fill the KV with the system prompt, ahead of the first recording.
    *
-   * There is no prefill-only entry point -- yoai_chat always generates --
-   * so this costs a handful of decoded tokens. It buys the 2.4 s that the first
-   * real recording would otherwise spend prefilling a prompt that never changes.
-   *
-   * What survives is the prefix up to where the user's text begins, which is
-   * exactly what the next turn needs: the measured 102-of-115 reuse came from
-   * precisely this shape, a previous turn with the same system prompt and a
-   * different transcript.
+   * It buys the 2.4 s that the first real recording would otherwise spend
+   * prefilling a prompt that never changes. This used to ask the model
+   * something and throw the answer away, because there was no prefill-only
+   * entry point; yoai_local_warm is that entry point, and it decodes nothing.
    */
   private primeCache(provider: string): void {
     this.warming = 'warming the prompt…';
-    const wire: string = JSON.stringify([{ role: 'user', content: '嗯' }]);
-    yoai.nativeChat(provider, wire, this.chainPrompt, '',
-      (type: string, content: string) => {
-        if (type === 'end' || type === 'error') {
-          this.warming = '';
-          this.warmed = true;
-        }
-      });
+    yoai.nativeLocalWarm(provider, this.chainPrompt, (type: string, content: string) => {
+      this.warming = '';
+      this.warmed = type === 'end';
+    });
   }
 
   /**

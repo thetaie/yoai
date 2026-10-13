@@ -10,23 +10,51 @@
  * The core's registry is process memory, so it is empty after every cold start.
  * syncToCore() is what refills it, and is the reason this class knows about the
  * native module at all.
+ *
+ * examples/desktop/src/main/models.ts is a port of this file and is meant to
+ * stay one: where one gains a rule the other should.
  */
 import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
 import hilog from '@ohos.hilog';
 import yoai from 'libyoai.so';
 import { ModelConfig, isLocal, modelId } from '../model/Provider';
+import { ChatSettings } from './ChatSettings';
 import { LocalModelStore } from './LocalModelStore';
+import { Reader } from './Reader';
 import { SecureKeyStore } from './SecureKeyStore';
 
 const STORE_NAME: string = 'models';
 const KEY_LIST: string = 'configured';
 const KEY_ACTIVE: string = 'active';
 
+/** Bumped whenever a preload changes state, so a screen showing it re-reads. */
+export const LOAD_REV: string = 'modelLoadRev';
+
+/** An on-device model's weights: being read, resident, or refused with a reason. */
+export interface ModelLoadState {
+  state: string;     // 'loading' | 'ready' | 'failed'
+  reason: string;    // why it failed; '' otherwise
+}
+
+function log(msg: string): void {
+  hilog.info(0x0000, 'yoai', '%{public}s', msg);
+}
+
 export class ModelStore {
   private static store: preferences.Preferences | null = null;
 
-  private static async prefs(ctx: common.UIAbilityContext): Promise<preferences.Preferences> {
+  /**
+   * How each automatic preload went, for the models page to show beside the
+   * model. Only models a preload was started for appear: the active one, at
+   * startup and when it is switched to.
+   */
+  private static loadState: Map<string, ModelLoadState> = new Map<string, ModelLoadState>();
+
+  /** Loads in flight, by id, so a second ask waits on the first instead of loading twice. */
+  private static inflight: Map<string, Promise<boolean>> = new Map<string, Promise<boolean>>();
+
+  private static async prefs(ctx: common.Context): Promise<preferences.Preferences> {
     if (ModelStore.store === null) {
       ModelStore.store = await preferences.getPreferences(ctx, STORE_NAME);
     }
@@ -34,7 +62,7 @@ export class ModelStore {
   }
 
   /** Every model the user has configured, in the order they added them. */
-  static async list(ctx: common.UIAbilityContext): Promise<ModelConfig[]> {
+  static async list(ctx: common.Context): Promise<ModelConfig[]> {
     const p: preferences.Preferences = await ModelStore.prefs(ctx);
     const raw: string = await p.get(KEY_LIST, '[]') as string;
     try {
@@ -47,7 +75,7 @@ export class ModelStore {
     }
   }
 
-  private static async write(ctx: common.UIAbilityContext, list: ModelConfig[]): Promise<void> {
+  private static async write(ctx: common.Context, list: ModelConfig[]): Promise<void> {
     const p: preferences.Preferences = await ModelStore.prefs(ctx);
     await p.put(KEY_LIST, JSON.stringify(list));
     await p.flush();
@@ -58,8 +86,13 @@ export class ModelStore {
    * immediately -- without this the user would have to restart the app after
    * adding a model, which is the kind of thing nobody reports as a bug because
    * they assume it is how the app works.
+   *
+   * Selected when nothing is. Adding a second model while one is selected must
+   * not silently move the conversation to it, but the first one ever added has
+   * to be the selection, or the app reports having no model while the picker
+   * shows that model's name.
    */
-  static async add(ctx: common.UIAbilityContext, cfg: ModelConfig): Promise<void> {
+  static async add(ctx: common.Context, cfg: ModelConfig): Promise<void> {
     const list: ModelConfig[] = await ModelStore.list(ctx);
     const next: ModelConfig[] = [];
     for (const m of list) {
@@ -69,11 +102,14 @@ export class ModelStore {
     }
     next.push(cfg);
     await ModelStore.write(ctx, next);
+    if ((await ModelStore.activeId(ctx)).length === 0) {
+      await ModelStore.setActiveId(ctx, cfg.id);
+    }
     await ModelStore.register(cfg);
   }
 
   /** Forget one model. Its vendor's key is left alone -- other models may share it. */
-  static async remove(ctx: common.UIAbilityContext, id: string): Promise<void> {
+  static async remove(ctx: common.Context, id: string): Promise<void> {
     const list: ModelConfig[] = await ModelStore.list(ctx);
     const next: ModelConfig[] = [];
     for (const m of list) {
@@ -87,6 +123,8 @@ export class ModelStore {
     }
     await ModelStore.write(ctx, next);
     yoai.nativeProviderRemove(id);
+    ModelStore.loadState.delete(id);
+    ModelStore.bump();
 
     // The selection may have just pointed at it.
     const active: string = await ModelStore.activeId(ctx);
@@ -100,7 +138,7 @@ export class ModelStore {
    * settings screen calls "remove this service": leaving models behind whose
    * key is gone would list entries that can only fail.
    */
-  static async removeVendor(ctx: common.UIAbilityContext, vendorId: string): Promise<void> {
+  static async removeVendor(ctx: common.Context, vendorId: string): Promise<void> {
     const list: ModelConfig[] = await ModelStore.list(ctx);
     for (const m of list) {
       if (m.vendorId === vendorId) {
@@ -111,12 +149,12 @@ export class ModelStore {
   }
 
   /** The model the composer is pointed at, or '' when nothing is configured. */
-  static async activeId(ctx: common.UIAbilityContext): Promise<string> {
+  static async activeId(ctx: common.Context): Promise<string> {
     const p: preferences.Preferences = await ModelStore.prefs(ctx);
     return await p.get(KEY_ACTIVE, '') as string;
   }
 
-  static async setActiveId(ctx: common.UIAbilityContext, id: string): Promise<void> {
+  static async setActiveId(ctx: common.Context, id: string): Promise<void> {
     const p: preferences.Preferences = await ModelStore.prefs(ctx);
     await p.put(KEY_ACTIVE, id);
     await p.flush();
@@ -170,10 +208,11 @@ export class ModelStore {
    * has moved or gone are dropped from the stored list here -- the single place
    * that owns that list, so an entry cannot vanish from two directions at once.
    */
-  static async syncToCore(ctx: common.UIAbilityContext): Promise<number> {
+  static async syncToCore(ctx: common.Context): Promise<number> {
     yoai.nativeProviderClear();
 
     let list: ModelConfig[] = await ModelStore.list(ctx);
+    let active: string = await ModelStore.activeId(ctx);
 
     const locals: ModelConfig[] = [];
     for (const m of list) {
@@ -194,7 +233,17 @@ export class ModelStore {
                    gone.length);
         await ModelStore.write(ctx, kept);
         list = kept;
+        if (gone.includes(active)) {
+          active = '';
+        }
       }
+    }
+
+    // Heal a selection that never got made, or that pointed at a model just
+    // dropped. add() selects now, but a store written before it did has models
+    // and an empty `active`, and nothing else would ever fill it.
+    if (active.length === 0 && list.length > 0) {
+      await ModelStore.setActiveId(ctx, list[list.length - 1].id);
     }
 
     let ready: number = 0;
@@ -205,6 +254,145 @@ export class ModelStore {
     }
     hilog.info(0x0000, 'yoai', 'registered %{public}d of %{public}d models', ready, list.length);
     return ready;
+  }
+
+  //----------------------------------------------------------------------------
+  // On-device engines
+  //----------------------------------------------------------------------------
+
+  /** A snapshot of how each preload went, by model id. */
+  static loadStates(): Map<string, ModelLoadState> {
+    return new Map<string, ModelLoadState>(ModelStore.loadState);
+  }
+
+  private static bump(): void {
+    const rev: number | undefined = AppStorage.get<number>(LOAD_REV);
+    AppStorage.setOrCreate(LOAD_REV, (rev === undefined ? 0 : rev) + 1);
+  }
+
+  /**
+   * Read the selected on-device model's weights now, without being asked.
+   *
+   * Only the ACTIVE one. Every configured local model is gigabytes, and loading
+   * a model nobody selected would spend the memory of a conversation that is not
+   * happening. The first turn pays for the weights otherwise, which is the one
+   * moment the user is already waiting.
+   *
+   * Resolves to whether the active model is resident -- true at once when it
+   * already is, false for a remote model or one that would not load -- so a
+   * caller that needs the weights can wait for them; the screens do not, and
+   * read the outcome from loadStates().
+   */
+  static async autoPreload(ctx: common.Context): Promise<boolean> {
+    const id: string = await ModelStore.activeId(ctx);
+    let cfg: ModelConfig | undefined = undefined;
+    for (const m of await ModelStore.list(ctx)) {
+      if (m.id === id) {
+        cfg = m;
+      }
+    }
+    if (cfg === undefined || !isLocal(cfg)) {
+      return false;
+    }
+    const st: ModelLoadState | undefined = ModelStore.loadState.get(id);
+    if (st !== undefined && st.state === 'ready') {
+      return true;
+    }
+    const running: Promise<boolean> | undefined = ModelStore.inflight.get(id);
+    if (running !== undefined) {
+      return running;
+    }
+    const load: Promise<boolean> = ModelStore.preload(ctx, id, cfg.modelPath ?? '');
+    ModelStore.inflight.set(id, load);
+    return load;
+  }
+
+  /**
+   * The file read once first, then the load. Mapped straight from user storage,
+   * a 2.74 GB model froze the ArkTS thread for 9.5s and the system killed the
+   * app; see nativePrefetch.
+   */
+  private static async preload(ctx: common.Context, id: string, path: string): Promise<boolean> {
+    log('preloading ' + id);
+    ModelStore.loadState.set(id, { state: 'loading', reason: '' });
+    ModelStore.bump();
+    if (path.length > 0) {
+      await LocalModelStore.prefetch(path);
+    }
+    const ok: boolean = await new Promise<boolean>((resolve: (ok: boolean) => void) => {
+      yoai.nativeLocalLoad(id, (type: string, content: string) => {
+        if (type === 'end') {
+          log(id + ' is resident');
+          ModelStore.loadState.set(id, { state: 'ready', reason: '' });
+        } else {
+          hilog.error(0x0000, 'yoai', '%{public}s would not preload: %{public}s', id, content);
+          ModelStore.loadState.set(id, {
+            state: 'failed',
+            reason: content.length > 0 ? content : 'the model would not load'
+          });
+        }
+        ModelStore.bump();
+        resolve(type === 'end');
+      });
+    });
+    ModelStore.inflight.delete(id);
+    if (ok) {
+      ModelStore.warmActive(ctx);
+    }
+    return ok;
+  }
+
+  /**
+   * Compute the active on-device model's prompt front now: the system prompt the
+   * next turn will be sent with, from ChatSettings.turnPrompt as the turn takes
+   * it.
+   *
+   * The first turn of a conversation otherwise prefills it while someone waits
+   * -- measured at 3.5s on the desktop for a 236-token prompt, before the
+   * reply's first word. Called whenever that front would otherwise be missing or
+   * stale: after the weights load, after a new conversation drops the cache,
+   * when the system prompt changes, and when the voice comes up or goes, which
+   * adds or removes the spoken-style paragraph.
+   *
+   * Fire and forget. A turn that arrives meanwhile waits for it in the core and
+   * then reuses it; one that finds a different prompt reuses what they share.
+   */
+  static async warmActive(ctx: common.Context): Promise<void> {
+    const id: string = await ModelStore.activeId(ctx);
+    const st: ModelLoadState | undefined = ModelStore.loadState.get(id);
+    if (st === undefined || st.state !== 'ready') {
+      return;
+    }
+    const prompt: string = await ChatSettings.turnPrompt(ctx, Reader.ready());
+    yoai.nativeLocalWarm(id, prompt, (type: string, content: string) => {
+      if (type !== 'end') {
+        hilog.warn(0x0000, 'yoai', '%{public}s: the prompt was not warmed: %{public}s', id, content);
+      }
+    });
+  }
+
+  /**
+   * Forget every on-device model's conversation. The weights stay resident.
+   *
+   * Called when a new conversation starts, and not once per turn: a turn already
+   * carries its whole transcript, so the only moment the cache holds something
+   * the next prompt has no business seeing is this one.
+   *
+   * All of them rather than the active one, because switching models is a way
+   * to leave a conversation behind too, and the one being left is the one that
+   * still has it.
+   */
+  static async forgetAll(ctx: common.Context): Promise<number> {
+    let cleared: number = 0;
+    for (const cfg of await ModelStore.list(ctx)) {
+      if (isLocal(cfg) && yoai.nativeLocalForget(cfg.id) === 0) {
+        cleared++;
+      }
+    }
+    // The system prompt went with the conversation; put it back before the new
+    // conversation's first turn needs it.
+    ModelStore.warmActive(ctx);
+    return cleared;
   }
 
   /** Which vendors have a key stored. Drives the settings screen's state. */

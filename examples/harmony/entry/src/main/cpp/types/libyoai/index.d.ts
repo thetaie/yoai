@@ -84,6 +84,21 @@ export const nativeLocalSet: (
 ) => number;
 
 /**
+ * Read a file once, on a worker, so its pages are in the page cache before an
+ * engine maps it. `onDone` fires once: 'end', or ('error', reason).
+ *
+ * Call it before nativeLocalLoad and nativeReaderLoad. Loading a 2.74 GB model
+ * straight from user storage froze the ArkTS thread for 9.5s and the system
+ * killed the app for not answering input; the likely cause is llama.cpp reading
+ * the file inside mmap() under this process's memory-map lock. Read here first,
+ * the mapping finds the pages in memory. See PrefetchWorker in napi_init.cpp.
+ */
+export const nativePrefetch: (
+  path: string,
+  onDone: (type: string, content: string) => void
+) => void;
+
+/**
  * Read one on-device model's weights now, on a worker thread, so the first turn
  * does not pay for them. `onDone` fires exactly once: 'end' when the model is
  * resident, 'error' with a reason when it will not load.
@@ -109,6 +124,31 @@ export const nativeLocalLoad: (
  * read off the log as pairs of lines.
  */
 export const nativeLocalSetThreads: (id: string, threads: number) => number;
+
+/**
+ * Forget the conversation an on-device model holds: drop its KV cache, keep the
+ * weights. Returns 0, or 1 when the id is not an on-device model.
+ *
+ * Call it when a new conversation starts. A turn replays the whole transcript,
+ * so this is not what makes the next prompt correct -- it is what stops the
+ * last conversation being in the cache underneath it. See src/yoai.h on
+ * yoai_local_forget.
+ */
+export const nativeLocalForget: (id: string) => number;
+
+/**
+ * Prefill the front every turn with `systemPrompt` shares, now, on a worker, so
+ * the first turn does not pay for it while someone waits. Loads the model first
+ * when it is not resident. `onDone` fires once: 'end', or 'error' with a reason.
+ *
+ * Pass exactly what the next turn will send -- nativePromptTurnSystem builds it
+ * -- or the work is wasted.
+ */
+export const nativeLocalWarm: (
+  id: string,
+  systemPrompt: string,
+  onDone: (type: string, content: string) => void
+) => void;
 
 /**
  * How fast this device reads memory, with no language model involved.
@@ -170,6 +210,31 @@ export const nativeChat: (
  * interrupted sooner. Unknown or finished ids are a no-op.
  */
 export const nativeChatCancel: (turnId: number) => void;
+
+//------------------------------------------------------------------------------
+// Prompts
+//------------------------------------------------------------------------------
+
+/**
+ * Every prompt the core keeps, as a JSON array of
+ * `{name, description, arguments, text, grammar, overridden}`. `grammar` is the
+ * GBNF a prompt's reply must follow, '' for prose -- the text-axes prompt is
+ * the one that has one.
+ */
+export const nativePrompts: () => string;
+
+/** One prompt's text, or null for an unknown name. 'system' is the default system prompt. */
+export const nativePromptGet: (name: string) => string | null;
+
+/**
+ * The system prompt one turn is sent with: `base`, the spoken-style paragraph
+ * after it when `reading`, and the core's closing line. null is a user who never
+ * wrote a prompt and gets the core's default; '' is one who cleared it.
+ *
+ * Pass the same result to nativeChat and nativeLocalWarm, so the warm-up is the
+ * prompt the turn sends.
+ */
+export const nativePromptTurnSystem: (base: string | null, reading: boolean) => string;
 
 //------------------------------------------------------------------------------
 // Voice
@@ -381,6 +446,12 @@ export const nativeTtsLoad: (
 /** Whether a TTS model is resident right now. */
 export const nativeTtsLoaded: () => boolean;
 
+/**
+ * Drop the weights. The reading lane below is a second engine over the same
+ * files, so whichever is loaded second unloads the other.
+ */
+export const nativeTtsUnload: () => void;
+
 /** 'voice_design', 'base', 'custom_voice', or '' with nothing loaded. */
 export const nativeTtsModelType: () => string;
 
@@ -536,6 +607,110 @@ export const nativeTtsLastSpeech: () => ArrayBuffer;
 
 /** Why the last load or say failed. '' after a success. */
 export const nativeTtsLastError: () => string;
+
+//------------------------------------------------------------------------------
+// Reading a reply aloud while it is still being written
+//------------------------------------------------------------------------------
+//
+// The lane the app speaks through: a reply as it is written, a message's 朗读,
+// the settings test. A second engine over the speech lane's two GGUFs, so load
+// one or the other. src/yoai.h documents every call; what follows is only what
+// this bridge adds.
+//
+// **Load and nativeReaderSetReferenceVoice hold the engine's lock for seconds,
+// and every setter takes the same lock.** On this thread that would freeze the
+// screen, so a caller does not call a setter while either is running.
+
+/** Whether this build has the speech engine compiled in. */
+export const nativeReaderAvailable: () => boolean;
+
+/**
+ * Read a talker and the 12 Hz tokenizer into `voices` engines (1 is the number
+ * to pass). On a worker; `onDone` fires once with 'end' or ('error', reason).
+ */
+export const nativeReaderLoad: (
+  talkerPath: string,
+  codecPath: string,
+  voices: number,
+  onDone: (type: string, content: string) => void
+) => void;
+
+export const nativeReaderLoaded: () => boolean;
+export const nativeReaderUnload: () => void;
+
+/** 'voice_design', 'base' or 'custom_voice'; '' before a load. */
+export const nativeReaderModelType: () => string;
+
+/** The named speakers of a custom_voice talker, as a JSON array; '[]' on any other. */
+export const nativeReaderSpeakers: () => string;
+
+/** 2048 for the 1.7B, 1024 for the 0.6B, 0 before a load: a .spk for it is 4x this many bytes. */
+export const nativeReaderTalkerHiddenSize: () => number;
+
+/** A written instruct; on custom_voice, the reading style. '' for none. */
+export const nativeReaderSetVoice: (instruct: string) => void;
+
+/** custom_voice only. '' clears it. */
+export const nativeReaderSetSpeaker: (name: string) => void;
+
+/**
+ * Anchor every piece to a recording: mono, 16-bit, exactly 24000 Hz. Runs the
+ * model's speaker encoder on a worker -- seconds -- and fires once with 'end'
+ * or ('error', reason). Base checkpoints only.
+ */
+export const nativeReaderSetReferenceVoice: (
+  wavPath: string,
+  onDone: (type: string, content: string) => void
+) => void;
+
+/** Anchor to a .spk instead, at once. '' on success, else the reason. */
+export const nativeReaderLoadReferenceEmbedding: (spkPath: string) => string;
+
+/** Write the embedding held now as a .spk, so a recording is extracted once. '' or the reason. */
+export const nativeReaderSaveReferenceEmbedding: (spkPath: string) => string;
+
+export const nativeReaderSetSeed: (seed: number) => void;
+/** Characters; a field <= 0 keeps the measured default. */
+export const nativeReaderSetSplit: (minChars: number, maxChars: number, tailChars: number) => void;
+/** The pieces after the first. 0 and 0 turn it off. */
+export const nativeReaderSetLaterSplit: (minChars: number, maxChars: number) => void;
+export const nativeReaderSetFirstStopChars: (chars: number) => void;
+export const nativeReaderSetClauseCuts: (on: boolean) => void;
+/** Below 0 restores the engine's 0.9. */
+export const nativeReaderSetTemperature: (temperature: number) => void;
+export const nativeReaderSetStreamingText: (on: boolean) => void;
+export const nativeReaderSetEosHold: (frames: number) => void;
+export const nativeReaderSetWholeReply: (on: boolean) => void;
+/** For the NEXT load. <= 0 leaves the engine's choice. */
+export const nativeReaderSetThreads: (threads: number) => void;
+
+/**
+ * Open a stream. Returns 1 when it is open, 0 when the engine is not loaded or
+ * a stream is already open.
+ *
+ * `onEvent` receives ('audio', ArrayBuffer, piece) for each block -- 16-bit
+ * signed mono at **24000 Hz**, in reading order -- and, after
+ * nativeReaderFinish, exactly one ('end', stats JSON, -1) or ('error', reason,
+ * -1). Both arrive on this one callback, so the terminal event cannot overtake
+ * the last audio.
+ */
+export const nativeReaderBegin: (
+  onEvent: (type: string, payload: ArrayBuffer | string, sentence: number) => void
+) => number;
+
+/** Add text, exactly as the model wrote it, markdown and all. Returns at once. */
+export const nativeReaderFeed: (delta: string) => number;
+
+/**
+ * No more text. Returns 1 when a stream was open, and its 'end' or 'error'
+ * follows on the begin callback once the last sample is out; 0 when none was.
+ */
+export const nativeReaderFinish: () => number;
+
+/** Abandon the open stream at its next block. It must still be finished. */
+export const nativeReaderCancel: () => void;
+
+export const nativeReaderLastError: () => string;
 
 //------------------------------------------------------------------------------
 // Model bundles
