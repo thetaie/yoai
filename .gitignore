@@ -6,10 +6,13 @@ out
 .mnn-build
 .qtts-build
 
+examples/android-bodyclock
+
 # Editor / tooling
 .vscode
 .idea
 compile_commands.json
+.clinerules
 
 # Python bytecode from the design scripts
 __pycache__
