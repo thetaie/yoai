@@ -6,6 +6,9 @@ out
 .mnn-build
 .qtts-build
 
+.gradle
+.kotlin
+
 examples/android-bodyclock
 
 # Editor / tooling

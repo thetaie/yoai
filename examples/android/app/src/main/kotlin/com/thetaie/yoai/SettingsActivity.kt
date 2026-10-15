@@ -48,10 +48,10 @@ fun SettingsScreen(navController: NavController) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            // 标题栏
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .statusBarsPadding()
                     .height(56.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -74,7 +74,6 @@ fun SettingsScreen(navController: NavController) {
         }
         
         item {
-            // 模型设置部分
             SettingsSection(title = "模型设置") {
                 SettingsRow(
                     title = "模型",
@@ -93,7 +92,6 @@ fun SettingsScreen(navController: NavController) {
         }
         
         item {
-            // 语音设置部分
             SettingsSection(title = "语音设置") {
                 SettingsRow(
                     title = "语音",
@@ -112,7 +110,6 @@ fun SettingsScreen(navController: NavController) {
         }
         
         item {
-            // 核心功能部分
             SettingsSection(title = "核心功能") {
                 Text(
                     text = "清除历史记录",

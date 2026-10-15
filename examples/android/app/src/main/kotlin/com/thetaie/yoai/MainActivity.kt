@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
+import kotlin.time.Duration.Companion.milliseconds
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -205,14 +206,14 @@ fun YoaiApp() {
         // Simulate streaming turn
         coroutineScope.launch {
             streamThinking = "正在分析问题并生成回复..."
-            delay(800)
+            delay(800.milliseconds)
             streamThinking = "分析完成，准备生成回答。"
-            delay(400)
+            delay(400.milliseconds)
 
             val fullReply = "这是由 ${activeModel.label} 生成的回复：关于“$text”，我已经为您整理好了相关要点与建议。"
             for (i in 1..fullReply.length) {
                 streamText = fullReply.substring(0, i)
-                delay(30)
+                delay(30.milliseconds)
                 scrollToBottom()
             }
 
@@ -808,6 +809,7 @@ fun Header(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .statusBarsPadding()
                 .height(56.dp)
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically
