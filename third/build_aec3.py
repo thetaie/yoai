@@ -23,6 +23,9 @@ Note: in bundle mode the script temporarily appends a clearly marked block to sr
 (a static_library with complete_static_lib = true and without the thin_archive config,
 so the result is self-contained) and removes it again after a
 successful build. Use --keep-patch to leave it in place, --unpatch to remove it manually.
+
+For the shared library that yoai actually loads (yoai_aec3.dll / .so, plain C ABI) see
+build_aec3_bridge.py, which reuses the helpers in this file.
 """
 import argparse
 import os
@@ -129,20 +132,28 @@ def write_gn(path: Path, text):
         f.write(text)
 
 
-def patch_build_gn(src: Path, name: str, deps, dry_run):
+def append_block(src: Path, block_lines, dry_run):
+    """Put `block_lines` (wrapped in our begin/end markers) at the end of src/BUILD.gn,
+    replacing any block of ours that is already there."""
     build_gn = src / "BUILD.gn"
     text, nl = read_gn(build_gn)
     text = strip_block(text)
-    block = nl.join(
-        [BLOCK_BEGIN, f'static_library("{name}") {{', "  complete_static_lib = true",
-         '  configs -= [ "//build/config/compiler:thin_archive" ]', "  testonly = false", "  deps = ["]
-        + [f'    "{d}",' for d in deps]
-        + ["  ]", "}", BLOCK_END]
-    ) + nl
-    log(f"Adding target '{name}' to {build_gn}")
+    block = nl.join([BLOCK_BEGIN] + list(block_lines) + [BLOCK_END]) + nl
+    log(f"Adding a block to {build_gn}")
     print(block)
     if not dry_run:
         write_gn(build_gn, text.rstrip("\r\n") + nl + nl + block)
+
+
+def patch_build_gn(src: Path, name: str, deps, dry_run):
+    append_block(
+        src,
+        [f'static_library("{name}") {{', "  complete_static_lib = true",
+         '  configs -= [ "//build/config/compiler:thin_archive" ]', "  testonly = false", "  deps = ["]
+        + [f'    "{d}",' for d in deps]
+        + ["  ]", "}"],
+        dry_run,
+    )
 
 
 def unpatch_build_gn(src: Path):
@@ -159,6 +170,18 @@ def unpatch_build_gn(src: Path):
 # --------------------------------------------------------------------------
 # Main steps
 # --------------------------------------------------------------------------
+def make_env(src: Path, depot_tools=None):
+    """Environment with depot_tools on PATH (default: <src>/../../depot_tools if it exists)."""
+    env = os.environ.copy()
+    depot = Path(depot_tools).expanduser().resolve() if depot_tools else src.parent.parent / "depot_tools"
+    if depot.exists():
+        env["PATH"] = str(depot) + os.pathsep + env["PATH"]
+    env.setdefault("DEPOT_TOOLS_UPDATE", "0")
+    if sys.platform == "win32":
+        env.setdefault("DEPOT_TOOLS_WIN_TOOLCHAIN", "0")
+    return env
+
+
 def build_gn_args(a):
     args = {
         "is_debug": gn_value(a.debug),
@@ -267,13 +290,7 @@ def main():
         print("[!] src/build is missing. Did 'gclient sync' finish? GN may fail.", flush=True)
 
     # Environment: put depot_tools on PATH
-    env = os.environ.copy()
-    depot = Path(a.depot_tools).expanduser().resolve() if a.depot_tools else src.parent.parent / "depot_tools"
-    if depot.exists():
-        env["PATH"] = str(depot) + os.pathsep + env["PATH"]
-    env.setdefault("DEPOT_TOOLS_UPDATE", "0")
-    if sys.platform == "win32":
-        env.setdefault("DEPOT_TOOLS_WIN_TOOLCHAIN", "0")
+    env = make_env(src, a.depot_tools)
 
     out_rel = a.out_dir.replace("\\", "/")
     out_abs = src / out_rel
