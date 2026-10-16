@@ -30,3 +30,5 @@ __pycache__
 /third/cosyvoice.cpp/
 /third/MNN/
 /third/vcpkg/
+/third/webrtc/
+/third/depot_tools/

@@ -39,5 +39,23 @@
     "submodules": true,
     "patches": ["qwentts-thread-count-override.patch@.", "qwentts-streaming-text.patch@."],
     "used_by": "harmony qtts, desktop qtts, android qtts"
+  },
+  "webrtc": {
+    "env": "WEBRTC_SRC",
+    "url": "https://chromium.googlesource.com/external/webrtc",
+    "branch": "main",
+    "commit": "e99f6879f6ae1c8c53f9ce7024abb33ce3173795",
+    "submodules": true,
+    "patches": [],
+    "used_by": "for WebRTC integration"
+  },
+  "depot_tools": {
+    "env": "DEPOT_TOOLS",
+    "url": "https://chromium.googlesource.com/chromium/tools/depot_tools.git",
+    "branch": "main",
+    "commit": "97ed77526c27c08ad80437625ffde66dcbdd3b9c",
+    "submodules": false,
+    "patches": [],
+    "used_by": "required for building WebRTC"
   }
 }
