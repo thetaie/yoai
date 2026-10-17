@@ -32,3 +32,4 @@ __pycache__
 /third/vcpkg/
 /third/webrtc/
 /third/depot_tools/
+/third/dist/
